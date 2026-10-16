@@ -1,0 +1,98 @@
+name: Jira → GitHub
+
+on:
+  repository_dispatch:
+    types: [jira-issue, jira-start]   # jira-issue: 이슈 발행 / jira-start: 진행 중 전환
+
+permissions:
+  contents: write   # 브랜치 생성
+  issues: write
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 1. 업무 발행 → GitHub 이슈 생성
+  # ─────────────────────────────────────────────
+  create-issue:
+    if: github.event.action == 'jira-issue'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render template and create issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const p = context.payload.client_payload || {};
+            const { owner, repo } = context.repo;
+            const kind = (p.kind || '').toLowerCase();
+
+            const esc = (s) => (s ?? '').toString();
+            const nz  = (s, fallback = '') => {
+              const v = (s ?? '').toString().trim();
+              return v.length ? v : fallback;
+            };
+
+            // 템플릿 선택: 유형별 파일이 있으면 사용, 없으면 default.md
+            const dir = '.github/automation-templates';
+            const candidates = [`${dir}/${kind}.md`, `${dir}/default.md`];
+            const file = candidates.find(f => fs.existsSync(path.join(process.cwd(), f)));
+            if (!file) {
+              core.setFailed(`Template not found: ${candidates.join(', ')}`);
+              return;
+            }
+            const tpl = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+
+            // 설명이 비어 있으면 ISSUE_TEMPLATE/{유형}.md 본문으로 대체
+            let description = esc(p.description).trim();
+            const kindTpl = path.join(process.cwd(), `.github/ISSUE_TEMPLATE/${kind}.md`);
+            if (!description && fs.existsSync(kindTpl)) {
+              description = fs.readFileSync(kindTpl, 'utf8')
+                .replace(/^---[\s\S]*?\n---\s*\n?/, '')   // front matter 제거
+                .trim();
+              core.info(`Jira 설명이 비어 있어 ${kind}.md 템플릿으로 대체`);
+            }
+            core.info(`kind=${kind}, description length=${description.length}`);
+
+            // 템플릿 치환
+            const values = {
+              key:         esc(p.key),
+              url:         esc(p.url),
+              summary:     esc(p.summary),
+              description,
+              initiator:   nz(p.initiator, '-'),
+              priority:    nz(p.priority, '-'),
+              duedate:     nz(p.duedate, '미정'),
+              kind,
+            };
+            let body = tpl;
+            for (const [k, v] of Object.entries(values)) {
+              body = body.replaceAll(`{{${k}}}`, v).replaceAll(`{{issue.${k}}}`, v);
+            }
+
+            // 라벨: 업무 유형 + Jira 레이블
+            const allowedKinds = new Set(['epic', 'feature', 'bug', 'refactoring', 'documentation']);
+            let incoming = [];
+            if (Array.isArray(p.labels)) incoming = p.labels;
+            else if (typeof p.labels === 'string' && p.labels.trim()) {
+              try {
+                const parsed = JSON.parse(p.labels);
+                if (Array.isArray(parsed)) incoming = parsed;
+              } catch {
+                incoming = p.labels.split(',').map(s => s.trim()).filter(Boolean);
+              }
+            }
+            const labels = [...new Set([
+              ...(allowedKinds.has(kind) ? [kind] : []),
+              ...incoming,
+            ])];
+
+            const res = await github.rest.issues.create({
+              owner, repo,
+              title: `[${values.key}] ${values.summary}`,
+              body,
+              labels,
+            });
+            core.info(`Created issue #${res.data.number}: ${res.data.html_url}`);

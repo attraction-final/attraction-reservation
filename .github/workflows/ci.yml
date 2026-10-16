@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [ main, dev ]
+    types: [opened, synchronize, reopened]
   push:
     branches: [ main ]
 
@@ -33,7 +34,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle (with cache)
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -45,7 +46,7 @@ jobs:
       # 2) 테스트 결과를 PR Checks 탭 / 요약에 표시 (실패한 테스트 바로 확인)
       - name: Publish test results
         if: always()
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@3585e9575db828022551b4231f165eb59a0e74e3
         with:
           report_paths: '**/build/test-results/test/TEST-*.xml'
           check_name: 'JUnit Test Report'
@@ -67,7 +68,50 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: ./gradlew sonar -Dsonar.qualitygate.wait=true --no-daemon
 
-      # 5) 리포트 Artifact 저장 (성공/실패 무관)
+      # 5) push 시 SonarQube 결과를 GitHub Actions Job Summary에 표시
+      - name: SonarQube summary
+        if: always() && github.event_name == 'push' && steps.sonar.outcome != 'skipped'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          API="https://sonarcloud.io/api"
+          QS="projectKey=${SONAR_PROJECT_KEY}&branch=${BRANCH}"
+          MS="component=${SONAR_PROJECT_KEY}&branch=${BRANCH}&metricKeys=coverage,bugs,vulnerabilities,security_hotspots,code_smells,duplicated_lines_density"
+                 
+          QG=$(curl -sf -u "${SONAR_TOKEN}:" "${API}/qualitygates/project_status?${QS}") || QG='{}'
+          M=$(curl -sf -u "${SONAR_TOKEN}:" "${API}/measures/component?${MS}") || M='{}'
+                 
+          STATUS=$(echo "$QG" | jq -r '.projectStatus.status // "UNKNOWN"')
+          case "$STATUS" in
+            OK)    ICON="✅ Passed" ;;
+            ERROR) ICON="❌ Failed" ;;
+            NONE)  ICON="⚪ Not computed (첫 분석 이후 계산됨)" ;;
+            *)     ICON="⚪ ${STATUS}" ;;
+          esac
+                 
+          m() { v=$(echo "$M" | jq -r --arg k "$1" '(.component.measures // [])[] | select(.metric==$k) | .value'); echo "${v:--}"; }
+                 
+          {
+            echo "## 🔍 SonarQube Cloud 분석 결과 (\`${BRANCH}\`)"
+            echo ""
+            echo "**Quality Gate:** ${ICON}"
+            echo ""
+            FAILED=$(echo "$QG" | jq -r '(.projectStatus.conditions // [])[] | select(.status=="ERROR") | "- `\(.metricKey)`: \(.actualValue) (기준 \(.comparator) \(.errorThreshold))"')
+            if [ -n "$FAILED" ]; then echo "**실패한 조건**"; echo ""; echo "$FAILED"; echo ""; fi
+            echo "| 항목 | 값 |"
+            echo "|---|---|"
+            echo "| Coverage | $(m coverage)% |"
+            echo "| Bugs | $(m bugs) |"
+            echo "| Vulnerabilities | $(m vulnerabilities) |"
+            echo "| Security Hotspots | $(m security_hotspots) |"
+            echo "| Code Smells | $(m code_smells) |"
+            echo "| Duplications | $(m duplicated_lines_density)% |"
+            echo ""
+            echo "[SonarQube Cloud에서 자세히 보기](https://sonarcloud.io/summary/overall?id=${SONAR_PROJECT_KEY}&branch=${BRANCH})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 6) 리포트 Artifact 저장 (성공/실패 무관)
       - name: Upload JaCoCo report
         if: always()
         uses: actions/upload-artifact@v4

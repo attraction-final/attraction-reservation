@@ -54,34 +54,38 @@ jobs:
           include_passed: false
           require_tests: true
 
-#      # 3) 커버리지 80% 미만이면 실패
-#      - name: Verify coverage (min 80%)
-#        run: ./gradlew jacocoTestCoverageVerification --no-daemon
+      #      # 3) 커버리지 80% 미만이면 실패
+      #      - name: Verify coverage (min 80%)
+      #        run: ./gradlew jacocoTestCoverageVerification --no-daemon
 
-      # 4) SonarQube 분석 + Quality Gate 대기
+      # 4) SonarQube 분석
+      #    - PR: 스캔 결과만 업로드하고 바로 종료 (Quality Gate는 SonarCloud가 PR Check/코멘트로 표시)
+      #    - push(main): Quality Gate 결과까지 대기 → 아래 summary에서 최신 결과 조회
       #    포크 PR에는 secrets가 전달되지 않으므로 같은 레포에서 온 PR / push만 실행
       - name: SonarQube analysis
+        id: sonar
         if: >
           github.event_name == 'push' ||
           github.event.pull_request.head.repo.full_name == github.repository
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: ./gradlew sonar -Dsonar.qualitygate.wait=true --no-daemon
+        run: ./gradlew sonar -Dsonar.qualitygate.wait=${{ github.event_name == 'push' }} --no-daemon
 
       # 5) push 시 SonarQube 결과를 GitHub Actions Job Summary에 표시
       - name: SonarQube summary
         if: always() && github.event_name == 'push' && steps.sonar.outcome != 'skipped'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
           BRANCH: ${{ github.ref_name }}
         run: |
           API="https://sonarcloud.io/api"
           QS="projectKey=${SONAR_PROJECT_KEY}&branch=${BRANCH}"
           MS="component=${SONAR_PROJECT_KEY}&branch=${BRANCH}&metricKeys=coverage,bugs,vulnerabilities,security_hotspots,code_smells,duplicated_lines_density"
-                 
+
           QG=$(curl -sf -u "${SONAR_TOKEN}:" "${API}/qualitygates/project_status?${QS}") || QG='{}'
           M=$(curl -sf -u "${SONAR_TOKEN}:" "${API}/measures/component?${MS}") || M='{}'
-                 
+
           STATUS=$(echo "$QG" | jq -r '.projectStatus.status // "UNKNOWN"')
           case "$STATUS" in
             OK)    ICON="✅ Passed" ;;
@@ -89,9 +93,9 @@ jobs:
             NONE)  ICON="⚪ Not computed (첫 분석 이후 계산됨)" ;;
             *)     ICON="⚪ ${STATUS}" ;;
           esac
-                 
+
           m() { v=$(echo "$M" | jq -r --arg k "$1" '(.component.measures // [])[] | select(.metric==$k) | .value'); echo "${v:--}"; }
-                 
+
           {
             echo "## 🔍 SonarQube Cloud 분석 결과 (\`${BRANCH}\`)"
             echo ""

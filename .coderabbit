@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# 레포 루트에 위치해야 함
+
+language: "ko-KR"
+
+reviews:
+  profile: "chill"                 # 더 엄격하게 원하면 "assertive"
+  request_changes_workflow: false  # true면 이슈 발견 시 'Request changes'로 리뷰
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  auto_review:
+    enabled: true
+    drafts: false                  # Draft PR은 리뷰하지 않음
+    base_branches:
+      - "main"
+      - "develop"
+
+  # 리뷰 대상에서 제외할 파일
+  path_filters:
+    - "!**/build/**"
+    - "!**/generated/**"
+    - "!gradle/wrapper/**"
+    - "!**/*.lock"
+
+  # 경로별 리뷰 지침
+  path_instructions:
+    - path: "src/main/java/**/*.java"
+      instructions: |
+        Spring Boot 코드입니다. 다음을 중점적으로 확인하세요:
+        - 트랜잭션 경계(@Transactional)와 readOnly 사용의 적절성
+        - JPA N+1 쿼리 가능성, 지연 로딩 관련 이슈
+        - 예외 처리 누락, 민감 정보 로깅 여부
+        - 레이어 간 의존 방향(Controller → Service → Repository) 위반
+    - path: "src/test/java/**/*.java"
+      instructions: |
+        테스트 코드입니다. 다음을 확인하세요:
+        - 커버리지만 채우고 검증(assert)이 없는 테스트
+        - 경계값, 예외 케이스 테스트 누락
+        - 테스트 간 상태 공유로 인한 순서 의존성
+    - path: ".github/workflows/**"
+      instructions: |
+        GitHub Actions 워크플로우입니다. secrets 노출, 과도한 permissions,
+        버전이 고정되지 않은 서드파티 액션 사용을 확인하세요.
+
+chat:
+  auto_reply: true

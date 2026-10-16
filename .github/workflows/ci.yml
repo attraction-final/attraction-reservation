@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # PR 코멘트
+  checks: write          # 테스트 결과 Check Run 생성
+
+jobs:
+  test-and-coverage:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SonarQube: 신규 코드 판별 / blame 정보에 전체 히스토리 필요
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 1) 테스트 + JaCoCo 리포트
+      - name: Run tests & generate JaCoCo report
+        run: ./gradlew test jacocoTestReport --no-daemon
+
+      # 2) 테스트 결과를 PR Checks 탭 / 요약에 표시 (실패한 테스트 바로 확인)
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: '**/build/test-results/test/TEST-*.xml'
+          check_name: 'JUnit Test Report'
+          detailed_summary: true
+          include_passed: false
+          require_tests: true
+
+      # 3) 커버리지 80% 미만이면 실패
+      - name: Verify coverage (min 80%)
+        run: ./gradlew jacocoTestCoverageVerification --no-daemon
+
+      # 4) SonarQube 분석 + Quality Gate 대기
+      #    포크 PR에는 secrets가 전달되지 않으므로 같은 레포에서 온 PR / push만 실행
+      - name: SonarQube analysis
+        if: >
+          github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: ./gradlew sonar -Dsonar.qualitygate.wait=true --no-daemon
+
+      # 5) 리포트 Artifact 저장 (성공/실패 무관)
+      - name: Upload JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: build/reports/jacoco/test/
+          retention-days: 14
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            build/reports/tests/test/
+            build/test-results/test/
+          retention-days: 14

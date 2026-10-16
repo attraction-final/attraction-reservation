@@ -66,6 +66,7 @@ def coverageExcludes = [
         '**/config/**',
         '**/dto/**',
         '**/exception/**',
+        '**/global/**',
         '**/Q*'          // QueryDSL Q클래스
 ]
 

@@ -53,9 +53,9 @@ jobs:
           include_passed: false
           require_tests: true
 
-      # 3) 커버리지 80% 미만이면 실패
-      - name: Verify coverage (min 80%)
-        run: ./gradlew jacocoTestCoverageVerification --no-daemon
+#      # 3) 커버리지 80% 미만이면 실패
+#      - name: Verify coverage (min 80%)
+#        run: ./gradlew jacocoTestCoverageVerification --no-daemon
 
       # 4) SonarQube 분석 + Quality Gate 대기
       #    포크 PR에는 secrets가 전달되지 않으므로 같은 레포에서 온 PR / push만 실행

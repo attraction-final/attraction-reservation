@@ -111,10 +111,9 @@ check.dependsOn jacocoTestCoverageVerification
 sonar {
     properties {
         property "sonar.projectKey", "attraction-final_attraction-reservation"      // SonarQube에서 생성한 프로젝트 키
-        property "sonar.projectName", "attraction-reservation"
+        property "sonar.organization", "attraction-final"
         property "sonar.coverage.jacoco.xmlReportPaths",
                 "${layout.buildDirectory.get()}/reports/jacoco/test/jacocoTestReport.xml"
         property "sonar.coverage.exclusions", coverageExcludes.join(',')
-        // 토큰/URL은 절대 여기 쓰지 말고 CI의 SONAR_TOKEN / SONAR_HOST_URL 환경변수로 전달
     }
 }

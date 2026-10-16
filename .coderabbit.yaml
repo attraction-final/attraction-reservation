@@ -4,7 +4,7 @@
 language: "ko-KR"
 
 reviews:
-  profile: "chill"                 # 더 엄격하게 원하면 "assertive"
+  profile: "assertive"                 # 더 엄격하게 원하면 "assertive"
   request_changes_workflow: false  # true면 이슈 발견 시 'Request changes'로 리뷰
   high_level_summary: true
   poem: false
@@ -16,12 +16,12 @@ reviews:
     drafts: false                  # Draft PR은 리뷰하지 않음
     base_branches:
       - "main"
-      - "develop"
+      - "dev"
 
   # 리뷰 대상에서 제외할 파일
   path_filters:
     - "!**/build/**"
-    - "!**/generated/**"
+    - "!**/__generated__/**"
     - "!gradle/wrapper/**"
     - "!**/*.lock"
 

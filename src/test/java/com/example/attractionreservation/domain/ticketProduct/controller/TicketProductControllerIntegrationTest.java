@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.ticketProduct.controller;
 
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.enums.TicketType;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
@@ -58,10 +60,13 @@ class TicketProductControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").exists())
                 .andExpect(jsonPath("$.data.name").value("종일이용권"))
                 .andExpect(jsonPath("$.data.type").value("ALL_DAY"))
                 .andExpect(jsonPath("$.data.price").value(50000))
+                .andExpect(jsonPath("$.data.description").value("하루 종일 이용 가능한 입장권"))
                 .andExpect(jsonPath("$.data.saleStatus").value("ON_SALE"))
+                .andExpect(jsonPath("$.data.stock").value(100))
                 .andExpect(jsonPath("$.data.createdAt").exists());
 
         // DB 저장 검증
@@ -72,6 +77,61 @@ class TicketProductControllerIntegrationTest {
         assertThat(savedProduct.getName()).isEqualTo("종일이용권");
         assertThat(savedProduct.getPrice()).isEqualTo(50000);
         assertThat(savedProduct.getStock()).isEqualTo(100);
+        assertThat(savedProduct.getType()).isEqualTo(TicketType.ALL_DAY);
+        assertThat(savedProduct.getStatus()).isEqualTo(TicketProductStatus.ON_SALE);
+        assertThat(savedProduct.getDescription()).isEqualTo("하루 종일 이용 가능한 입장권");
+    }
+
+    @Test
+    @DisplayName("가격이 0이어도 티켓 상품을 등록할 수 있다")
+    void createTicketProduct_zeroPrice() throws Exception {
+        // given
+        Map<String, Object> request = Map.of(
+                "name", "무료이용권",
+                "type", "ALL_DAY",
+                "price", 0,
+                "description", "무료 입장권",
+                "saleStatus", "ON_SALE",
+                "stock", 100
+        );
+
+        // when & then
+        mockMvc.perform(post("/api/ticket-products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.price").value(0));
+
+        assertThat(ticketProductRepository.count()).isEqualTo(1);
+
+        TicketProduct savedProduct = ticketProductRepository.findAll().get(0);
+        assertThat(savedProduct.getPrice()).isZero();
+    }
+
+    @Test
+    @DisplayName("재고가 0이어도 티켓 상품을 등록할 수 있다")
+    void createTicketProduct_zeroStock() throws Exception {
+        // given
+        Map<String, Object> request = Map.of(
+                "name", "종일이용권",
+                "type", "ALL_DAY",
+                "price", 50000,
+                "description", "하루 종일 이용 가능한 입장권",
+                "saleStatus", "ON_SALE",
+                "stock", 0
+        );
+
+        // when & then
+        mockMvc.perform(post("/api/ticket-products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.stock").value(0));
+
+        assertThat(ticketProductRepository.count()).isEqualTo(1);
+
+        TicketProduct savedProduct = ticketProductRepository.findAll().get(0);
+        assertThat(savedProduct.getStock()).isZero();
     }
 
     @Test

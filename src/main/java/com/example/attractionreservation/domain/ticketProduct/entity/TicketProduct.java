@@ -41,6 +41,22 @@ public class TicketProduct extends BaseTimeEntity {
     private TicketProductStatus status;
 
     public TicketProduct(String name, int price, String description, TicketType type, int stock, TicketProductStatus status) {
+        if (name == null || name.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_NAME);
+        }
+
+        if (description == null || description.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
+        }
+
+        if (type == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_TYPE);
+        }
+
+        if (status == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
+        }
+
         if (price < 0) {
             throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_PRICE);
         }

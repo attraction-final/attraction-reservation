@@ -25,6 +25,6 @@ public class TicketProductController {
     public ResponseEntity<ApiResponse<CreateTicketProductResponse>> create(
             @Valid @RequestBody CreateTicketProductRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(ticketProductService.create(request)));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("티켓 상품이 등록되었습니다.", ticketProductService.create(request)));
     }
 }

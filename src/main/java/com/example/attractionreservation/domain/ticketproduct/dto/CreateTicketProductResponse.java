@@ -14,6 +14,7 @@ public record CreateTicketProductResponse(
         int price,
         String description,
         TicketProductStatus saleStatus,
+        int stock,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -22,6 +23,7 @@ public record CreateTicketProductResponse(
                 ticketProduct.getId(), ticketProduct.getName(),
                 ticketProduct.getType(), ticketProduct.getPrice(),
                 ticketProduct.getDescription(), ticketProduct.getStatus(),
+                ticketProduct.getStock(),
                 ticketProduct.getCreatedAt(), ticketProduct.getUpdatedAt()
         );
     }

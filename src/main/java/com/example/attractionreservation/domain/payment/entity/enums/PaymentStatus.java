@@ -20,7 +20,7 @@ public enum PaymentStatus {
     PARTIALLY_REFUNDED {
         @Override
         public boolean canTransitTo(PaymentStatus nextStatus) {
-            return nextStatus == REFUNDED;
+            return nextStatus == REFUNDED ||  nextStatus == PARTIALLY_REFUNDED;
         }
     },
     // 전체 환불

@@ -50,6 +50,185 @@ class PaymentTest {
         //when
         assertThatThrownBy(() -> Payment.create(order, 0))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.INVALID_AMOUNT.getMessage());
+                .hasMessage(ErrorCode.PAYMENT_INVALID_AMOUNT.getMessage());
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태면 결제 완료로 변경할 수 있다.")
+    void markAsPaid_pending_Success() {
+        //given
+        Payment payment = createPayment();
+
+        //when
+        payment.markAsPaid();
+
+        //then
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("이미 결제 완료 상태면 다시 결제 완료로 변경할 수 없다.")
+    void markAsPaid_alreadyPaid_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+
+        //when & then
+        assertThatThrownBy(payment::markAsPaid)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 취소 상태면 결제 완료로 변경할 수 없다.")
+    void markAsPaid_cancelled_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsCancelled();
+
+        //when & then
+        assertThatThrownBy(payment::markAsPaid)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태면 결제 취소로 변경할 수 있다.")
+    void markAsCancelled_pending_Success() {
+        //given
+        Payment payment = createPayment();
+
+        //when
+        payment.markAsCancelled();
+
+        //then
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 완료 상태면 결제 취소로 변경할 수 없다.")
+    void markAsCancelled_paid_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+
+        //when & then
+        assertThatThrownBy(payment::markAsCancelled)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 완료 상태면 부분 환불로 변경할 수 있다.")
+    void markAsPartiallyRefunded_paid_Success() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+
+        //when
+        payment.markAsPartiallyRefunded();
+
+        //then
+        assertEquals(PaymentStatus.PARTIALLY_REFUNDED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태면 부분 환불로 변경할 수 없다.")
+    void markAsPartiallyRefunded_pending_Fail() {
+        //given
+        Payment payment = createPayment();
+
+        //when & then
+        assertThatThrownBy(payment::markAsPartiallyRefunded)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("이미 부분 환불 상태여도 다시 부분 환불로 변경할 수 있다.")
+    void markAsPartiallyRefunded_alreadyPartiallyRefunded_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+        payment.markAsPartiallyRefunded();
+
+        //when
+        payment.markAsPartiallyRefunded();
+
+        //then
+        assertEquals(PaymentStatus.PARTIALLY_REFUNDED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 완료 상태면 전체 환불로 변경할 수 있다.")
+    void markAsRefunded_paid_Success() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+
+        //when
+        payment.markAsRefunded();
+
+        //then
+        assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("부분 환불 상태면 전체 환불로 변경할 수 있다.")
+    void markAsRefunded_partiallyRefunded_Success() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+        payment.markAsPartiallyRefunded();
+
+        //when
+        payment.markAsRefunded();
+
+        //then
+        assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태면 전체 환불로 변경할 수 없다.")
+    void markAsRefunded_pending_Fail() {
+        //given
+        Payment payment = createPayment();
+
+        //when & then
+        assertThatThrownBy(payment::markAsRefunded)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("이미 전체 환불 상태면 다시 전체 환불로 변경할 수 없다.")
+    void markAsRefunded_alreadyRefunded_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+        payment.markAsRefunded();
+
+        //when & then
+        assertThatThrownBy(payment::markAsRefunded)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
+    }
+
+    private Payment createPayment() {
+        Order order = Order.create(
+                User.builder()
+                        .email("test@email.com")
+                        .password("password")
+                        .nickname("name")
+                        .build(),
+                10000
+        );
+        return Payment.create(order, 10000);
     }
 }

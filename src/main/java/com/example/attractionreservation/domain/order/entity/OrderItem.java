@@ -29,10 +29,4 @@ public class OrderItem {
 
     @Column(nullable = false)
     private int quantity;
-
-    private OrderItem(TicketProduct ticketProduct, int price, int quantity) {
-        this.ticketProduct = ticketProduct;
-        this.price = price;
-        this.quantity = quantity;
-    }
 }

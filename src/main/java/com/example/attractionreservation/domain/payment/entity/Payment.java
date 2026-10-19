@@ -47,9 +47,41 @@ public class Payment {
 
     public static Payment create(Order order, int amount) {
         if (amount <= 0) {
-            throw new BusinessException(ErrorCode.INVALID_AMOUNT);
+            throw new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT);
         }
 
         return new Payment(order, amount);
+    }
+
+    public void markAsPaid() {
+        if (!this.status.canTransitTo(PaymentStatus.PAID)) {
+            throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = PaymentStatus.PAID;
+    }
+
+    public void markAsCancelled() {
+        if (!this.status.canTransitTo(PaymentStatus.CANCELLED)) {
+            throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = PaymentStatus.CANCELLED;
+    }
+
+    public void markAsPartiallyRefunded() {
+        if (!this.status.canTransitTo(PaymentStatus.PARTIALLY_REFUNDED)) {
+            throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = PaymentStatus.PARTIALLY_REFUNDED;
+    }
+
+    public void markAsRefunded() {
+        if (!this.status.canTransitTo(PaymentStatus.REFUNDED)) {
+            throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = PaymentStatus.REFUNDED;
     }
 }

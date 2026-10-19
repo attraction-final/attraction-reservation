@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -21,9 +22,10 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
@@ -54,7 +56,13 @@ class PaymentServiceTest {
         paymentService.createPayment(order);
 
         //then
-        verify(paymentRepository).save(any(Payment.class));
+        ArgumentCaptor<Payment> paymentArgumentCaptor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(paymentArgumentCaptor.capture());
+        Payment payment = paymentArgumentCaptor.getValue();
+
+        assertEquals(10000, payment.getAmount());
+        assertNotNull(payment.getOrder());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
     }
 
     @Test
@@ -93,6 +101,8 @@ class PaymentServiceTest {
         assertThatThrownBy(() -> paymentService.createPayment(order))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INVALID_AMOUNT.getMessage());
+
+        verifyNoInteractions(paymentRepository);
     }
 
     @Test

@@ -30,10 +30,10 @@ public class Attraction extends BaseTimeEntity {
     @Column(name = "duration_minutes", nullable = false)
     private Integer durationMinutes;
 
-    @Enumerated(EnumType.STRING) // // Enum 값을 숫자가 아닌 문자열로 데이터베이스에 저장한다.
+    @Enumerated(EnumType.STRING) // // Enum 값을 숫자가 아닌 문자열로 데이터베이스에 저장
     @Column(name = "operation_status", nullable = false, length = 50)
     private OperationStatus operationStatus;
 
     @Column(name = "deleted_at")
-    private Instant deletedAt; // 어트랙션이 삭제 처리된 시각을 저장한다.
+    private Instant deletedAt; // 어트랙션이 삭제 처리된 시각을 저장
 }

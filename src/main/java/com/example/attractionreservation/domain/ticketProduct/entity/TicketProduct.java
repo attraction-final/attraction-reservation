@@ -1,7 +1,7 @@
-package com.example.attractionreservation.domain.ticketproduct.entity;
+package com.example.attractionreservation.domain.ticketProduct.entity;
 
-import com.example.attractionreservation.domain.ticketproduct.enums.TicketProductStatus;
-import com.example.attractionreservation.domain.ticketproduct.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.enums.TicketType;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;

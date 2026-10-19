@@ -1,4 +1,4 @@
-package com.example.attractionreservation.domain.ticketproduct.enums;
+package com.example.attractionreservation.domain.ticketProduct.enums;
 
 import lombok.Getter;
 

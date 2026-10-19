@@ -1,8 +1,8 @@
-package com.example.attractionreservation.domain.ticketproduct.controller;
+package com.example.attractionreservation.domain.ticketProduct.controller;
 
-import com.example.attractionreservation.domain.ticketproduct.dto.CreateTicketProductRequest;
-import com.example.attractionreservation.domain.ticketproduct.dto.CreateTicketProductResponse;
-import com.example.attractionreservation.domain.ticketproduct.service.TicketProductService;
+import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductRequest;
+import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductResponse;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

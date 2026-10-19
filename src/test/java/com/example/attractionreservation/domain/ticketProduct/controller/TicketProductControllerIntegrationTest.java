@@ -1,7 +1,7 @@
-package com.example.attractionreservation.domain.ticketproduct.controller;
+package com.example.attractionreservation.domain.ticketProduct.controller;
 
-import com.example.attractionreservation.domain.ticketproduct.entity.TicketProduct;
-import com.example.attractionreservation.domain.ticketproduct.repository.TicketProductRepository;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;

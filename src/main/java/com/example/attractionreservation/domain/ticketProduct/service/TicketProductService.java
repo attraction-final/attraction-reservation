@@ -1,9 +1,9 @@
-package com.example.attractionreservation.domain.ticketproduct.service;
+package com.example.attractionreservation.domain.ticketProduct.service;
 
-import com.example.attractionreservation.domain.ticketproduct.dto.CreateTicketProductRequest;
-import com.example.attractionreservation.domain.ticketproduct.dto.CreateTicketProductResponse;
-import com.example.attractionreservation.domain.ticketproduct.entity.TicketProduct;
-import com.example.attractionreservation.domain.ticketproduct.repository.TicketProductRepository;
+import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductRequest;
+import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductResponse;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

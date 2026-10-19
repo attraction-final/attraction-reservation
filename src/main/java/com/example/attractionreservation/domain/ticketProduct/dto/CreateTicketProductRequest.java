@@ -1,7 +1,7 @@
-package com.example.attractionreservation.domain.ticketproduct.dto;
+package com.example.attractionreservation.domain.ticketProduct.dto;
 
-import com.example.attractionreservation.domain.ticketproduct.enums.TicketProductStatus;
-import com.example.attractionreservation.domain.ticketproduct.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.enums.TicketType;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

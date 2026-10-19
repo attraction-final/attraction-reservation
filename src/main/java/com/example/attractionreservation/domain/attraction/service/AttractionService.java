@@ -2,13 +2,20 @@ package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
+import com.example.attractionreservation.domain.attraction.dto.SearchAttractionCondition;
+import com.example.attractionreservation.domain.attraction.dto.SearchAttractionListResponse;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -37,6 +44,29 @@ public class AttractionService {
         if (attractionRepository.existsByNameAndDeletedAtIsNull(name)) {
             throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
         }
+    }
+
+    // 어트랙션 목록 조회
+    @Transactional(readOnly = true)
+    public SearchAttractionListResponse findAttractionAll(SearchAttractionCondition condition) {
+        LocalDateTime now = KstTime.now();
+        LocalDateTime reservableFrom = now.plusMinutes(RESERVATION_DEADLINE_MINUTES);
+        LocalDateTime todayEnd = now.toLocalDate().plusDays(1).atStartOfDay();
+
+        Page<Attraction> attractionPage = attractionRepository.searchAttractions(
+                condition.keyword(),
+                condition.operating(),
+                condition.reservable(),
+                condition.sort(),
+                reservableFrom,
+                todayEnd,
+                PageRequest.of(condition.page(), condition.size())
+        );
+
+        Map<Long, ReservableSlotView> nextSlotMap =
+                findNextSlotMap(attractionPage.getContent(), reservableFrom, todayEnd);
+
+        return SearchAttractionListResponse.of(attractionPage, nextSlotMap);
     }
 
 }

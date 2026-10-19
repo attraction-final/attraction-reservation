@@ -1,0 +1,39 @@
+package com.example.attractionreservation.domain.attraction.controller;
+
+import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
+import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
+import com.example.attractionreservation.domain.attraction.service.AttractionService;
+import com.example.attractionreservation.global.response.ApiResponse;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/admin/attractions")
+public class AdminAttractionController {
+
+    private final AttractionService attractionService;
+
+    // 어트랙션 등록
+    // @RequestBody: 요청 본문의 JSON을 CreateAttractionRequest 객체로 변환
+    // @Valid: 요청 객체에 선언된 검증 조건(@NotBlank, @Size 등)을 검사
+    @PostMapping
+    public ResponseEntity<ApiResponse<CreateAttractionResponse>> createAttraction(
+            @Valid @RequestBody CreateAttractionRequest request) {
+
+        CreateAttractionResponse response = attractionService.createAttraction(request); // 서비스에 요청DTO 전달해서 응답DTO로 반환
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok("어트랙션 등록에 성공했습니다.", response));
+    }
+
+
+
+
+
+}

@@ -36,4 +36,19 @@ public class Attraction extends BaseTimeEntity {
 
     @Column(name = "deleted_at")
     private Instant deletedAt; // 어트랙션이 삭제 처리된 시각을 저장
+
+
+    // Attraction Service에 필요
+    private Attraction(String name, String description, String location, Integer durationMinutes) {
+        this.name = name;
+        this.description = description;
+        this.location = location;
+        this.durationMinutes = durationMinutes;
+        this.operationStatus = OperationStatus.OPERATING; // 등록 시 기본값
+    }
+
+    public static Attraction create(String name, String description, String location,
+                                    Integer durationMinutes) {
+        return new Attraction(name, description, location, durationMinutes);
+    }
 }

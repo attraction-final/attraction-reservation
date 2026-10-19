@@ -1,7 +1,7 @@
 package com.example.attractionreservation.domain.ticketProduct.entity;
 
-import com.example.attractionreservation.domain.ticket.entity.TicketType;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;

@@ -27,7 +27,7 @@ class PaymentTest {
         );
 
         //when
-        Payment payment = Payment.create(order, 10000);
+        Payment payment = Payment.create(order);
 
         //then
         assertEquals(10000, payment.getAmount());
@@ -48,7 +48,7 @@ class PaymentTest {
         );
 
         //when
-        assertThatThrownBy(() -> Payment.create(order, 0))
+        assertThatThrownBy(() -> Payment.create(order))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INVALID_AMOUNT.getMessage());
     }
@@ -220,6 +220,61 @@ class PaymentTest {
         assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
     }
 
+    @Test
+    @DisplayName("결제 대기 상태면 결제 실패로 변경할 수 있다.")
+    void markAsFailed_pending_Success() {
+        //given
+        Payment payment = createPayment();
+
+        //when
+        payment.markAsFailed();
+
+        //then
+        assertEquals(PaymentStatus.FAILED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 완료 상태면 결제 실패로 변경할 수 없다.")
+    void markAsFailed_paid_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsPaid();
+
+        //when & then
+        assertThatThrownBy(payment::markAsFailed)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("이미 결제 실패 상태면 다시 결제 실패로 변경할 수 없다.")
+    void markAsFailed_alreadyFailed_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsFailed();
+
+        //when & then
+        assertThatThrownBy(payment::markAsFailed)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.FAILED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 실패 상태면 결제 완료로 변경할 수 없다.")
+    void markAsPaid_failed_Fail() {
+        //given
+        Payment payment = createPayment();
+        payment.markAsFailed();
+
+        //when & then
+        assertThatThrownBy(payment::markAsPaid)
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(PaymentStatus.FAILED, payment.getStatus());
+    }
+
     private Payment createPayment() {
         Order order = Order.create(
                 User.builder()
@@ -229,6 +284,6 @@ class PaymentTest {
                         .build(),
                 10000
         );
-        return Payment.create(order, 10000);
+        return Payment.create(order);
     }
 }

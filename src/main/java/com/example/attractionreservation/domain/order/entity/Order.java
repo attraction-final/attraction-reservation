@@ -44,25 +44,4 @@ public class Order extends BaseTimeEntity {
     public static Order create(User user, int totalAmount) {
         return new Order(user, totalAmount);
     }
-
-    public void addOrderItem(OrderItem orderItem) {
-        orderItems.add(orderItem);
-        orderItem.assignOrder(this);
-        this.totalAmount += orderItem.getTotalPrice();
-    }
-
-    public void markPaid() {
-        if (status != OrderStatus.PENDING) {
-            throw new IllegalStateException("결제 대기 상태의 주문만 결제 완료 처리할 수 있습니다.");
-        }
-        this.status = OrderStatus.PAID;
-    }
-
-    public void cancel() {
-        this.status = OrderStatus.CANCELLED;
-    }
-
-    public void changeStatus(OrderStatus status) { // 환불 처리 등에서 사용
-        this.status = status;
-    }
 }

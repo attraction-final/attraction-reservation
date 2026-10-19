@@ -1,4 +1,4 @@
-package com.example.attractionreservation.domain.payment.entity;
+package com.example.attractionreservation.domain.payment.entity.enums;
 
 // 결제 상태
 public enum PaymentStatus {

@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.payment.entity;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.*;

@@ -4,7 +4,6 @@ import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -37,7 +36,7 @@ public class Order extends BaseTimeEntity {
 
     private Order(User user, int totalAmount) {
         this.user = user;
-        this.totalAmount = 0;
+        this.totalAmount = totalAmount;
         this.status = OrderStatus.PENDING;
     }
 

@@ -1,4 +1,5 @@
-import com.example.attractionreservation.domain.payment.controller.PaymentController;
+package com.example.attractionreservation.domain.payment.controller;
+
 import com.example.attractionreservation.domain.payment.dto.PaymentResponse;
 import com.example.attractionreservation.domain.payment.dto.SearchPaymentCondition;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;

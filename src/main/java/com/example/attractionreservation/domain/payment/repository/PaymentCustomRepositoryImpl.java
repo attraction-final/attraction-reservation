@@ -92,6 +92,8 @@ public class PaymentCustomRepositoryImpl implements PaymentCustomRepository {
             orders.add(payment.createdAt.desc());
         }
 
+        orders.add(payment.id.desc());
+
         return orders.toArray(OrderSpecifier[]::new);
     }
 }

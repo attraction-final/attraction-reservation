@@ -1,8 +1,9 @@
+package com.example.attractionreservation.domain.payment.service;
+
 import com.example.attractionreservation.domain.payment.dto.PaymentResponse;
 import com.example.attractionreservation.domain.payment.dto.SearchPaymentCondition;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
-import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.global.response.PageableDto;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

@@ -23,6 +23,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -133,6 +135,68 @@ class PaymentCustomRepositoryImplTest {
     }
 
     @Test
+    @DisplayName("정렬 조건이 없으면 생성 시각 내림차순으로 조회된다.")
+    void searchAllByUserId_noSort_ReturnsCreatedAtDesc() {
+        //given
+        Payment middle = savePayment(user);
+        Payment latest = savePayment(user);
+        Payment oldest = savePayment(user);
+        updateCreatedAt(middle, Instant.parse("2026-01-02T00:00:00Z"));
+        updateCreatedAt(latest, Instant.parse("2026-01-03T00:00:00Z"));
+        updateCreatedAt(oldest, Instant.parse("2026-01-01T00:00:00Z"));
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), pageable, new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(latest.getId(), middle.getId(), oldest.getId());
+    }
+
+    @Test
+    @DisplayName("정렬 조건이 없고 생성 시각이 같으면 id 내림차순으로 조회된다.")
+    void searchAllByUserId_noSortAndSameCreatedAt_ReturnsIdDesc() {
+        //given
+        Instant sameCreatedAt = Instant.parse("2026-01-01T00:00:00Z");
+        Payment first = savePayment(user);
+        Payment second = savePayment(user);
+        Payment third = savePayment(user);
+        updateCreatedAt(first, sameCreatedAt);
+        updateCreatedAt(second, sameCreatedAt);
+        updateCreatedAt(third, sameCreatedAt);
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), pageable, new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(third.getId(), second.getId(), first.getId());
+    }
+
+    @Test
+    @DisplayName("정렬 기준 값이 같으면 id 내림차순으로 조회된다.")
+    void searchAllByUserId_sameSortValue_ReturnsIdDesc() {
+        //given
+        Payment first = savePayment(user, 10000);
+        Payment second = savePayment(user, 10000);
+        Payment third = savePayment(user, 10000);
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), PageRequest.of(0, 10, Sort.by(Sort.Direction.ASC, "amount")),
+                new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(third.getId(), second.getId(), first.getId());
+    }
+
+    @Test
     @DisplayName("금액 오름차순 정렬 조건이면 금액이 작은 결제부터 조회된다.")
     void searchAllByUserId_sortByAmountAsc_ReturnsAscending() {
         //given
@@ -217,5 +281,15 @@ class PaymentCustomRepositoryImplTest {
     private Payment savePayment(User owner, int amount) {
         Order order = em.persist(Order.create(owner, amount));
         return em.persist(Payment.create(order));
+    }
+
+    // createdAt은 Auditing으로 저장 시점에 채워지므로, 정렬 검증을 위해 DB 값을 직접 변경
+    private void updateCreatedAt(Payment payment, Instant createdAt) {
+        em.flush();
+        em.getEntityManager()
+                .createNativeQuery("update payments set created_at = :createdAt where id = :id")
+                .setParameter("createdAt", createdAt)
+                .setParameter("id", payment.getId())
+                .executeUpdate();
     }
 }

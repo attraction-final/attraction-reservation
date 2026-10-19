@@ -5,7 +5,6 @@ import com.example.attractionreservation.domain.ticketproduct.enums.TicketProduc
 import com.example.attractionreservation.domain.ticketproduct.enums.TicketType;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 
 public record CreateTicketProductResponse(
         Long id,

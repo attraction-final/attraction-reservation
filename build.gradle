@@ -11,6 +11,8 @@ group = 'com.example'
 version = '0.0.1-SNAPSHOT'
 description = 'attraction-reservation'
 
+def querydslVersion = '7.6'
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(17)
@@ -30,6 +32,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // Querydsl
+    implementation "io.github.openfeign.querydsl:querydsl-jpa:${querydslVersion}"
+    annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${querydslVersion}:jpa"
+
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'com.mysql:mysql-connector-j'
     annotationProcessor 'org.projectlombok:lombok'

@@ -4,6 +4,8 @@ import com.example.attractionreservation.domain.attraction.dto.CreateAttractionR
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,12 @@ public class AttractionService {
         Attraction savedAttraction = attractionRepository.save(attraction); // 생성한 엔티티를 Repository를 통해 저장, 저장 결과를 savedAttraction 변수에 담음
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
+    }
+
+    private void validateNameNotDuplicated(String name) {
+        if (attractionRepository.existsByNameAndDeletedAtIsNull(name)) {
+            throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+        }
     }
 
 }

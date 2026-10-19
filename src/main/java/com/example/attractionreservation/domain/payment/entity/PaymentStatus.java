@@ -6,7 +6,7 @@ public enum PaymentStatus {
     PENDING {
         @Override
         public boolean canTransitTo(PaymentStatus nextStatus) {
-            return true;
+            return nextStatus != REFUNDED && nextStatus != PARTIALLY_REFUNDED;
         }
     },
     // 결제 완료

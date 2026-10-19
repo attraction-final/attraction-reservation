@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.payment.entity;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -24,7 +26,7 @@ public class Payment {
     @JoinColumn(name = "order_id", nullable = false)
     private Order order;
 
-    @Column(nullable = false, unique = true, length = 30)
+    @Column(nullable = false, unique = true, length = 40)
     private String pgId;
 
     @Column(nullable = false)
@@ -44,6 +46,10 @@ public class Payment {
     }
 
     public static Payment create(Order order, int amount) {
+        if (amount <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_AMOUNT);
+        }
+
         return new Payment(order, amount);
     }
 }

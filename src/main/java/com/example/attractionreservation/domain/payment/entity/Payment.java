@@ -22,7 +22,7 @@ public class Payment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id", nullable = false)
     private Order order;
 
@@ -38,19 +38,19 @@ public class Payment {
 
     private LocalDateTime paidAt;
 
-    private Payment(Order order, int amount) {
+    private Payment(Order order) {
         this.order = order;
         this.pgId = UUID.randomUUID().toString();
-        this.amount = amount;
+        this.amount = order.getTotalAmount();
         this.status = PaymentStatus.PENDING;
     }
 
-    public static Payment create(Order order, int amount) {
-        if (amount <= 0) {
+    public static Payment create(Order order) {
+        if (order.getTotalAmount() <= 0) {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT);
         }
 
-        return new Payment(order, amount);
+        return new Payment(order);
     }
 
     public void markAsPaid() {
@@ -83,5 +83,13 @@ public class Payment {
         }
 
         this.status = PaymentStatus.REFUNDED;
+    }
+
+    public void markAsFailed() {
+        if (!this.status.canTransitTo(PaymentStatus.FAILED)) {
+            throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = PaymentStatus.FAILED;
     }
 }

@@ -12,7 +12,7 @@ public record CreateAttractionRequest(
         String name,
 
         @NotBlank
-        @Size(max = 50)
+        @Size(max = 200)
         String description,
 
         @NotBlank

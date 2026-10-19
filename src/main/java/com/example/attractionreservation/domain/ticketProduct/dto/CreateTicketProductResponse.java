@@ -1,8 +1,8 @@
 package com.example.attractionreservation.domain.ticketProduct.dto;
 
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
-import com.example.attractionreservation.domain.ticketProduct.enums.TicketProductStatus;
-import com.example.attractionreservation.domain.ticketProduct.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 
 import java.time.Instant;
 

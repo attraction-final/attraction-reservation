@@ -1,8 +1,8 @@
 package com.example.attractionreservation.domain.ticketProduct.controller;
 
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
-import com.example.attractionreservation.domain.ticketProduct.enums.TicketProductStatus;
-import com.example.attractionreservation.domain.ticketProduct.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;

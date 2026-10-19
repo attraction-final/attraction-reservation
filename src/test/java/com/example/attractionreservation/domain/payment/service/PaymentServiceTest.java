@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.payment.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.payment.entity.Payment;
+import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -9,13 +10,16 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
@@ -41,7 +45,13 @@ class PaymentServiceTest {
         paymentService.createPayment(order);
 
         //then
-        verify(paymentRepository).save(any(Payment.class));
+        ArgumentCaptor<Payment> paymentArgumentCaptor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(paymentArgumentCaptor.capture());
+        Payment payment = paymentArgumentCaptor.getValue();
+
+        assertEquals(10000, payment.getAmount());
+        assertNotNull(payment.getOrder());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
     }
 
     @Test
@@ -80,5 +90,7 @@ class PaymentServiceTest {
         assertThatThrownBy(() -> paymentService.createPayment(order))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INVALID_AMOUNT.getMessage());
+
+        verifyNoInteractions(paymentRepository);
     }
 }

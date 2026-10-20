@@ -10,6 +10,8 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,6 +34,9 @@ class AttractionServiceTest {
 
     @Mock
     private AttractionRepository attractionRepository;
+
+    @Mock
+    private UpcomingReservationReader upcomingReservationReader; // 위로 옮김 (다른 @Mock과 같이)
 
     @InjectMocks
     private AttractionService attractionService;
@@ -65,6 +70,12 @@ class AttractionServiceTest {
                 any(),          // todayEnd (LocalDateTime)
                 any()           // pageable
         )).willReturn(new PageImpl<>(attractions));
+    }
+
+    // 이용 예정 예약 건수 Mock 설정 (상태 변경 테스트에서 반복되는 부분)
+    private void givenUpcomingReservationCount(Long attractionId, long count) {
+        given(upcomingReservationReader.countUpcomingReservationsByAttractionId(eq(attractionId), any(LocalDateTime.class)))
+                .willReturn(count);
     }
 
     // ReservableSlotView는 인터페이스라서 테스트용 구현체를 만듦
@@ -257,6 +268,132 @@ class AttractionServiceTest {
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
 
         verify(attractionRepository, never()).existsByNameAndIdNotAndDeletedAtIsNull(any(), any());
+        verify(attractionRepository, never()).flush();
+    }
+
+    // 상태 변경 - 성공
+    @Test
+    @DisplayName("이용 예정 예약이 없으면 운영중에서 점검으로 바꿀 수 있다")
+    void updateAttractionStatus_NoUpcomingReservations_Success() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        givenUpcomingReservationCount(1L, 0L);
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("MAINTENANCE");
+
+        // when
+        UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(1L, request);
+
+        // then
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.MAINTENANCE); // 엔티티가 바뀌었는지
+        assertThat(response.attractionId()).isEqualTo(1L);
+        assertThat(response.previousStatus()).isEqualTo(OperationStatus.OPERATING);        // 바뀌기 전
+        assertThat(response.operationStatus()).isEqualTo(OperationStatus.MAINTENANCE);     // 바뀐 후
+        verify(attractionRepository).flush();                                              // DB 반영을 호출했는지
+    }
+
+    @Test
+    @DisplayName("운영중으로 되돌릴 때는 이용 예정 예약을 확인하지 않는다")
+    void updateAttractionStatus_ToOperating_DoesNotCheckReservations() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.MAINTENANCE);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("OPERATING");
+
+        // when
+        UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(1L, request);
+
+        // then
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING);
+        assertThat(response.previousStatus()).isEqualTo(OperationStatus.MAINTENANCE);
+        verify(upcomingReservationReader, never())
+                .countUpcomingReservationsByAttractionId(anyLong(), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("점검에서 일시중단처럼 비운영끼리 바꿀 때도 이용 예정 예약을 확인한다")
+    void updateAttractionStatus_NonOperatingToNonOperating_ChecksReservations() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.MAINTENANCE);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        givenUpcomingReservationCount(1L, 0L);
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("SUSPENDED");
+
+        // when
+        attractionService.updateAttractionStatus(1L, request);
+
+        // then
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.SUSPENDED);
+        verify(upcomingReservationReader)
+                .countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class));
+    }
+
+    // 상태 변경 - 실패 (서비스 검사 순서: 상태값 → 존재 여부 → 같은 상태 → 이용 예정 예약)
+    @Test
+    @DisplayName("허용되지 않은 상태값이면 어트랙션을 조회하기 전에 INVALID_ATTRACTION_STATUS 예외가 발생한다")
+    void updateAttractionStatus_InvalidStatus_ThrowsException() {
+        // given
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("BROKEN");
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INVALID_ATTRACTION_STATUS);
+        verify(attractionRepository, never()).findByIdAndDeletedAtIsNull(anyLong());
+    }
+
+    @Test
+    @DisplayName("없거나 삭제된 어트랙션이면 ATTRACTION_NOT_FOUND 예외가 발생한다")
+    void updateAttractionStatus_NotExists_ThrowsException() {
+        // given
+        given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("MAINTENANCE");
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(99L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
+        verify(attractionRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("현재와 같은 상태로 변경하면 예약을 확인하기 전에 ATTRACTION_STATUS_SAME 예외가 발생한다")
+    void updateAttractionStatus_SameStatus_ThrowsException() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("OPERATING");
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_STATUS_SAME);
+        verify(upcomingReservationReader, never())
+                .countUpcomingReservationsByAttractionId(anyLong(), any(LocalDateTime.class));
+        verify(attractionRepository, never()).flush();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MAINTENANCE", "SUSPENDED", "CLOSED"})
+    @DisplayName("운영중이 아닌 상태로 바꿀 때 이용 예정 예약이 있으면 예외가 발생하고 상태는 그대로다")
+    void updateAttractionStatus_HasUpcomingReservations_ThrowsException(String status) {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        givenUpcomingReservationCount(1L, 3L);
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest(status);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("이용 예정 예약이 3건 있어 상태를 변경할 수 없습니다. 예약을 먼저 처리해 주세요.")
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
+
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING); // 상태가 바뀌지 않았는지
         verify(attractionRepository, never()).flush();
     }
 }

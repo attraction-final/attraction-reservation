@@ -286,11 +286,11 @@ class AttractionServiceTest {
         UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(1L, request);
 
         // then
-        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.MAINTENANCE); // 엔티티가 바뀌었는지
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.MAINTENANCE);
         assertThat(response.attractionId()).isEqualTo(1L);
-        assertThat(response.previousStatus()).isEqualTo(OperationStatus.OPERATING);        // 바뀌기 전
-        assertThat(response.operationStatus()).isEqualTo(OperationStatus.MAINTENANCE);     // 바뀐 후
-        verify(attractionRepository).flush();                                              // DB 반영을 호출했는지
+        assertThat(response.previousStatus()).isEqualTo(OperationStatus.OPERATING);
+        assertThat(response.operationStatus()).isEqualTo(OperationStatus.MAINTENANCE);
+        verify(attractionRepository).flush();
     }
 
     @Test
@@ -412,7 +412,9 @@ class AttractionServiceTest {
         attractionService.deleteAttraction(1L);
 
         // then
-        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING);
+        assertThat(attraction.getDeletedAt()).isNotNull();   // 삭제 표시가 남았는지
+        verify(upcomingReservationReader)
+                .countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class)); // 예약 확인을 했는지
     }
 
     @Test

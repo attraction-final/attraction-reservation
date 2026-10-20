@@ -39,6 +39,7 @@ public class Payment {
     private LocalDateTime paidAt;
 
     @Version
+    @Column(nullable = false)
     private Integer version;
 
     private Payment(Order order) {

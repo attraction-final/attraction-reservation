@@ -1,4 +1,4 @@
-package com.example.domain.attraction.service;
+package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;

@@ -21,6 +21,11 @@ public record CreateAttractionRequest(
 
         @NotNull
         @Min(1)
-        Integer durationMinutes // 이용 소요 시간(분 단위)
+        Integer durationMinutes, // 이용 소요 시간(분 단위)
+
+        // 추가: 필수, 1 이상
+        @NotNull
+        @Min(1)
+        Integer entranceMoveMinutes
 ) {
 }

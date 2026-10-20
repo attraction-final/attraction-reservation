@@ -19,6 +19,10 @@ public record UpdateAttractionRequest(
         String location,
 
         @Min(1)
-        Integer durationMinutes
+        Integer durationMinutes,
+
+        // 추가: 안 보내도 됨(null), 보내면 1 이상
+        @Min(1)
+        Integer entranceMoveMinutes
 ) {
 }

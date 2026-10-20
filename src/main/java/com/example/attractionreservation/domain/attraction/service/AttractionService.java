@@ -39,7 +39,8 @@ public class AttractionService {
                 request.name(),
                 request.description(),
                 request.location(),
-                request.durationMinutes()
+                request.durationMinutes(),
+                request.entranceMoveMinutes() // 추가
         );
         Attraction savedAttraction = attractionRepository.save(attraction); // 생성한 엔티티를 Repository를 통해 저장, 저장 결과를 savedAttraction 변수에 담음
 
@@ -130,7 +131,8 @@ public class AttractionService {
                 request.name(),
                 request.description(),
                 request.location(),
-                request.durationMinutes()
+                request.durationMinutes(),
+                request.entranceMoveMinutes() // 추가
         );
         // updatedAt 은 DB에 반영(flush)될 때 채워지므로, 응답 전에 먼저 반영한다.
         attractionRepository.flush();

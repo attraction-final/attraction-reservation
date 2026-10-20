@@ -14,6 +14,7 @@ public record SearchAttractionResponse(
         String description,
         String location,
         Integer durationMinutes,
+        Integer entranceMoveMinutes,
         OperationStatus operationStatus,
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime createdAt,
@@ -28,6 +29,7 @@ public record SearchAttractionResponse(
                 attraction.getDescription(),
                 attraction.getLocation(),
                 attraction.getDurationMinutes(),
+                attraction.getEntranceMoveMinutes(),
                 attraction.getOperationStatus(),
                 KstTime.toLocalDateTime(attraction.getCreatedAt()),
                 KstTime.toLocalDateTime(attraction.getUpdatedAt())

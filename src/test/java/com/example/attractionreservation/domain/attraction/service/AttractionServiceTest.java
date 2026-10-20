@@ -43,7 +43,7 @@ class AttractionServiceTest {
 
     // 테스트 데이터 helper
     private Attraction createRollerCoaster() {
-        return Attraction.create("롤러코스터", "빠른 속도의 코스터", "A구역", 10);
+        return Attraction.create("롤러코스터", "빠른 속도의 코스터", "A구역", 10, 8); // 수정: 정문 이동 시간 8 추가
     }
 
     // DB에 저장하지 않은 엔티티는 id가 null이라서 직접 넣어 줌
@@ -92,7 +92,7 @@ class AttractionServiceTest {
     @DisplayName("이름이 중복되지 않으면 운영중 상태로 등록된다")
     void createAttraction_UniqueName_Success() {
         // given
-        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "빠른 속도의 코스터", "A구역", 10);
+        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "빠른 속도의 코스터", "A구역", 10, 8); // 수정: 8 추가
         given(attractionRepository.existsByNameAndDeletedAtIsNull("롤러코스터")).willReturn(false);
         given(attractionRepository.save(any(Attraction.class))).willAnswer(invocation -> invocation.getArgument(0));
 
@@ -108,7 +108,7 @@ class AttractionServiceTest {
     @DisplayName("이미 있는 이름으로 등록하면 ATTRACTION_NAME_DUPLICATED 예외가 발생한다")
     void createAttraction_DuplicatedName_ThrowsException() {
         // given
-        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "빠른 속도의 코스터", "A구역", 10);
+        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "빠른 속도의 코스터", "A구역", 10, 8); // 수정: 8 추가
         given(attractionRepository.existsByNameAndDeletedAtIsNull("롤러코스터")).willReturn(true);
 
         // when & then
@@ -201,18 +201,19 @@ class AttractionServiceTest {
         given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
         given(attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull("슈퍼 롤러코스터", 1L)).willReturn(false);
 
-        // 이름과 소요 시간만 보냄 (설명, 위치는 null = "안 바꿀래요")
-        UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, 12);
+        // 이름과 소요 시간만 보냄 (설명, 위치, 정문 이동 시간은 null = "안 바꿀래요")
+        UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, 12, null); // 수정: null 추가
 
         // when
         SearchAttractionResponse response = attractionService.updateAttraction(1L, request);
 
         // then
-        assertThat(response.name()).isEqualTo("슈퍼 롤러코스터");      // 바뀜
-        assertThat(response.durationMinutes()).isEqualTo(12);          // 바뀜
-        assertThat(response.description()).isEqualTo("빠른 속도의 코스터"); // 그대로
-        assertThat(response.location()).isEqualTo("A구역");            // 그대로
-        verify(attractionRepository).flush();                          // DB 반영을 호출했는지
+        assertThat(response.name()).isEqualTo("슈퍼 롤러코스터");
+        assertThat(response.durationMinutes()).isEqualTo(12);
+        assertThat(response.description()).isEqualTo("빠른 속도의 코스터");
+        assertThat(response.location()).isEqualTo("A구역");
+        assertThat(response.entranceMoveMinutes()).isEqualTo(8);
+        verify(attractionRepository).flush();  // DB 반영을 호출했는지
     }
 
     @Test
@@ -223,7 +224,7 @@ class AttractionServiceTest {
         given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
         given(attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull("회전목마", 1L)).willReturn(true);
 
-        UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null);
+        UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null, null); // 수정: null 추가
 
         // when & then
         assertThatThrownBy(() -> attractionService.updateAttraction(1L, request))
@@ -243,7 +244,7 @@ class AttractionServiceTest {
         given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
 
         // 이름은 지금과 똑같이, 설명만 바꿈
-        UpdateAttractionRequest request = new UpdateAttractionRequest("롤러코스터", "더 빨라진 코스터", null, null);
+        UpdateAttractionRequest request = new UpdateAttractionRequest("롤러코스터", "더 빨라진 코스터", null, null, null); // 수정: null 추가
 
         // when
         SearchAttractionResponse response = attractionService.updateAttraction(1L, request);
@@ -259,7 +260,7 @@ class AttractionServiceTest {
     void updateAttraction_NotExists_ThrowsException() {
         // given
         given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
-        UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, null);
+        UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, null, null); // 수정: null 추가
 
         // when & then
         assertThatThrownBy(() -> attractionService.updateAttraction(99L, request))
@@ -464,4 +465,8 @@ class AttractionServiceTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
     }
+
+    // 삭제: "정문 이동 시간이 0이면 어트랙션 등록에 실패한다" 테스트
+    //  → Service 테스트에서는 @Min(1) 검증이 실행되지 않아서
+    //  CreateAttractionRequestTest(DTO 검증 테스트)로 옮김
 }

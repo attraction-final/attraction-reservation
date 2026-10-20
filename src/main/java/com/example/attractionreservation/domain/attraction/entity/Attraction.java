@@ -48,8 +48,15 @@ public class Attraction extends BaseTimeEntity {
     }
 
     public static Attraction create(String name, String description, String location,
-                                    Integer durationMinutes) {
-        return new Attraction(name, description, location, durationMinutes);
+                                    Integer durationMinutes, Integer entranceMoveMinutes) {
+        Attraction attraction = new Attraction();
+        attraction.name = name;
+        attraction.description = description;
+        attraction.location = location;
+        attraction.durationMinutes = durationMinutes;
+        attraction.entranceMoveMinutes = entranceMoveMinutes;
+        attraction.operationStatus = OperationStatus.OPERATING;
+        return attraction;
     }
 
     // Attraction Service 목록조회에 필요
@@ -58,19 +65,13 @@ public class Attraction extends BaseTimeEntity {
     }
 
     // Attraction Service 수정에 필요
-    public void update(String name, String description, String location, Integer durationMinutes) {
-        if (name != null) {
-            this.name = name;
-        }
-        if (description != null) {
-            this.description = description;
-        }
-        if (location != null) {
-            this.location = location;
-        }
-        if (durationMinutes != null) {
-            this.durationMinutes = durationMinutes;
-        }
+    public void update(String name, String description, String location,
+                       Integer durationMinutes, Integer entranceMoveMinutes) {
+        if (name != null) this.name = name;
+        if (description != null) this.description = description;
+        if (location != null) this.location = location;
+        if (durationMinutes != null) this.durationMinutes = durationMinutes;
+        if (entranceMoveMinutes != null) this.entranceMoveMinutes = entranceMoveMinutes;
     }
 
     // Attraction Service 운영 상태 변경에 필요
@@ -82,4 +83,8 @@ public class Attraction extends BaseTimeEntity {
     public void delete() {
         this.deletedAt = Instant.now();
     }
+
+    // 추가: 정문 → 이 어트랙션까지 예상 이동 시간(분)
+    @Column(name = "entrance_move_minutes", nullable = false)
+    private Integer entranceMoveMinutes;
 }

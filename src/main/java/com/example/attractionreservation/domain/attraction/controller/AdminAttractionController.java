@@ -1,9 +1,6 @@
 package com.example.attractionreservation.domain.attraction.controller;
 
-import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
-import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
-import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
-import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
+import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.service.AttractionService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -41,5 +38,14 @@ public class AdminAttractionController {
         return ResponseEntity.ok(ApiResponse.ok("어트랙션 수정에 성공했습니다.", response));
     }
 
+    // 어트랙션 운영 상태 변경
+    @PatchMapping("/{attractionId}/status")
+    public ResponseEntity<ApiResponse<UpdateAttractionStatusResponse>> updateAttractionStatus(
+            @PathVariable Long attractionId,
+            @Valid @RequestBody UpdateAttractionStatusRequest request) {
 
+        UpdateAttractionStatusResponse response =
+                attractionService.updateAttractionStatus(attractionId, request);
+        return ResponseEntity.ok(ApiResponse.ok("어트랙션 운영 상태 변경에 성공했습니다.", response));
+    }
 }

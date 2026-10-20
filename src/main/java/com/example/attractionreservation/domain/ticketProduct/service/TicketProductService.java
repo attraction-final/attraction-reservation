@@ -51,6 +51,14 @@ public class TicketProductService {
         return UpdateTicketProductResponse.from(ticketProduct);
     }
 
+    @Transactional
+    public void deleteTicketProduct(Long ticketProductId) {
+        TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        ticketProduct.delete();
+    }
+
     // 티켓 상품 목록 조회
     public Page<SearchTicketProductResponse> getTicketProductAll(SearchTicketProductCondition condition, Pageable pageable) {
         Page<TicketProduct> ticketProducts = ticketProductRepository.findAllByCondition(

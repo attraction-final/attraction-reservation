@@ -23,27 +23,29 @@ public class TicketProductController {
 
     // 티켓 상품 등록
     @PostMapping
-    public ResponseEntity<ApiResponse<CreateTicketProductResponse>> create(
+    public ResponseEntity<ApiResponse<CreateTicketProductResponse>> createTicketProduct(
             @Valid @RequestBody CreateTicketProductRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("티켓 상품이 등록되었습니다.", ticketProductService.create(request)));
+        CreateTicketProductResponse response = ticketProductService.createTicketProduct(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("티켓 상품이 등록되었습니다.", response));
     }
 
     // 티켓 상품 수정
     @PutMapping("/{ticketProductId}")
-    public ResponseEntity<ApiResponse<UpdateTicketProductResponse>> update(
+    public ResponseEntity<ApiResponse<UpdateTicketProductResponse>> updateTicketProduct(
             @Valid @RequestBody UpdateTicketProductRequest request,
             @PathVariable Long ticketProductId
     ) {
-        return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 수정되었습니다.", ticketProductService.update(ticketProductId, request)));
+        UpdateTicketProductResponse response = ticketProductService.updateTicketProduct(ticketProductId, request);
+        return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 수정되었습니다.", response));
     }
 
     // 티켓 상품 삭제
     @DeleteMapping("/{ticketProductId}")
-    public ResponseEntity<ApiResponse<Void>> delete(
+    public ResponseEntity<ApiResponse<Void>> deleteTicketProduct(
             @PathVariable Long ticketProductId
     ) {
-        ticketProductService.delete(ticketProductId);
+        ticketProductService.deleteTicketProduct(ticketProductId);
         return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 삭제되었습니다.", null));
     }
 }

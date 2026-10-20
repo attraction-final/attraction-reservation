@@ -6,5 +6,6 @@ import lombok.Getter;
 public enum TicketProductStatus {
     ON_SALE,
     STOPPED,
+    ENDED,
     DELETED
 }

@@ -23,7 +23,7 @@ public class TicketProductService {
     // 티켓 상품 등록
     // TODO: 추후 관리자 인증 검증 부분 추가 예정
     @Transactional
-    public CreateTicketProductResponse create(CreateTicketProductRequest request) {
+    public CreateTicketProductResponse createTicketProduct(CreateTicketProductRequest request) {
         TicketProduct ticketProduct = new TicketProduct(
                 request.name(), request.price(), request.description(),
                 request.type(), request.stock(), request.saleStatus()
@@ -37,7 +37,7 @@ public class TicketProductService {
     // 티켓 상품 수정
     // TODO: 추후 관리자 인증 검증 부분 추가 예정
     @Transactional
-    public UpdateTicketProductResponse update(Long ticketProductId, @Valid UpdateTicketProductRequest request) {
+    public UpdateTicketProductResponse updateTicketProduct(Long ticketProductId, @Valid UpdateTicketProductRequest request) {
         TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
 
@@ -53,7 +53,7 @@ public class TicketProductService {
     }
 
     @Transactional
-    public void delete(Long ticketProductId) {
+    public void deleteTicketProduct(Long ticketProductId) {
         TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
 

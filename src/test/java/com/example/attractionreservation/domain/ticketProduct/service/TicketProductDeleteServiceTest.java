@@ -58,7 +58,7 @@ class TicketProductDeleteServiceTest {
                 .thenReturn(Optional.of(ticketProduct));
 
         // when
-        ticketProductService.delete(ticketProductId);
+        ticketProductService.deleteTicketProduct(ticketProductId);
 
         // then
         assertThat(ticketProduct.getStatus())
@@ -81,7 +81,7 @@ class TicketProductDeleteServiceTest {
                 .thenReturn(Optional.of(stoppedProduct));
 
         // when
-        ticketProductService.delete(ticketProductId);
+        ticketProductService.deleteTicketProduct(ticketProductId);
 
         // then
         assertThat(stoppedProduct.getStatus())
@@ -103,7 +103,7 @@ class TicketProductDeleteServiceTest {
                 .thenReturn(Optional.of(deletedProduct));
 
         // when
-        ticketProductService.delete(ticketProductId);
+        ticketProductService.deleteTicketProduct(ticketProductId);
 
         // then
         assertThat(deletedProduct.getStatus())
@@ -124,9 +124,11 @@ class TicketProductDeleteServiceTest {
                 .thenReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> ticketProductService.delete(ticketProductId))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.TICKET_PRODUCT_NOT_FOUND.getMessage());
+        assertThatThrownBy(() -> ticketProductService.deleteTicketProduct(ticketProductId))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.TICKET_PRODUCT_NOT_FOUND)
+                );
 
         verify(ticketProductRepository).findById(ticketProductId);
         verify(ticketProductRepository, never()).delete(any(TicketProduct.class));

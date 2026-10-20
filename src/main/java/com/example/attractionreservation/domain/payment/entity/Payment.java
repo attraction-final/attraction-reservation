@@ -38,6 +38,9 @@ public class Payment {
 
     private LocalDateTime paidAt;
 
+    @Version
+    private Integer version;
+
     private Payment(Order order) {
         this.order = order;
         this.pgId = UUID.randomUUID().toString();

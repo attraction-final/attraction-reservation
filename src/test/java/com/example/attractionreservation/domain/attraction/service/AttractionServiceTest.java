@@ -396,4 +396,72 @@ class AttractionServiceTest {
         assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING); // 상태가 바뀌지 않았는지
         verify(attractionRepository, never()).flush();
     }
+
+    // 삭제(소프트삭제)
+    @Test
+    @DisplayName("이용 예정 예약이 없으면 소프트 삭제된다")
+    void deleteAttraction_NoUpcomingReservations_SoftDeleted() {
+        // given
+        Attraction attraction = createRollerCoaster();
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(upcomingReservationReader.countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class)))
+                .willReturn(0L);
+
+        // when
+        attractionService.deleteAttraction(1L);
+
+        // then
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 어트랙션을 삭제하면 예외가 발생한다")
+    void deleteAttraction_NotFound_ThrowsException() {
+        // given
+        given(attractionRepository.findByIdAndDeletedAtIsNull(999L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.deleteAttraction(999L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
+
+        // 어트랙션이 없으면 예약 개수를 셀 필요도 없어야 한다
+        verify(upcomingReservationReader, never())
+                .countUpcomingReservationsByAttractionId(anyLong(), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("이용 예정 예약이 있으면 삭제할 수 없다")
+    void deleteAttraction_HasUpcomingReservations_ThrowsException() {
+        // given
+        Attraction attraction = createRollerCoaster();
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(upcomingReservationReader.countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class)))
+                .willReturn(3L);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.deleteAttraction(1L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
+
+        // 예외가 났으니 삭제 표시가 남으면 안 된다
+        assertThat(attraction.getDeletedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("이미 삭제된 어트랙션을 다시 삭제하면 찾을 수 없다는 예외가 발생한다")
+    void deleteAttraction_AlreadyDeleted_ThrowsNotFound() {
+        // given
+        // 이미 삭제된 어트랙션은 deletedAt이 채워져 있으므로
+        // findByIdAndDeletedAtIsNull 조회 결과가 비어 있다
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.deleteAttraction(1L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
+    }
 }

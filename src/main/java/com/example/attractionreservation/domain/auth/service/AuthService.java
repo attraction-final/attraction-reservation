@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -45,6 +46,20 @@ public class AuthService {
 
         return CreateAuthLoginServiceResponse.of(response, refreshToken);
     }
+
+
+    public void logout(Long userId, String refreshToken) {
+        // Refresh Token이 없거나 Redis에 저장된 토큰과 일치하지 않으면 거부
+        if (refreshToken == null
+                || refreshToken.isBlank()
+                || !refreshTokenRepository.matches(userId, refreshToken)) {
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
+        }
+
+        // 일치하는 Refresh Token을 Redis에서 삭제
+        refreshTokenRepository.delete(userId);
+    }
+
 
     private User authenticateUser(CreateAuthLoginRequest request) {
 

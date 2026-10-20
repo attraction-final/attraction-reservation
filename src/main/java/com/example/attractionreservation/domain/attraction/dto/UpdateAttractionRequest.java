@@ -7,15 +7,15 @@ import jakarta.validation.constraints.Size;
 public record UpdateAttractionRequest(
 
         @Size(max = 50)
-        @Pattern(regexp = ".*\\S.*", message = "공백만 입력할 수 없습니다.")
+        @Pattern(regexp = "(?s).*\\S.*", message = "공백만 입력할 수 없습니다.")
         String name,
 
-        @Size(max = 50)
-        @Pattern(regexp = ".*\\S.*", message = "공백만 입력할 수 없습니다.")
+        @Size(max = 200)
+        @Pattern(regexp = "(?s).*\\S.*", message = "공백만 입력할 수 없습니다.")
         String description,
 
         @Size(max = 50)
-        @Pattern(regexp = ".*\\S.*", message = "공백만 입력할 수 없습니다.")
+        @Pattern(regexp = "(?s).*\\S.*", message = "공백만 입력할 수 없습니다.")
         String location,
 
         @Min(1)

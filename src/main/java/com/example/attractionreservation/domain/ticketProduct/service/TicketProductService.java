@@ -8,8 +8,6 @@ import com.example.attractionreservation.domain.ticketProduct.entity.TicketProdu
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
-import com.example.attractionreservation.global.exception.BusinessException;
-import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

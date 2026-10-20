@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -26,6 +27,7 @@ import java.util.function.BinaryOperator;
 public class AttractionService {
 
     private final AttractionRepository attractionRepository;
+    private final UpcomingReservationReader upcomingReservationReader;
 
     // 어트랙션 등록
     @Transactional
@@ -136,4 +138,36 @@ public class AttractionService {
         return SearchAttractionResponse.from(attraction);
     }
 
+    // 어트랙션 운영 상태 변경
+    @Transactional
+    public UpdateAttractionStatusResponse updateAttractionStatus(Long attractionId,
+                                                                 UpdateAttractionStatusRequest request) {
+        OperationStatus newStatus = OperationStatus.from(request.operationStatus());
+        Attraction attraction = findActiveAttraction(attractionId);
+        OperationStatus previousStatus = attraction.getOperationStatus();
+
+        if (previousStatus == newStatus) {
+            throw new BusinessException(ErrorCode.ATTRACTION_STATUS_SAME);
+        }
+        // 운영중이 아닌 상태로 바꿀 때만 이용 예정 예약 확인 (BR-ATR-05)
+        if (newStatus != OperationStatus.OPERATING) {
+            validateNoUpcomingReservations(attractionId, "상태를 변경");
+        }
+
+        attraction.changeOperationStatus(newStatus);
+        attractionRepository.flush();
+
+        return UpdateAttractionStatusResponse.of(attraction, previousStatus);
+    }
+
+    private void validateNoUpcomingReservations(Long attractionId, String actionName) {
+        long upcomingCount = upcomingReservationReader
+                .countUpcomingReservationsByAttractionId(attractionId, KstTime.now());
+        if (upcomingCount > 0) {
+            String message = String.format(
+                    "이용 예정 예약이 %d건 있어 %s할 수 없습니다. 예약을 먼저 처리해 주세요.",
+                    upcomingCount, actionName);
+            throw new BusinessException(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS, message);
+        }
+    }
 }

@@ -13,7 +13,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -87,5 +87,27 @@ class UserControllerTest {
                             }
                             """))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void signup_passwordExceeds72Bytes_returnsBadRequest() throws Exception {
+        // given
+        String password = "a1" + "😀".repeat(18);
+
+        String requestBody = """
+            {
+                "email": "test@gmail.com",
+                "password": "%s",
+                "nickname": "홍길동"
+            }
+            """.formatted(password);
+
+        // when & then
+        mockMvc.perform(post("/api/users/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verify(userService, never()).signup(any());
     }
 }

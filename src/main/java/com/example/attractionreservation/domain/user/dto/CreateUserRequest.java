@@ -1,9 +1,12 @@
 package com.example.attractionreservation.domain.user.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+
+import java.nio.charset.StandardCharsets;
 
 public record CreateUserRequest(
 
@@ -23,4 +26,10 @@ public record CreateUserRequest(
         @Size(max = 50, message = "닉네임은 50자 이하여야 합니다.")
         String nickname
 ) {
+
+        @AssertTrue(message = "비밀번호는 UTF-8 기준 72바이트 이하여야 합니다.")
+        public boolean isPasswordWithinByteLimit() {
+                return password == null
+                        || password.getBytes(StandardCharsets.UTF_8).length <= 72;
+        }
 }

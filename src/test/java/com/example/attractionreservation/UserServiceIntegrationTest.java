@@ -13,6 +13,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,5 +71,23 @@ class UserServiceIntegrationTest {
 
         assertThat(savedUser.getStatus())
                 .isEqualTo(UserStatus.ACTIVE);
+    }
+
+    @Test
+    void signup_duplicateEmail_throwsBusinessException() {
+        // given
+        CreateUserRequest request = new CreateUserRequest(
+                "duplicate@gmail.com",
+                "Password123!",
+                "홍길동"
+        );
+
+        userService.signup(request);
+
+        // when & then
+        assertThatThrownBy(() -> userService.signup(request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.DUPLICATE_EMAIL);
     }
 }

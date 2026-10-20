@@ -113,4 +113,27 @@ public class AttractionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND));
     }
 
+    // 어트랙션 수정
+    @Transactional
+    public SearchAttractionResponse updateAttraction(Long attractionId, UpdateAttractionRequest request) {
+        Attraction attraction = findActiveAttraction(attractionId);
+
+        boolean isNameChanged = request.name() != null && !request.name().equals(attraction.getName());
+        if (isNameChanged
+                && attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull(request.name(), attractionId)) {
+            throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+        }
+
+        attraction.update(
+                request.name(),
+                request.description(),
+                request.location(),
+                request.durationMinutes()
+        );
+        // updatedAt 은 DB에 반영(flush)될 때 채워지므로, 응답 전에 먼저 반영한다.
+        attractionRepository.flush();
+
+        return SearchAttractionResponse.from(attraction);
+    }
+
 }

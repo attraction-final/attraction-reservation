@@ -40,7 +40,7 @@ class PaymentServiceTest {
     void cancelPayment_pending_Success() {
         //given
         Payment payment = createPayment(USER_ID);
-        given(paymentRepository.findByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
 
         //when
         paymentService.cancelPayment(USER_ID, ORDER_ID);
@@ -53,7 +53,7 @@ class PaymentServiceTest {
     @DisplayName("존재하지 않는 결제는 취소할 수 없다.")
     void cancelPayment_notFound_Fail() {
         //given
-        given(paymentRepository.findByOrderId(ORDER_ID)).willReturn(Optional.empty());
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.empty());
 
         //when & then
         assertThatThrownBy(() -> paymentService.cancelPayment(USER_ID, ORDER_ID))
@@ -67,7 +67,7 @@ class PaymentServiceTest {
         //given
         Long otherUserId = 2L;
         Payment payment = createPayment(otherUserId);
-        given(paymentRepository.findByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
 
         //when & then
         assertThatThrownBy(() -> paymentService.cancelPayment(USER_ID, ORDER_ID))
@@ -82,7 +82,7 @@ class PaymentServiceTest {
     void cancelPayment_notPending_Fail(PaymentStatus status) {
         //given
         Payment payment = createPaymentWithStatus(USER_ID, status);
-        given(paymentRepository.findByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
 
         //when & then
         assertThatThrownBy(() -> paymentService.cancelPayment(USER_ID, ORDER_ID))

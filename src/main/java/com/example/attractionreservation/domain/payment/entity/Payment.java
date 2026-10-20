@@ -9,7 +9,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -36,11 +36,7 @@ public class Payment {
     @Column(nullable = false, length = 20)
     private PaymentStatus status;
 
-    private LocalDateTime paidAt;
-
-    @Version
-    @Column(nullable = false)
-    private Integer version;
+    private Instant paidAt;
 
     private Payment(Order order) {
         this.order = order;
@@ -62,6 +58,7 @@ public class Payment {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
         }
 
+        this.paidAt = Instant.now();
         this.status = PaymentStatus.PAID;
     }
 

@@ -4,6 +4,9 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password:
+    hikari:
+      # H2에서 MySQL의 innodb_lock_wait_timeout 설정에 대응하는 락 대기 타임아웃
+      connection-init-sql: SET LOCK_TIMEOUT 3000
 
   jpa:
     hibernate:

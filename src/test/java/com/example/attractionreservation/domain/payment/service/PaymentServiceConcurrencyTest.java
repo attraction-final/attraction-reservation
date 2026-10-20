@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.payment.service;
 
+import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
@@ -14,24 +15,26 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
-import org.springframework.test.context.ActiveProfiles;
+import org.springframework.context.annotation.Import;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest
-@ActiveProfiles("test")
+@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
+@Import(TestcontainersConfiguration.class)
 class PaymentServiceConcurrencyTest {
 
     @Autowired
@@ -82,30 +85,66 @@ class PaymentServiceConcurrencyTest {
     }
 
     @Test
-    @DisplayName("결제 승인 트랜잭션이 결제를 읽은 뒤 취소가 먼저 커밋되면, 승인은 낙관적 락 충돌로 실패한다.")
-    void cancelPayment_paidAfterCancelCommitted_OptimisticLockFail() throws Exception {
+    @DisplayName("결제 승인 트랜잭션이 락을 잡고 있으면 취소는 대기하고, 승인 커밋 후 결제 완료 상태를 읽어 취소가 거부된다.")
+    void cancelPayment_waitForApproveLock_Fail() throws Exception {
         //given
         ExecutorService executor = Executors.newSingleThreadExecutor();
+        List<Future<?>> cancelFutures = new ArrayList<>();
 
-        //when & then
+        //when
         try {
-            assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
-                // 승인 트랜잭션이 PENDING 상태의 결제를 먼저 읽는다.
-                Payment payment = entityManager.find(Payment.class, paymentId);
+            transactionTemplate.executeWithoutResult(status -> {
+                // 승인 트랜잭션이 결제에 비관적 락을 먼저 잡는다.
+                Payment payment = paymentRepository.findWithLockByOrderId(orderId).orElseThrow();
                 assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PENDING);
 
-                // 그 사이 다른 스레드에서 결제 취소가 커밋된다.
-                runAndWait(executor, () -> paymentService.cancelPayment(userId, orderId));
+                // 그 사이 다른 스레드에서 취소를 요청하면 락 해제까지 대기한다.
+                Future<?> cancelFuture = executor.submit(() -> paymentService.cancelPayment(userId, orderId));
+                cancelFutures.add(cancelFuture);
+                assertThatThrownBy(() -> cancelFuture.get(1, TimeUnit.SECONDS))
+                        .isInstanceOf(TimeoutException.class);
 
-                // 이미 읽어 둔 PENDING 상태 기준으로 승인을 시도한다.
                 payment.markAsPaid();
-            })).isInstanceOf(ObjectOptimisticLockingFailureException.class);
+            });
+
+            //then
+            assertThatThrownBy(() -> cancelFutures.get(0).get(10, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .cause()
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage(ErrorCode.PAYMENT_CANCEL_PROHIBITED.getMessage());
         } finally {
             executor.shutdownNow();
         }
 
         Payment result = paymentRepository.findById(paymentId).orElseThrow();
-        assertThat(result.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("다른 트랜잭션이 락을 3초 넘게 잡고 있으면 취소는 락 획득 실패로 끝나고 결제 상태는 바뀌지 않는다.")
+    void cancelPayment_lockWaitTimeout_Fail() {
+        //given
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        //when & then
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                // 다른 트랜잭션이 결제에 비관적 락을 잡은 상태를 유지한다.
+                paymentRepository.findWithLockByOrderId(orderId).orElseThrow();
+
+                Future<?> cancelFuture = executor.submit(() -> paymentService.cancelPayment(userId, orderId));
+                assertThatThrownBy(() -> cancelFuture.get(10, TimeUnit.SECONDS))
+                        .isInstanceOf(ExecutionException.class)
+                        .cause()
+                        .isInstanceOf(CannotAcquireLockException.class);
+            });
+        } finally {
+            executor.shutdownNow();
+        }
+
+        Payment result = paymentRepository.findById(paymentId).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PENDING);
     }
 
     @Test
@@ -127,8 +166,6 @@ class PaymentServiceConcurrencyTest {
                     startLatch.await();
                     paymentService.cancelPayment(userId, orderId);
                     successCount.incrementAndGet();
-                } catch (ObjectOptimisticLockingFailureException e) {
-                    failCount.incrementAndGet();
                 } catch (BusinessException e) {
                     if (e.getErrorCode() == ErrorCode.PAYMENT_CANCEL_PROHIBITED) {
                         failCount.incrementAndGet();
@@ -157,14 +194,5 @@ class PaymentServiceConcurrencyTest {
 
         Payment result = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
-        assertThat(result.getVersion()).isEqualTo(1);
-    }
-
-    private void runAndWait(ExecutorService executor, Runnable task) {
-        try {
-            executor.submit(task).get(10, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
     }
 }

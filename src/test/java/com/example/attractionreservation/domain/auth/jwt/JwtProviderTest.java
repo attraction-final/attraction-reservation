@@ -130,4 +130,26 @@ class JwtProviderTest {
         assertThatThrownBy(() -> jwtProvider.parseToken(expiredToken))
                 .isInstanceOf(ExpiredJwtException.class);
     }
+
+    @Test
+    @DisplayName("Refresh Token의 만료시간을 설정값에 따라 초 단위로 반환한다.")
+    void getRefreshTokenExpirationSeconds_customExpiration_Success() {
+        // given
+        // 기본값인 7일이 아닌 3일로 설정한다.
+        long threeDaysInMillis = 3L * 24 * 60 * 60 * 1000;
+
+        JwtProvider customProvider = new JwtProvider(
+                SECRET,
+                ACCESS_EXPIRATION,
+                threeDaysInMillis
+        );
+
+        // when
+        long expirationSeconds =
+                customProvider.getRefreshTokenExpirationSeconds();
+
+        // then
+        assertThat(expirationSeconds).isEqualTo(259200L);
+    }
+
 }

@@ -60,4 +60,9 @@ public class JwtProvider {
     public long getAccessTokenExpirationSeconds() {
         return accessTokenExpiration / 1000;
     }
+
+    // Refresh Token의 유효기간을 초 단위로 반환한다.
+    public long getRefreshTokenExpirationSeconds() {
+        return refreshTokenExpiration / 1000;
+    }
 }

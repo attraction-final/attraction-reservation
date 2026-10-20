@@ -32,6 +32,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserRepository userRepository;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
 
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // 로그인과 회원가입은 인증 없이 이용하므로 JWT 검증을 건너뛴다.
+        String path = request.getServletPath();
+        String method = request.getMethod();
+
+        return "POST".equalsIgnoreCase(method)
+                && ("/api/auth/login".equals(path)
+                || "/api/users/signup".equals(path));
+    }
+
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,

@@ -4,6 +4,7 @@ package com.example.attractionreservation.domain.auth.controller;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
+import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.service.AuthService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -24,9 +25,8 @@ import java.time.Duration;
 @RequestMapping("/api/auth")
 public class AuthController {
 
-    private static final long REFRESH_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
-
     private final AuthService authService;
+    private final JwtProvider jwtProvider;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<CreateAuthLoginResponse>> login(
@@ -41,7 +41,7 @@ public class AuthController {
                 .secure(true)
                 .sameSite("Lax")
                 .path("/api/auth")
-                .maxAge(Duration.ofSeconds(REFRESH_TOKEN_MAX_AGE_SECONDS))
+                .maxAge(Duration.ofSeconds(jwtProvider.getRefreshTokenExpirationSeconds()))
                 .build();
 
         // Access Token만 응답 Body에 포함하고, Refresh Token은 Cookie로 전달

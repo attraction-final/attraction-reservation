@@ -20,7 +20,6 @@ public class TicketProductService {
     private final TicketProductRepository ticketProductRepository;
 
     // 티켓 상품 등록
-    // TODO: 추후 관리자 인증 검증 부분 추가 예정
     @Transactional
     public CreateTicketProductResponse createTicketProduct(CreateTicketProductRequest request) {
         TicketProduct ticketProduct = new TicketProduct(
@@ -51,6 +50,7 @@ public class TicketProductService {
         return UpdateTicketProductResponse.from(ticketProduct);
     }
 
+    // 티켓 상품 삭제
     @Transactional
     public void deleteTicketProduct(Long ticketProductId) {
         TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)

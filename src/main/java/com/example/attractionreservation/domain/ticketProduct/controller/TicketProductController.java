@@ -48,8 +48,6 @@ public class TicketProductController {
     ) {
         ticketProductService.deleteTicketProduct(ticketProductId);
         return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 삭제되었습니다.", null));
-        UpdateTicketProductResponse response = ticketProductService.updateTicketProduct(ticketProductId, request);
-        return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 수정되었습니다.", response));
     }
 
     // 티켓 상품 목록 조회 (이름 + 상태 + 종류 + 페이징)

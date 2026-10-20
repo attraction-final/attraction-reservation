@@ -170,4 +170,12 @@ public class AttractionService {
             throw new BusinessException(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS, message);
         }
     }
+
+    // 어트랙션 삭제
+    @Transactional
+    public void deleteAttraction(Long attractionId) {
+        Attraction attraction = findActiveAttraction(attractionId);
+        validateNoUpcomingReservations(attractionId, "삭제"); // BR-ATR-06
+        attraction.delete();
+    }
 }

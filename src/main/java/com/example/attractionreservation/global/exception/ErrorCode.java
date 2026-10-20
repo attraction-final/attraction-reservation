@@ -24,10 +24,14 @@ public enum ErrorCode {
     INVALID_TICKET_PRODUCT_TYPE(HttpStatus.BAD_REQUEST, "티켓 상품의 타입이 올바르지 않습니다."),
     INVALID_TICKET_PRODUCT_STATUS(HttpStatus.BAD_REQUEST, "티켓 상품의 상태값이 올바르지 않습니다."),
 
+    // order
+    ORDER_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 전이입니다."),
+
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),
-    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다."),
+    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 전이입니다."),
     PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 내역을 찾을 수 없습니다."),
+    PAYMENT_INCORRECT_AMOUNT(HttpStatus.BAD_REQUEST, "결제 금액이 결제 원장과 일치하지 않습니다."),
     PAYMENT_CANCEL_PROHIBITED(HttpStatus.CONFLICT, "결제 대기 상태가 아닌 결제는 취소할 수 없습니다.");
 
     private final HttpStatus status;

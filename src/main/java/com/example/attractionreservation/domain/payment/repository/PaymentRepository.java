@@ -12,4 +12,8 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @EntityGraph(attributePaths = {"order.user"})
     Optional<Payment> findWithLockByOrderId(Long orderId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"order"})
+    Optional<Payment> findWithLockByPgId(String pgId);
 }

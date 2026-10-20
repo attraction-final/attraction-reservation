@@ -1,3 +1,16 @@
 spring:
   application:
     name: attraction-reservation
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/attraction_reservation}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false

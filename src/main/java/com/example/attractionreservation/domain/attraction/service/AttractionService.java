@@ -6,8 +6,10 @@ import com.example.attractionreservation.domain.attraction.dto.SearchAttractionC
 import com.example.attractionreservation.domain.attraction.dto.SearchAttractionListResponse;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -15,7 +17,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -46,6 +51,7 @@ public class AttractionService {
         }
     }
 
+
     // 어트랙션 목록 조회
     @Transactional(readOnly = true)
     public SearchAttractionListResponse findAttractionAll(SearchAttractionCondition condition) {
@@ -67,6 +73,32 @@ public class AttractionService {
                 findNextSlotMap(attractionPage.getContent(), reservableFrom, todayEnd);
 
         return SearchAttractionListResponse.of(attractionPage, nextSlotMap);
+    }
+
+    // 예약 마감 = 슬롯 시작 30분 전
+    private static final long RESERVATION_DEADLINE_MINUTES = 30L;
+
+    // 운영중인 어트랙션들의 "오늘 가장 빠른 예약 가능 슬롯"을 어트랙션 ID별로 묶음
+    private Map<Long, ReservableSlotView> findNextSlotMap(List<Attraction> attractions,
+                                                          LocalDateTime reservableFrom,
+                                                          LocalDateTime todayEnd) {
+        List<Long> operatingAttractionIds = attractions.stream()
+                .filter(Attraction::isOperating)
+                .map(Attraction::getId)
+                .toList();
+
+        if (operatingAttractionIds.isEmpty()) {
+            return Map.of();
+        }
+
+        // 슬롯은 시작 시각 순으로 오므로, 같은 어트랙션이면 먼저 나온(가장 빠른) 슬롯을 남긴다.
+        return attractionRepository.findReservableSlots(operatingAttractionIds, reservableFrom, todayEnd)
+                .stream()
+                .collect(Collectors.toMap(
+                        ReservableSlotView::getAttractionId,
+                        Function.identity(),
+                        (earlierSlot, laterSlot) -> earlierSlot
+                ));
     }
 
 }

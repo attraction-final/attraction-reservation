@@ -1,11 +1,11 @@
-package com.example.attractionreservation.user.service;
+package com.example.attractionreservation.domain.user.service;
 
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
-import com.example.attractionreservation.user.dto.UserSignupRequest;
-import com.example.attractionreservation.user.dto.UserSignupResponse;
-import com.example.attractionreservation.user.entity.User;
-import com.example.attractionreservation.user.repository.UserRepository;
+import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
+import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
+import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,7 +19,7 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
 
     @Transactional
-    public UserSignupResponse signup(UserSignupRequest request) {
+    public CreateUserResponse signup(CreateUserRequest request) {
 
         if (userRepository.existsByEmail(request.email())) {
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
@@ -27,15 +27,15 @@ public class UserService {
 
         String encodedPassword = passwordEncoder.encode(request.password());
 
-        User user = User.createLocalUser(
-                request.email(),
-                encodedPassword,
-                request.nickname()
-        );
+        User user = User.builder()
+                .email(request.email())
+                .password(encodedPassword)
+                .nickname(request.nickname())
+                .build();
 
         User savedUser = userRepository.save(user);
 
-        return new UserSignupResponse(
+        return new CreateUserResponse(
                 savedUser.getId(),
                 savedUser.getEmail(),
                 savedUser.getNickname()

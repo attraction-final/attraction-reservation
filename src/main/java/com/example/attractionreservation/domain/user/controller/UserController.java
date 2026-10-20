@@ -1,9 +1,9 @@
-package com.example.attractionreservation.user.controller;
+package com.example.attractionreservation.domain.user.controller;
 
 import com.example.attractionreservation.global.response.ApiResponse;
-import com.example.attractionreservation.user.dto.UserSignupRequest;
-import com.example.attractionreservation.user.dto.UserSignupResponse;
-import com.example.attractionreservation.user.service.UserService;
+import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
+import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
+import com.example.attractionreservation.domain.user.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,10 +21,10 @@ public class UserController {
     private final UserService userService;
 
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<UserSignupResponse>> signup(
-            @Valid @RequestBody UserSignupRequest request
+    public ResponseEntity<ApiResponse<CreateUserResponse>> signup(
+            @Valid @RequestBody CreateUserRequest request
     ) {
-        UserSignupResponse response = userService.signup(request);
+        CreateUserResponse response = userService.signup(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)

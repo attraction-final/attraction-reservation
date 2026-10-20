@@ -1,12 +1,12 @@
 package com.example.attractionreservation;
 
-import com.example.attractionreservation.user.service.UserService;
-import com.example.attractionreservation.user.dto.UserSignupRequest;
-import com.example.attractionreservation.user.dto.UserSignupResponse;
-import com.example.attractionreservation.user.entity.User;
-import com.example.attractionreservation.user.entity.UserRole;
-import com.example.attractionreservation.user.entity.UserStatus;
-import com.example.attractionreservation.user.repository.UserRepository;
+import com.example.attractionreservation.domain.user.service.UserService;
+import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
+import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
+import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.entity.Role;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,14 +33,14 @@ class UserServiceIntegrationTest {
     @Test
     void signup_savesUserToDatabase() {
         // given
-        UserSignupRequest request = new UserSignupRequest(
+        CreateUserRequest request = new CreateUserRequest(
                 "integration@gmail.com",
                 "Password123!",
                 "홍길동"
         );
 
         // when
-        UserSignupResponse response = userService.signup(request);
+        CreateUserResponse response = userService.signup(request);
 
         userRepository.flush();
 
@@ -63,7 +63,7 @@ class UserServiceIntegrationTest {
         )).isTrue();
 
         assertThat(savedUser.getRole())
-                .isEqualTo(UserRole.USER);
+                .isEqualTo(Role.USER);
 
         assertThat(savedUser.getStatus())
                 .isEqualTo(UserStatus.ACTIVE);

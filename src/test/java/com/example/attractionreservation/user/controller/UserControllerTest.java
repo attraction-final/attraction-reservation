@@ -1,9 +1,10 @@
 package com.example.attractionreservation.user.controller;
 
+import com.example.attractionreservation.domain.user.controller.UserController;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
-import com.example.attractionreservation.user.dto.UserSignupResponse;
-import com.example.attractionreservation.user.service.UserService;
+import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
+import com.example.attractionreservation.domain.user.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -29,7 +30,7 @@ class UserControllerTest {
     @Test
     void signup_success() throws Exception {
         // given
-        UserSignupResponse response = new UserSignupResponse(
+        CreateUserResponse response = new CreateUserResponse(
                 1L,
                 "test@gmail.com",
                 "홍길동"

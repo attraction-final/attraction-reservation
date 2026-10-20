@@ -1,9 +1,10 @@
 package com.example.attractionreservation.user.service;
 
-import com.example.attractionreservation.user.dto.UserSignupRequest;
-import com.example.attractionreservation.user.dto.UserSignupResponse;
-import com.example.attractionreservation.user.entity.User;
-import com.example.attractionreservation.user.repository.UserRepository;
+import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
+import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
+import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
+import com.example.attractionreservation.domain.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,7 +39,7 @@ class UserServiceTest {
     @Test
     void signup_success() {
         // given
-        UserSignupRequest request = new UserSignupRequest(
+        CreateUserRequest request = new CreateUserRequest(
                 "test@gmail.com",
                 "Password123!",
                 "홍길동"
@@ -51,7 +52,7 @@ class UserServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         // when
-        UserSignupResponse response = userService.signup(request);
+        CreateUserResponse response = userService.signup(request);
 
         // then
         // then
@@ -73,7 +74,7 @@ class UserServiceTest {
     @Test
     void signup_duplicateEmail_throwsException() {
         // given
-        UserSignupRequest request = new UserSignupRequest(
+        CreateUserRequest request = new CreateUserRequest(
                 "test@gmail.com",
                 "Password123!",
                 "홍길동"

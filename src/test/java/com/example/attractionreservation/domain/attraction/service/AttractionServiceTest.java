@@ -1,14 +1,10 @@
 package com.example.attractionreservation.domain.attraction.service;
 
-import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
-import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
-import com.example.attractionreservation.domain.attraction.dto.SearchAttractionCondition;
-import com.example.attractionreservation.domain.attraction.dto.SearchAttractionListResponse;
+import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
-import com.example.attractionreservation.domain.attraction.service.AttractionService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
@@ -41,7 +37,6 @@ class AttractionServiceTest {
     private AttractionService attractionService;
 
     // 테스트 데이터 helper
-
     private Attraction createRollerCoaster() {
         return Attraction.create("롤러코스터", "빠른 속도의 코스터", "A구역", 10);
     }
@@ -82,7 +77,6 @@ class AttractionServiceTest {
     }
 
     // 등록
-
     @Test
     @DisplayName("이름이 중복되지 않으면 운영중 상태로 등록된다")
     void createAttraction_UniqueName_Success() {
@@ -115,7 +109,6 @@ class AttractionServiceTest {
     }
 
     // 목록 조회
-
     @Test
     @DisplayName("운영중인 어트랙션이 없으면 슬롯을 조회하지 않고 nextSlot은 null이다")
     void findAttractionAll_NoOperatingAttraction_SkipsSlotQuery() {
@@ -175,7 +168,6 @@ class AttractionServiceTest {
     }
 
     // 상세 조회
-
     @Test
     @DisplayName("존재하지 않는 어트랙션을 조회하면 ATTRACTION_NOT_FOUND 예외가 발생한다")
     void findAttractionById_NotExists_ThrowsException() {
@@ -187,5 +179,84 @@ class AttractionServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
+    }
+
+    // 수정
+    @Test
+    @DisplayName("보낸 값만 수정되고, 보내지 않은(null) 값은 그대로 유지된다")
+    void updateAttraction_PartialRequest_UpdatesOnlyGivenFields() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull("슈퍼 롤러코스터", 1L)).willReturn(false);
+
+        // 이름과 소요 시간만 보냄 (설명, 위치는 null = "안 바꿀래요")
+        UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, 12);
+
+        // when
+        SearchAttractionResponse response = attractionService.updateAttraction(1L, request);
+
+        // then
+        assertThat(response.name()).isEqualTo("슈퍼 롤러코스터");      // 바뀜
+        assertThat(response.durationMinutes()).isEqualTo(12);          // 바뀜
+        assertThat(response.description()).isEqualTo("빠른 속도의 코스터"); // 그대로
+        assertThat(response.location()).isEqualTo("A구역");            // 그대로
+        verify(attractionRepository).flush();                          // DB 반영을 호출했는지
+    }
+
+    @Test
+    @DisplayName("다른 어트랙션이 쓰는 이름으로 수정하면 ATTRACTION_NAME_DUPLICATED 예외가 발생하고 값은 바뀌지 않는다")
+    void updateAttraction_DuplicatedName_ThrowsException() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull("회전목마", 1L)).willReturn(true);
+
+        UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttraction(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+
+        assertThat(attraction.getName()).isEqualTo("롤러코스터");  // 이름이 바뀌지 않았는지
+        verify(attractionRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("현재와 같은 이름을 보내면 중복 검사를 하지 않고 수정된다")
+    void updateAttraction_SameName_SkipsDuplicateCheck() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+
+        // 이름은 지금과 똑같이, 설명만 바꿈
+        UpdateAttractionRequest request = new UpdateAttractionRequest("롤러코스터", "더 빨라진 코스터", null, null);
+
+        // when
+        SearchAttractionResponse response = attractionService.updateAttraction(1L, request);
+
+        // then
+        verify(attractionRepository, never()).existsByNameAndIdNotAndDeletedAtIsNull(any(), any());
+        assertThat(response.name()).isEqualTo("롤러코스터");
+        assertThat(response.description()).isEqualTo("더 빨라진 코스터");
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 어트랙션을 수정하면 ATTRACTION_NOT_FOUND 예외가 발생한다")
+    void updateAttraction_NotExists_ThrowsException() {
+        // given
+        given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+        UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, null);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttraction(99L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
+
+        verify(attractionRepository, never()).existsByNameAndIdNotAndDeletedAtIsNull(any(), any());
+        verify(attractionRepository, never()).flush();
     }
 }

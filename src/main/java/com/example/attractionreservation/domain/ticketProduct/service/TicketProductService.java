@@ -4,6 +4,8 @@ import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketPr
 import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductResponse;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,5 +29,13 @@ public class TicketProductService {
         TicketProduct savedTicketProduct = ticketProductRepository.save(ticketProduct);
 
         return CreateTicketProductResponse.from(savedTicketProduct);
+    }
+
+    @Transactional
+    public void delete(Long ticketProductId) {
+        TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        ticketProduct.delete();
     }
 }

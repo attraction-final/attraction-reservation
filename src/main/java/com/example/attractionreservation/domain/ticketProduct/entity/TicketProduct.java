@@ -72,4 +72,8 @@ public class TicketProduct extends BaseTimeEntity {
         this.stock = stock;
         this.status = status;
     }
+
+    public void delete() {
+        this.status = TicketProductStatus.DELETED;
+    }
 }

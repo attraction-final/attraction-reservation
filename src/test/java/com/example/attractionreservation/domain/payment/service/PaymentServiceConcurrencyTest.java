@@ -2,6 +2,8 @@ package com.example.attractionreservation.domain.payment.service;
 
 import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
+import com.example.attractionreservation.domain.payment.dto.PgPaymentResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
@@ -19,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -52,6 +55,7 @@ class PaymentServiceConcurrencyTest {
     private Long userId;
     private Long orderId;
     private Long paymentId;
+    private String pgId;
 
     @BeforeEach
     void setUp() {
@@ -72,6 +76,7 @@ class PaymentServiceConcurrencyTest {
             userId = user.getId();
             orderId = order.getId();
             paymentId = payment.getId();
+            pgId = payment.getPgId();
         });
     }
 
@@ -104,7 +109,7 @@ class PaymentServiceConcurrencyTest {
                 assertThatThrownBy(() -> cancelFuture.get(1, TimeUnit.SECONDS))
                         .isInstanceOf(TimeoutException.class);
 
-                payment.markAsPaid();
+                payment.markAsPaid(Instant.now());
             });
 
             //then
@@ -194,5 +199,81 @@ class PaymentServiceConcurrencyTest {
 
         Payment result = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("다른 승인 트랜잭션이 락을 잡고 있으면 승인은 대기하고, 커밋 후 이미 결제 완료된 결제로 보고 예외 없이 건너뛴다.")
+    void approvePayment_waitForOtherApproval_Skip() throws Exception {
+        //given
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Instant firstApprovedAt = Instant.parse("2026-10-20T01:00:00Z");
+        Instant secondApprovedAt = Instant.parse("2026-10-20T01:00:05Z");
+        List<Future<?>> approveFutures = new ArrayList<>();
+
+        //when
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                // 먼저 도착한 승인(예: 승인 API)이 결제에 비관적 락을 잡고 처리한다.
+                Payment payment = paymentRepository.findWithLockByPgId(pgId).orElseThrow();
+
+                // 그 사이 도착한 승인(예: 웹훅)은 락 해제까지 대기한다.
+                Future<?> approveFuture = executor.submit(() ->
+                        paymentService.approvePayment(new PgPaymentResult(pgId, 10000, secondApprovedAt)));
+                approveFutures.add(approveFuture);
+                assertThatThrownBy(() -> approveFuture.get(1, TimeUnit.SECONDS))
+                        .isInstanceOf(TimeoutException.class);
+
+                payment.markAsPaid(firstApprovedAt);
+                payment.getOrder().markAsPaid();
+            });
+
+            //then
+            approveFutures.get(0).get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        Payment result = paymentRepository.findById(paymentId).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(result.getPaidAt()).isEqualTo(firstApprovedAt);
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("같은 결제에 승인 요청이 동시에 들어와도 모두 예외 없이 끝나고 결제와 주문은 결제 완료 상태가 된다.")
+    void approvePayment_concurrentRequests_AllSuccess() throws Exception {
+        //given
+        int threadCount = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+        PgPaymentResult result = new PgPaymentResult(pgId, 10000, Instant.parse("2026-10-20T01:00:00Z"));
+
+        //when
+        for (int i = 0; i < threadCount; i++) {
+            futures.add(executor.submit(() -> {
+                startLatch.await();
+                paymentService.approvePayment(result);
+                return null;
+            }));
+        }
+        startLatch.countDown();
+        try {
+            for (Future<?> future : futures) {
+                future.get(10, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        //then
+        Payment payment = paymentRepository.findById(paymentId).orElseThrow();
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    private OrderStatus findOrderStatus() {
+        return transactionTemplate.execute(status -> entityManager.find(Order.class, orderId).getStatus());
     }
 }

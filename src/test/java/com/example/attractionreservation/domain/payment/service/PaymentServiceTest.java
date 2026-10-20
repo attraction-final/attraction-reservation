@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.payment.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
+import com.example.attractionreservation.domain.payment.dto.PgPaymentResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
@@ -18,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,6 +35,7 @@ class PaymentServiceTest {
 
     private static final Long USER_ID = 1L;
     private static final Long ORDER_ID = 10L;
+    private static final Instant APPROVED_AT = Instant.parse("2026-10-20T01:00:00Z");
 
     @Mock
     private PaymentRepository paymentRepository;
@@ -117,6 +121,7 @@ class PaymentServiceTest {
 
         //then
         assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+        assertEquals(OrderStatus.CANCELLED, payment.getOrder().getStatus());
     }
 
     @Test
@@ -159,6 +164,90 @@ class PaymentServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_CANCEL_PROHIBITED.getMessage());
         assertEquals(status, payment.getStatus());
+        assertEquals(OrderStatus.PENDING, payment.getOrder().getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태의 결제를 승인하면 결제와 주문이 결제 완료 상태가 된다.")
+    void approvePayment_pending_Success() {
+        //given
+        Payment payment = createPayment(USER_ID);
+        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
+
+        //when
+        paymentService.approvePayment(createPgPaymentResult(payment, payment.getAmount()));
+
+        //then
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+        assertEquals(APPROVED_AT, payment.getPaidAt());
+        assertEquals(OrderStatus.PAID, payment.getOrder().getStatus());
+    }
+
+    @Test
+    @DisplayName("이미 결제 완료된 결제를 다시 승인하면 예외 없이 기존 상태를 유지한다.")
+    void approvePayment_alreadyPaid_Skip() {
+        //given
+        Payment payment = createPayment(USER_ID);
+        payment.markAsPaid(APPROVED_AT);
+        payment.getOrder().markAsPaid();
+        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
+        PgPaymentResult duplicated = new PgPaymentResult(payment.getPgId(), payment.getAmount(), APPROVED_AT.plusSeconds(5));
+
+        //when
+        paymentService.approvePayment(duplicated);
+
+        //then
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+        assertEquals(APPROVED_AT, payment.getPaidAt());
+        assertEquals(OrderStatus.PAID, payment.getOrder().getStatus());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 결제는 승인할 수 없다.")
+    void approvePayment_notFound_Fail() {
+        //given
+        given(paymentRepository.findWithLockByPgId("unknown-pg-id")).willReturn(Optional.empty());
+        PgPaymentResult result = new PgPaymentResult("unknown-pg-id", 10000, APPROVED_AT);
+
+        //when & then
+        assertThatThrownBy(() -> paymentService.approvePayment(result))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
+    }
+
+    @Test
+    @DisplayName("PG 승인 금액이 결제 원장 금액과 다르면 승인할 수 없다.")
+    void approvePayment_incorrectAmount_Fail() {
+        //given
+        Payment payment = createPayment(USER_ID);
+        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
+
+        //when & then
+        assertThatThrownBy(() -> paymentService.approvePayment(createPgPaymentResult(payment, payment.getAmount() - 1)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+        assertEquals(OrderStatus.PENDING, payment.getOrder().getStatus());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PENDING", "PAID"})
+    @DisplayName("결제 대기·결제 완료가 아닌 결제는 승인할 수 없다.")
+    void approvePayment_notPendingOrPaid_Fail(PaymentStatus status) {
+        //given
+        Payment payment = createPaymentWithStatus(USER_ID, status);
+        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
+
+        //when & then
+        assertThatThrownBy(() -> paymentService.approvePayment(createPgPaymentResult(payment, payment.getAmount())))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(status, payment.getStatus());
+        assertEquals(OrderStatus.PENDING, payment.getOrder().getStatus());
+    }
+
+    private PgPaymentResult createPgPaymentResult(Payment payment, int amount) {
+        return new PgPaymentResult(payment.getPgId(), amount, APPROVED_AT);
     }
 
     private Payment createPayment(Long userId) {
@@ -178,13 +267,13 @@ class PaymentServiceTest {
         switch (status) {
             case PENDING -> {
             }
-            case PAID -> payment.markAsPaid();
+            case PAID -> payment.markAsPaid(APPROVED_AT);
             case PARTIALLY_REFUNDED -> {
-                payment.markAsPaid();
+                payment.markAsPaid(APPROVED_AT);
                 payment.markAsPartiallyRefunded();
             }
             case REFUNDED -> {
-                payment.markAsPaid();
+                payment.markAsPaid(APPROVED_AT);
                 payment.markAsRefunded();
             }
             case FAILED -> payment.markAsFailed();

@@ -1,9 +1,6 @@
 package com.example.attractionreservation.domain.attraction.service;
 
-import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
-import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
-import com.example.attractionreservation.domain.attraction.dto.SearchAttractionCondition;
-import com.example.attractionreservation.domain.attraction.dto.SearchAttractionListResponse;
+import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
@@ -99,6 +96,18 @@ public class AttractionService {
                         Function.identity(),
                         (earlierSlot, laterSlot) -> earlierSlot
                 ));
+    }
+
+    // 어트랙션 상세 조회
+    @Transactional(readOnly = true)
+    public SearchAttractionResponse findAttractionById(Long attractionId) {
+        Attraction attraction = findActiveAttraction(attractionId);
+        return SearchAttractionResponse.from(attraction);
+    }
+
+    private Attraction findActiveAttraction(Long attractionId) {
+        return attractionRepository.findByIdAndDeletedAtIsNull(attractionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND));
     }
 
 }

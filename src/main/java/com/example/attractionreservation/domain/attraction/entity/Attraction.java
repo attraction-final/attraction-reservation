@@ -56,4 +56,20 @@ public class Attraction extends BaseTimeEntity {
     public boolean isOperating() {
         return this.operationStatus == OperationStatus.OPERATING;
     }
+
+    // Attraction Service 수정에 필요
+    public void update(String name, String description, String location, Integer durationMinutes) {
+        if (name != null) {
+            this.name = name;
+        }
+        if (description != null) {
+            this.description = description;
+        }
+        if (location != null) {
+            this.location = location;
+        }
+        if (durationMinutes != null) {
+            this.durationMinutes = durationMinutes;
+        }
+    }
 }

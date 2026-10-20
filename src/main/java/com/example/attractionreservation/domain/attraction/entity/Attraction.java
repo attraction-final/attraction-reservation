@@ -38,7 +38,7 @@ public class Attraction extends BaseTimeEntity {
     private Instant deletedAt; // 어트랙션이 삭제 처리된 시각을 저장
 
 
-    // Attraction Service에 필요
+    // Attraction Service 등록에 필요
     private Attraction(String name, String description, String location, Integer durationMinutes) {
         this.name = name;
         this.description = description;
@@ -50,5 +50,10 @@ public class Attraction extends BaseTimeEntity {
     public static Attraction create(String name, String description, String location,
                                     Integer durationMinutes) {
         return new Attraction(name, description, location, durationMinutes);
+    }
+
+    // Attraction Service 목록조회에 필요
+    public boolean isOperating() {
+        return this.operationStatus == OperationStatus.OPERATING;
     }
 }

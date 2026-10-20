@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.attraction.dto;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
+import com.example.attractionreservation.global.util.KstTime;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.time.LocalDateTime;

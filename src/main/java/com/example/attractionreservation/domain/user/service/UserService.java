@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
+import java.sql.SQLException;
 
 @Service
 @RequiredArgsConstructor
@@ -33,12 +35,39 @@ public class UserService {
                 .nickname(request.nickname())
                 .build();
 
-        User savedUser = userRepository.save(user);
+        User savedUser;
+
+        try {
+            User savedUserResult = userRepository.saveAndFlush(user);
+            savedUser = savedUserResult;
+        } catch (DataIntegrityViolationException exception) {
+            if (isDuplicateEmailViolation(exception)) {
+                throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
+            }
+            throw exception;
+        }
 
         return new CreateUserResponse(
                 savedUser.getId(),
                 savedUser.getEmail(),
                 savedUser.getNickname()
         );
+    }
+
+    private boolean isDuplicateEmailViolation(DataIntegrityViolationException exception) {
+        Throwable cause = exception;
+
+        while (cause != null) {
+            if (cause instanceof SQLException sqlException
+                    && sqlException.getErrorCode() == 1062
+                    && sqlException.getMessage() != null
+                    && sqlException.getMessage().contains("email")) {
+                return true;
+            }
+
+            cause = cause.getCause();
+        }
+
+        return false;
     }
 }

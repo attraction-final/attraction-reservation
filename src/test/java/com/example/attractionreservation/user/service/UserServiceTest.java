@@ -21,6 +21,9 @@ import static org.mockito.Mockito.*;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 
+import org.springframework.dao.DataIntegrityViolationException;
+import java.sql.SQLException;
+
 class UserServiceTest {
 
     @Mock
@@ -48,7 +51,7 @@ class UserServiceTest {
         when(userRepository.existsByEmail(request.email()))
                 .thenReturn(false);
 
-        when(userRepository.save(any(User.class)))
+        when(userRepository.saveAndFlush(any(User.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         // when
@@ -62,7 +65,7 @@ class UserServiceTest {
         verify(userRepository).existsByEmail("test@gmail.com");
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
 
         User savedUser = userCaptor.getValue();
 
@@ -93,6 +96,72 @@ class UserServiceTest {
                 });
 
         verify(userRepository).existsByEmail("test@gmail.com");
-        verify(userRepository, never()).save(any(User.class));
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    @Test
+    void signup_databaseDuplicateEmail_throwsBusinessException() {
+        // given
+        CreateUserRequest request = new CreateUserRequest(
+                "duplicate@gmail.com",
+                "Password123!",
+                "홍길동"
+        );
+
+        SQLException sqlException = new SQLException(
+                "Duplicate entry 'duplicate@gmail.com' for key 'users.email'",
+                "23000",
+                1062
+        );
+
+        DataIntegrityViolationException exception =
+                new DataIntegrityViolationException("Duplicate email", sqlException);
+
+        when(userRepository.existsByEmail(request.email()))
+                .thenReturn(false);
+
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenThrow(exception);
+
+        // when & then
+        assertThatThrownBy(() -> userService.signup(request))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(thrown -> {
+                    BusinessException businessException = (BusinessException) thrown;
+                    assertThat(businessException.getErrorCode())
+                            .isEqualTo(ErrorCode.DUPLICATE_EMAIL);
+                });
+    }
+
+    @Test
+    void signup_otherDatabaseViolation_rethrowsOriginalException() {
+        // given
+        CreateUserRequest request = new CreateUserRequest(
+                "test@gmail.com",
+                "Password123!",
+                "홍길동"
+        );
+
+        SQLException sqlException = new SQLException(
+                "Cannot add or update a child row: a foreign key constraint fails",
+                "23000",
+                1452
+        );
+
+        DataIntegrityViolationException exception =
+                new DataIntegrityViolationException(
+                        "Foreign key violation",
+                        sqlException
+                );
+
+        when(userRepository.existsByEmail(request.email()))
+                .thenReturn(false);
+
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenThrow(exception);
+
+        // when & then
+        assertThatThrownBy(() -> userService.signup(request))
+                .isSameAs(exception);
     }
 }

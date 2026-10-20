@@ -4,6 +4,7 @@ import com.example.attractionreservation.global.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -83,6 +84,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleUnsupportedMediaType() {
         return ResponseEntity.status(ErrorCode.UNSUPPORTED_MEDIA_TYPE.getStatus())
                 .body(ApiResponse.error(ErrorCode.UNSUPPORTED_MEDIA_TYPE));
+    }
+
+    // 동시에 같은 데이터를 수정해 낙관적 락 충돌이 발생한 경우
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLockingFailure() {
+        return ResponseEntity.status(ErrorCode.CONCURRENT_UPDATE_CONFLICT.getStatus())
+                .body(ApiResponse.error(ErrorCode.CONCURRENT_UPDATE_CONFLICT));
     }
 
     // 예상하지 못한 DB 제약 조건 위반이 발생한 경우

@@ -28,7 +28,7 @@ public class PaymentService {
 
     @Transactional
     public void cancelPayment(Long userId, Long orderId) {
-        Payment found = paymentRepository.findByOrderId(orderId)
+        Payment found = paymentRepository.findWithLockByOrderId(orderId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
         if (!found.getOrder().getUser().getId().equals(userId)) {

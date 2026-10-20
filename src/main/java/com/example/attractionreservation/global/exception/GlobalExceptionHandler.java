@@ -3,8 +3,8 @@ package com.example.attractionreservation.global.exception;
 import com.example.attractionreservation.global.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.ResponseEntity;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -86,9 +86,9 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ErrorCode.UNSUPPORTED_MEDIA_TYPE));
     }
 
-    // 동시에 같은 데이터를 수정해 낙관적 락 충돌이 발생한 경우
-    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-    public ResponseEntity<ApiResponse<Void>> handleOptimisticLockingFailure() {
+    // 동시에 같은 데이터를 수정해 비관적 락 충돌이 발생한 경우
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePessimisticLockFailure() {
         return ResponseEntity.status(ErrorCode.CONCURRENT_UPDATE_CONFLICT.getStatus())
                 .body(ApiResponse.error(ErrorCode.CONCURRENT_UPDATE_CONFLICT));
     }

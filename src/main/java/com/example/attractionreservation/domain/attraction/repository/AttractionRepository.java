@@ -84,5 +84,8 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long> {
 
     // 삭제되지 않은 어트랙션만 단건 조회
     Optional<Attraction> findByIdAndDeletedAtIsNull(Long id);
+
+    // 수정 시 이름 중복 확인 (자기 자신은 제외)
+    boolean existsByNameAndIdNotAndDeletedAtIsNull(String name, Long id);
 }
 

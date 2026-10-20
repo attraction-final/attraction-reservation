@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface AttractionRepository extends JpaRepository<Attraction, Long> {
 
@@ -80,5 +81,8 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long> {
     List<ReservableSlotView> findReservableSlots(@Param("attractionIds") List<Long> attractionIds,
                                                  @Param("reservableFrom") LocalDateTime reservableFrom,
                                                  @Param("todayEnd") LocalDateTime todayEnd);
+
+    // 삭제되지 않은 어트랙션만 단건 조회
+    Optional<Attraction> findByIdAndDeletedAtIsNull(Long id);
 }
-}
+

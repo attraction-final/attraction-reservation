@@ -48,4 +48,11 @@ public class AdminAttractionController {
                 attractionService.updateAttractionStatus(attractionId, request);
         return ResponseEntity.ok(ApiResponse.ok("어트랙션 운영 상태 변경에 성공했습니다.", response));
     }
+
+    // 어트랙션 삭제
+    @DeleteMapping("/{attractionId}")
+    public ResponseEntity<ApiResponse<Void>> deleteAttraction(@PathVariable Long attractionId) {
+        attractionService.deleteAttraction(attractionId);
+        return ResponseEntity.ok(ApiResponse.<Void>ok("어트랙션 삭제에 성공했습니다.", null));
+    }
 }

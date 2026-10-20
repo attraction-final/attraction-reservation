@@ -74,7 +74,11 @@ class TicketProductSearchControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.message")
                         .value("티켓 상품 목록 조회에 성공했습니다."))
-                .andExpect(jsonPath("$.data.content").isEmpty());
+                .andExpect(jsonPath("$.data.content").isEmpty())
+                .andExpect(jsonPath("$.data.number").value(0))
+                .andExpect(jsonPath("$.data.size").value(10))
+                .andExpect(jsonPath("$.data.totalElements").value(0))
+                .andExpect(jsonPath("$.data.totalPages").value(0));
 
         ArgumentCaptor<SearchTicketProductCondition> conditionCaptor =
                 ArgumentCaptor.forClass(SearchTicketProductCondition.class);
@@ -92,8 +96,12 @@ class TicketProductSearchControllerTest {
         Pageable pageable = pageableCaptor.getValue();
         assertThat(pageable.getPageNumber()).isZero();
         assertThat(pageable.getPageSize()).isEqualTo(10);
-        assertThat(pageable.getSort())
-                .isEqualTo(Sort.by(Sort.Direction.DESC, "type"));
+        assertThat(pageable.getSort()).isEqualTo(
+                Sort.by(
+                        Sort.Order.desc("type"),
+                        Sort.Order.desc("id")
+                )
+        );
     }
 
     @Test
@@ -144,7 +152,11 @@ class TicketProductSearchControllerTest {
                 .andExpect(jsonPath("$.data.content[0].description")
                         .value("테스트 상품 설명"))
                 .andExpect(jsonPath("$.data.content[0].status")
-                        .value("ON_SALE"));
+                        .value("ON_SALE"))
+                .andExpect(jsonPath("$.data.number").value(1))
+                .andExpect(jsonPath("$.data.size").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(3))
+                .andExpect(jsonPath("$.data.totalPages").value(2));
 
         ArgumentCaptor<SearchTicketProductCondition> conditionCaptor =
                 ArgumentCaptor.forClass(SearchTicketProductCondition.class);
@@ -167,8 +179,12 @@ class TicketProductSearchControllerTest {
         Pageable pageable = pageableCaptor.getValue();
         assertThat(pageable.getPageNumber()).isEqualTo(1);
         assertThat(pageable.getPageSize()).isEqualTo(2);
-        assertThat(pageable.getSort())
-                .isEqualTo(Sort.by(Sort.Direction.ASC, "name"));
+        assertThat(pageable.getSort()).isEqualTo(
+                Sort.by(
+                        Sort.Order.asc("name"),
+                        Sort.Order.desc("id")
+                )
+        );
     }
 
     @Test
@@ -195,5 +211,36 @@ class TicketProductSearchControllerTest {
                 .andExpect(jsonPath("$.success").value(false));
 
         verifyNoInteractions(ticketProductService);
+    }
+
+    @Test
+    @DisplayName("ID 정렬을 직접 지정하면 해당 정렬을 유지한다")
+    void getTicketProductAll_IdSort_PreservesRequestedSort() throws Exception {
+        // given
+        when(ticketProductService.getTicketProductAll(
+                any(SearchTicketProductCondition.class),
+                any(Pageable.class)
+        )).thenAnswer(invocation ->
+                Page.<SearchTicketProductResponse>empty(
+                        invocation.getArgument(1, Pageable.class)
+                )
+        );
+
+        // when & then
+        mockMvc.perform(get("/api/ticket-products")
+                        .param("sort", "id,asc")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(ticketProductService).getTicketProductAll(
+                any(SearchTicketProductCondition.class),
+                pageableCaptor.capture()
+        );
+
+        assertThat(pageableCaptor.getValue().getSort())
+                .isEqualTo(Sort.by(Sort.Direction.ASC, "id"));
     }
 }

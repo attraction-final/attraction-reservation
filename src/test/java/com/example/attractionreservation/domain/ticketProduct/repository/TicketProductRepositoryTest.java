@@ -247,4 +247,38 @@ class TicketProductRepositoryTest {
                 status
         );
     }
+
+    @Test
+    @DisplayName("마지막 페이지는 남은 상품 1개를 반환하고 다음 페이지가 없다")
+    void findAllByCondition_LastPage_ReturnsRemainingProduct() {
+        // given
+        Pageable pageable = PageRequest.of(
+                1,
+                2,
+                Sort.by(Sort.Direction.ASC, "id")
+        );
+
+        // when
+        Page<TicketProduct> result =
+                ticketProductRepository.findAllByCondition(
+                        null, null, null, pageable
+                );
+
+        // then
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().get(0).getName())
+                .isEqualTo("에버랜드 오후권");
+        assertThat(result.getContent())
+                .noneMatch(product ->
+                        product.getStatus() == TicketProductStatus.DELETED
+                );
+
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(2);
+        assertThat(result.getTotalElements()).isEqualTo(3);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+        assertThat(result.isLast()).isTrue();
+        assertThat(result.hasNext()).isFalse();
+        assertThat(result.hasPrevious()).isTrue();
+    }
 }

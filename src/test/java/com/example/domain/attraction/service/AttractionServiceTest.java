@@ -16,6 +16,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,5 +70,18 @@ class AttractionServiceTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
         verify(attractionRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 어트랙션을 조회하면 ATTRACTION_NOT_FOUND 예외가 발생한다")
+    void findAttractionById_NotExists_ThrowsException() {
+        // given
+        given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.findAttractionById(99L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
     }
 }

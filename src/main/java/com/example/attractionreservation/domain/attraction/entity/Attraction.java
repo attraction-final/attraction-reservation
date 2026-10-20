@@ -72,4 +72,9 @@ public class Attraction extends BaseTimeEntity {
             this.durationMinutes = durationMinutes;
         }
     }
+
+    // Attraction Service 운영 상태 변경에 필요
+    public void changeOperationStatus(OperationStatus operationStatus) {
+        this.operationStatus = operationStatus;
+    }
 }

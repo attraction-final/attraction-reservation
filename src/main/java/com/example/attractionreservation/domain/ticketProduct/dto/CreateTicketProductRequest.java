@@ -9,8 +9,8 @@ import jakarta.validation.constraints.Size;
 
 public record CreateTicketProductRequest(
 
-        @NotBlank(message = "이름을 입력해주세요.")
-        @Size(max = 80, message = "이름은 80자를 넘을 수 없습니다.")
+        @NotBlank(message = "상품명을 입력해주세요.")
+        @Size(max = 80, message = "상품명은 80자를 넘을 수 없습니다.")
         String name,
 
         @NotNull(message = "티켓 종류를 입력해주세요.")

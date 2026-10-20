@@ -2,10 +2,15 @@ package com.example.attractionreservation.domain.ticketProduct.service;
 
 import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductRequest;
 import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductResponse;
+import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductRequest;
+import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductResponse;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +34,24 @@ public class TicketProductService {
         TicketProduct savedTicketProduct = ticketProductRepository.save(ticketProduct);
 
         return CreateTicketProductResponse.from(savedTicketProduct);
+    }
+
+    // 티켓 상품 수정
+    // TODO: 추후 관리자 인증 검증 부분 추가 예정
+    @Transactional
+    public UpdateTicketProductResponse update(Long ticketProductId, @Valid UpdateTicketProductRequest request) {
+        TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        ticketProduct.updateTicketProduct(
+                request.name(),
+                request.price(),
+                request.description(),
+                request.stock(),
+                request.saleStatus()
+        );
+
+        return UpdateTicketProductResponse.from(ticketProduct);
     }
 
     @Transactional

@@ -70,7 +70,7 @@ class TicketProductServiceTest {
 
         // when
         UpdateTicketProductResponse response =
-                ticketProductService.update(ticketProductId, request);
+                ticketProductService.updateTicketProduct(ticketProductId, request);
 
         // then
         assertThat(response.name()).isEqualTo("프리미엄 자유이용권");
@@ -110,7 +110,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -145,7 +145,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -180,7 +180,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -216,7 +216,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -251,7 +251,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -288,7 +288,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -323,7 +323,7 @@ class TicketProductServiceTest {
 
         // when & then
         assertThatThrownBy(() ->
-                ticketProductService.update(ticketProductId, request)
+                ticketProductService.updateTicketProduct(ticketProductId, request)
         )
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> {
@@ -358,7 +358,7 @@ class TicketProductServiceTest {
 
         // when
         UpdateTicketProductResponse response =
-                ticketProductService.update(ticketProductId, request);
+                ticketProductService.updateTicketProduct(ticketProductId, request);
 
         // then
         assertThat(response.price()).isZero();
@@ -390,7 +390,7 @@ class TicketProductServiceTest {
 
         // when
         UpdateTicketProductResponse response =
-                ticketProductService.update(ticketProductId, request);
+                ticketProductService.updateTicketProduct(ticketProductId, request);
 
         // then
         assertThat(response.stock()).isZero();

@@ -1,13 +1,14 @@
 package com.example.attractionreservation.domain.ticketProduct.controller;
 
-import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductRequest;
-import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductResponse;
-import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductRequest;
-import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductResponse;
+import com.example.attractionreservation.domain.ticketProduct.dto.*;
 import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,18 +22,30 @@ public class TicketProductController {
 
     // 티켓 상품 등록
     @PostMapping
-    public ResponseEntity<ApiResponse<CreateTicketProductResponse>> create(
+    public ResponseEntity<ApiResponse<CreateTicketProductResponse>> createTicketProduct(
             @Valid @RequestBody CreateTicketProductRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("티켓 상품이 등록되었습니다.", ticketProductService.create(request)));
+        CreateTicketProductResponse response = ticketProductService.createTicketProduct(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("티켓 상품이 등록되었습니다.", response));
     }
 
     // 티켓 상품 수정
     @PutMapping("/{ticketProductId}")
-    public ResponseEntity<ApiResponse<UpdateTicketProductResponse>> update(
+    public ResponseEntity<ApiResponse<UpdateTicketProductResponse>> updateTicketProduct(
             @Valid @RequestBody UpdateTicketProductRequest request,
             @PathVariable Long ticketProductId
     ) {
-        return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 수정되었습니다.", ticketProductService.update(ticketProductId, request)));
+        UpdateTicketProductResponse response = ticketProductService.updateTicketProduct(ticketProductId, request);
+        return ResponseEntity.ok(ApiResponse.ok("티켓 상품이 수정되었습니다.", response));
+    }
+
+    // 티켓 상품 목록 조회 (이름 + 상태 + 종류 + 페이징)
+    @GetMapping
+    public ResponseEntity<ApiResponse<Page<SearchTicketProductResponse>>> getTicketProductAll(
+            @ModelAttribute SearchTicketProductCondition condition,
+            @PageableDefault(page = 0, size = 10, sort = "type", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        Page<SearchTicketProductResponse> response = ticketProductService.getTicketProductAll(condition, pageable);
+        return ResponseEntity.ok(ApiResponse.ok("티켓 상품 목록 조회에 성공했습니다.", response));
     }
 }

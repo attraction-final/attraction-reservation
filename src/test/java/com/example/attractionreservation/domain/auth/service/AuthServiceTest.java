@@ -166,23 +166,21 @@ class AuthServiceTest {
                 .save(1L, "refresh-token");
     }
 
-
     @Test
-    @DisplayName("Refresh Token이 일치하면 로그아웃에 성공하고 Redis에서 토큰을 삭제한다.")
+    @DisplayName("유효한 Refresh Token이면 로그아웃에 성공하고 Redis에서 토큰을 삭제한다.")
     void logout_validRefreshToken_deletesToken() {
         // given
         Long userId = 1L;
         String refreshToken = "valid-refresh-token";
 
-        when(refreshTokenRepository.matches(userId, refreshToken))
+        when(refreshTokenRepository.deleteIfMatches(userId, refreshToken))
                 .thenReturn(true);
 
         // when
         authService.logout(userId, refreshToken);
 
         // then
-        verify(refreshTokenRepository).matches(userId, refreshToken);
-        verify(refreshTokenRepository).delete(userId);
+        verify(refreshTokenRepository).deleteIfMatches(userId, refreshToken);
     }
 
     @Test
@@ -192,7 +190,7 @@ class AuthServiceTest {
         Long userId = 1L;
         String refreshToken = "invalid-refresh-token";
 
-        when(refreshTokenRepository.matches(userId, refreshToken))
+        when(refreshTokenRepository.deleteIfMatches(userId, refreshToken))
                 .thenReturn(false);
 
         // when & then
@@ -200,7 +198,7 @@ class AuthServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.INVALID_REFRESH_TOKEN.getMessage());
 
-        verify(refreshTokenRepository, never()).delete(anyLong());
+        verify(refreshTokenRepository).deleteIfMatches(userId, refreshToken);
     }
 
     @Test

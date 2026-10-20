@@ -48,16 +48,12 @@ public class AuthService {
     }
 
 
+
     public void logout(Long userId, String refreshToken) {
-        // Refresh Token이 없거나 Redis에 저장된 토큰과 일치하지 않으면 거부
-        if (refreshToken == null
-                || refreshToken.isBlank()
-                || !refreshTokenRepository.matches(userId, refreshToken)) {
+        if (refreshToken == null || refreshToken.isBlank()
+                || !refreshTokenRepository.deleteIfMatches(userId, refreshToken)) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
-
-        // 일치하는 Refresh Token을 Redis에서 삭제
-        refreshTokenRepository.delete(userId);
     }
 
 

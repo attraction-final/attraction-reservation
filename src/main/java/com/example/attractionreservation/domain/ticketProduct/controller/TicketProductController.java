@@ -17,6 +17,8 @@ public class TicketProductController {
 
     private final TicketProductService ticketProductService;
 
+    // TODO: 관리자 인증 구현 후 인증 검사 추가
+
     // 티켓 상품 등록
     @PostMapping
     public ResponseEntity<ApiResponse<CreateTicketProductResponse>> create(

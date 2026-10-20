@@ -20,7 +20,7 @@ public enum ErrorCode {
     ATTRACTION_NAME_DUPLICATED(HttpStatus.CONFLICT, "이미 존재하는 어트랙션명입니다."),
     INVALID_ATTRACTION_STATUS(HttpStatus.BAD_REQUEST, "허용되지 않은 운영 상태입니다."),
     ATTRACTION_STATUS_SAME(HttpStatus.BAD_REQUEST, "현재 상태와 같습니다."),
-    ATTRACTION_HAS_UPCOMING_RESERVATIONS(HttpStatus.CONFLICT, "이용 예정 예약이 있어 처리할 수 없습니다. 예약을 먼저 처리해 주세요.");
+    ATTRACTION_HAS_UPCOMING_RESERVATIONS(HttpStatus.CONFLICT, "이용 예정 예약이 있어 처리할 수 없습니다. 예약을 먼저 처리해 주세요."),
   
     // ticketProduct
     INVALID_TICKET_PRODUCT_PRICE(HttpStatus.BAD_REQUEST, "티켓 상품 가격은 0원 이상이어야 합니다."),

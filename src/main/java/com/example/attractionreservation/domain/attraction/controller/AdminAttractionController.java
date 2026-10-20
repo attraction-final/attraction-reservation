@@ -2,16 +2,15 @@ package com.example.attractionreservation.domain.attraction.controller;
 
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
+import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
+import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.service.AttractionService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -32,8 +31,15 @@ public class AdminAttractionController {
                 .body(ApiResponse.ok("어트랙션 등록에 성공했습니다.", response));
     }
 
+    // 어트랙션 수정
+    @PatchMapping("/{attractionId}")
+    public ResponseEntity<ApiResponse<SearchAttractionResponse>> updateAttraction(
+            @PathVariable Long attractionId,
+            @Valid @RequestBody UpdateAttractionRequest request) {
 
-
+        SearchAttractionResponse response = attractionService.updateAttraction(attractionId, request);
+        return ResponseEntity.ok(ApiResponse.ok("어트랙션 수정에 성공했습니다.", response));
+    }
 
 
 }

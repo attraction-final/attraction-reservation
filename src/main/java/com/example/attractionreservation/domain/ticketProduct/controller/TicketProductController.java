@@ -28,7 +28,7 @@ public class TicketProductController {
     }
 
     // 티켓 상품 수정
-    @PatchMapping("/{ticketProductId}")
+    @PutMapping("/{ticketProductId}")
     public ResponseEntity<ApiResponse<UpdateTicketProductResponse>> update(
             @Valid @RequestBody UpdateTicketProductRequest request,
             @PathVariable Long ticketProductId

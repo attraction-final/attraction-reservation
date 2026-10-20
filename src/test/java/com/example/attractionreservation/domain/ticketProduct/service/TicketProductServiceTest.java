@@ -39,7 +39,7 @@ class TicketProductServiceTest {
     @BeforeEach
     void setUp() {
         originalType = TicketType.values()[0];
-        originalStatus = TicketProductStatus.values()[0];
+        originalStatus = TicketProductStatus.ON_SALE;
 
         ticketProduct = new TicketProduct(
                 "기존 자유이용권",
@@ -61,7 +61,7 @@ class TicketProductServiceTest {
                 "프리미엄 자유이용권",
                 60000,
                 "변경된 상품 설명",
-                originalStatus,
+                TicketProductStatus.STOPPED,
                 80
         );
 
@@ -76,11 +76,13 @@ class TicketProductServiceTest {
         assertThat(response.name()).isEqualTo("프리미엄 자유이용권");
         assertThat(response.price()).isEqualTo(60000);
         assertThat(response.description()).isEqualTo("변경된 상품 설명");
-        assertThat(response.saleStatus()).isEqualTo(originalStatus);
+        assertThat(response.saleStatus()).isEqualTo(TicketProductStatus.STOPPED);
+        assertThat(response.stock()).isEqualTo(80);
 
         assertThat(ticketProduct.getName()).isEqualTo("프리미엄 자유이용권");
         assertThat(ticketProduct.getPrice()).isEqualTo(60000);
         assertThat(ticketProduct.getDescription()).isEqualTo("변경된 상품 설명");
+        assertThat(ticketProduct.getStatus()).isEqualTo(TicketProductStatus.STOPPED);
         assertThat(ticketProduct.getStock()).isEqualTo(80);
         assertThat(ticketProduct.getType()).isEqualTo(originalType);
 
@@ -160,6 +162,113 @@ class TicketProductServiceTest {
     }
 
     @Test
+    @DisplayName("상품 설명이 공백이면 수정에 실패한다")
+    void updateTicketProduct_blankDescription() {
+        // given
+        Long ticketProductId = 1L;
+
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "프리미엄 자유이용권",
+                60000,
+                "   ",
+                originalStatus,
+                80
+        );
+
+        when(ticketProductRepository.findById(ticketProductId))
+                .thenReturn(Optional.of(ticketProduct));
+
+        // when & then
+        assertThatThrownBy(() ->
+                ticketProductService.update(ticketProductId, request)
+        )
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> {
+                    BusinessException businessException =
+                            (BusinessException) exception;
+
+                    assertThat(businessException.getErrorCode())
+                            .isEqualTo(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
+                });
+
+        assertThat(ticketProduct.getName()).isEqualTo("기존 자유이용권");
+        assertThat(ticketProduct.getDescription()).isEqualTo("기존 상품 설명");
+        assertThat(ticketProduct.getPrice()).isEqualTo(50000);
+        assertThat(ticketProduct.getStock()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("상품 설명이 null이면 수정에 실패한다")
+    void updateTicketProduct_nullDescription() {
+        // given
+        Long ticketProductId = 1L;
+
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "프리미엄 자유이용권",
+                60000,
+                null,
+                originalStatus,
+                80
+        );
+
+        when(ticketProductRepository.findById(ticketProductId))
+                .thenReturn(Optional.of(ticketProduct));
+
+        // when & then
+        assertThatThrownBy(() ->
+                ticketProductService.update(ticketProductId, request)
+        )
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> {
+                    BusinessException businessException =
+                            (BusinessException) exception;
+
+                    assertThat(businessException.getErrorCode())
+                            .isEqualTo(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
+                });
+
+        assertThat(ticketProduct.getDescription()).isEqualTo("기존 상품 설명");
+        assertThat(ticketProduct.getPrice()).isEqualTo(50000);
+        assertThat(ticketProduct.getStock()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("판매 상태가 null이면 수정에 실패한다")
+    void updateTicketProduct_nullSaleStatus() {
+        // given
+        Long ticketProductId = 1L;
+
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "프리미엄 자유이용권",
+                60000,
+                "변경된 상품 설명",
+                null,
+                80
+        );
+
+        when(ticketProductRepository.findById(ticketProductId))
+                .thenReturn(Optional.of(ticketProduct));
+
+        // when & then
+        assertThatThrownBy(() ->
+                ticketProductService.update(ticketProductId, request)
+        )
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> {
+                    BusinessException businessException =
+                            (BusinessException) exception;
+
+                    assertThat(businessException.getErrorCode())
+                            .isEqualTo(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
+                });
+
+        assertThat(ticketProduct.getStatus()).isEqualTo(originalStatus);
+        assertThat(ticketProduct.getName()).isEqualTo("기존 자유이용권");
+        assertThat(ticketProduct.getPrice()).isEqualTo(50000);
+        assertThat(ticketProduct.getStock()).isEqualTo(100);
+    }
+
+    @Test
     @DisplayName("가격이 음수이면 수정에 실패한다")
     void updateTicketProduct_invalidPrice() {
         // given
@@ -228,5 +337,69 @@ class TicketProductServiceTest {
         assertThat(ticketProduct.getName()).isEqualTo("기존 자유이용권");
         assertThat(ticketProduct.getPrice()).isEqualTo(50000);
         assertThat(ticketProduct.getStock()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("가격이 0원이면 정상적으로 수정된다")
+    void updateTicketProduct_zeroPrice() {
+        // given
+        Long ticketProductId = 1L;
+
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "무료 자유이용권",
+                0,
+                "무료 이용권 설명",
+                originalStatus,
+                80
+        );
+
+        when(ticketProductRepository.findById(ticketProductId))
+                .thenReturn(Optional.of(ticketProduct));
+
+        // when
+        UpdateTicketProductResponse response =
+                ticketProductService.update(ticketProductId, request);
+
+        // then
+        assertThat(response.price()).isZero();
+        assertThat(ticketProduct.getPrice()).isZero();
+
+        assertThat(response.name()).isEqualTo("무료 자유이용권");
+        assertThat(ticketProduct.getName()).isEqualTo("무료 자유이용권");
+
+        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("재고가 0개이면 정상적으로 수정된다")
+    void updateTicketProduct_zeroStock() {
+        // given
+        Long ticketProductId = 1L;
+
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "프리미엄 자유이용권",
+                60000,
+                "변경된 상품 설명",
+                originalStatus,
+                0
+        );
+
+        when(ticketProductRepository.findById(ticketProductId))
+                .thenReturn(Optional.of(ticketProduct));
+
+        // when
+        UpdateTicketProductResponse response =
+                ticketProductService.update(ticketProductId, request);
+
+        // then
+        assertThat(response.stock()).isZero();
+        assertThat(ticketProduct.getStock()).isZero();
+
+        assertThat(response.price()).isEqualTo(60000);
+        assertThat(ticketProduct.getPrice()).isEqualTo(60000);
+
+        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository, never()).save(any());
     }
 }

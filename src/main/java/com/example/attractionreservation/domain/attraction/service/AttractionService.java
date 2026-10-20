@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.Comparator;
+import java.util.function.BinaryOperator;
 
 @Service
 @RequiredArgsConstructor
@@ -88,13 +90,14 @@ public class AttractionService {
             return Map.of();
         }
 
-        // 슬롯은 시작 시각 순으로 오므로, 같은 어트랙션이면 먼저 나온(가장 빠른) 슬롯을 남긴다.
+        // 같은 어트랙션의 슬롯이 여러 개면 시작 시각이 가장 빠른 슬롯을 남긴다.
+        // (쿼리의 정렬 순서에 의존하지 않도록 직접 비교)
         return attractionRepository.findReservableSlots(operatingAttractionIds, reservableFrom, todayEnd)
                 .stream()
                 .collect(Collectors.toMap(
                         ReservableSlotView::getAttractionId,
                         Function.identity(),
-                        (earlierSlot, laterSlot) -> earlierSlot
+                        BinaryOperator.minBy(Comparator.comparing(ReservableSlotView::getStartsAt))
                 ));
     }
 

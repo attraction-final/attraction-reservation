@@ -19,11 +19,15 @@ public record CreateTicketProductResponse(
 ) {
     public static CreateTicketProductResponse from(TicketProduct ticketProduct) {
         return new CreateTicketProductResponse(
-                ticketProduct.getId(), ticketProduct.getName(),
-                ticketProduct.getType(), ticketProduct.getPrice(),
-                ticketProduct.getDescription(), ticketProduct.getStatus(),
+                ticketProduct.getId(),
+                ticketProduct.getName(),
+                ticketProduct.getType(),
+                ticketProduct.getPrice(),
+                ticketProduct.getDescription(),
+                ticketProduct.getStatus(),
                 ticketProduct.getStock(),
-                ticketProduct.getCreatedAt(), ticketProduct.getUpdatedAt()
+                ticketProduct.getCreatedAt(),
+                ticketProduct.getUpdatedAt()
         );
     }
 }

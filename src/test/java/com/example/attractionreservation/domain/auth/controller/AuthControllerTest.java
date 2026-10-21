@@ -22,6 +22,9 @@ import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import jakarta.servlet.http.Cookie;
+import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
@@ -29,8 +32,11 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
-@WebMvcTest(AuthController.class)
+@WebMvcTest({AuthController.class, CsrfController.class})
 @Import({
         SecurityConfig.class,
         GlobalExceptionHandler.class,
@@ -43,6 +49,9 @@ class AuthControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockitoBean
     private AuthService authService;
@@ -76,6 +85,7 @@ class AuthControllerTest {
         // when & then
         mockMvc.perform(post("/api/auth/login")
                         .servletPath("/api/auth/login")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -126,6 +136,7 @@ class AuthControllerTest {
         // when & then
         mockMvc.perform(post("/api/auth/login")
                         .servletPath("/api/auth/login")
+                        .with(csrf().asHeader())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -183,5 +194,120 @@ class AuthControllerTest {
                         .value(ErrorCode.ACCESS_DENIED.getMessage()));
 
         verifyNoInteractions(authService, jwtProvider, userRepository);
+    }
+
+    @Test
+    @DisplayName("조회한 CSRF 토큰과 쿠키를 함께 보내면 로그인에 성공한다.")
+    void login_issuedCsrfTokenAndCookie_returnsOk() throws Exception {
+        // given
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .servletPath("/api/auth/csrf")
+                        .secure(true))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.headerName").value("X-XSRF-TOKEN"))
+                .andExpect(jsonPath("$.data.token").isNotEmpty())
+                .andExpect(header().string(
+                        HttpHeaders.CACHE_CONTROL, containsString("no-store")
+                ))
+                .andReturn();
+
+        var data = objectMapper.readTree(
+                csrfResult.getResponse().getContentAsString()
+        ).get("data");
+
+        String headerName = data.get("headerName").asText();
+        String token = data.get("token").asText();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+
+        assertThat(csrfCookie).isNotNull();
+        assertThat(csrfCookie.isHttpOnly()).isTrue();
+        assertThat(csrfCookie.getSecure()).isTrue();
+        assertThat(csrfCookie.getPath()).isEqualTo("/");
+        assertThat(csrfCookie.getAttribute("SameSite")).isEqualTo("Lax");
+
+        CreateAuthLoginRequest request =
+                new CreateAuthLoginRequest("test@example.com", "Password!123");
+
+        when(authService.login(request))
+                .thenReturn(CreateAuthLoginServiceResponse.of(
+                        CreateAuthLoginResponse.of("access-token", 600L),
+                        "refresh-token"
+                ));
+        when(jwtProvider.getRefreshTokenExpirationSeconds())
+                .thenReturn(604_800L);
+
+        // when & then
+        mockMvc.perform(post("/api/auth/login")
+                        .servletPath("/api/auth/login")
+                        .secure(true)
+                        .cookie(csrfCookie)
+                        .header(headerName, token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginRequestBody()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"));
+
+        verify(authService).login(request);
+    }
+
+    @Test
+    @DisplayName("CSRF 토큰 없이 로그인하면 HTTP 403을 반환하고 서비스를 호출하지 않는다.")
+    void login_missingCsrfToken_returnsForbidden() throws Exception {
+        // given: 로그인 입력은 유효하지만 CSRF 토큰이 없다.
+
+        // when & then
+        mockMvc.perform(post("/api/auth/login")
+                        .servletPath("/api/auth/login")
+                        .secure(true)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginRequestBody()))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(
+                        MediaType.APPLICATION_JSON
+                ))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.ACCESS_DENIED.getMessage()));
+
+        verifyNoInteractions(authService, jwtProvider, userRepository);
+    }
+
+    @Test
+    @DisplayName("발급받은 쿠키가 있어도 CSRF 헤더가 잘못되면 로그인을 거부한다.")
+    void login_invalidCsrfToken_returnsForbidden() throws Exception {
+        // given
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .servletPath("/api/auth/csrf")
+                        .secure(true))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertThat(csrfCookie).isNotNull();
+
+        // when & then
+        mockMvc.perform(post("/api/auth/login")
+                        .servletPath("/api/auth/login")
+                        .secure(true)
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginRequestBody()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.ACCESS_DENIED.getMessage()));
+
+        verifyNoInteractions(authService, jwtProvider, userRepository);
+    }
+
+    private String loginRequestBody() {
+        return """
+            {
+              "email": "test@example.com",
+              "password": "Password!123"
+            }
+            """;
     }
 }

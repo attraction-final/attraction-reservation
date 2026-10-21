@@ -25,6 +25,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
 @WebMvcTest(UserController.class)
 @Import({
@@ -64,6 +65,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -85,6 +87,7 @@ class UserControllerTest {
     void signup_invalidEmail_returnsBadRequest() throws Exception {
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                             {
@@ -104,6 +107,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                             {
@@ -130,6 +134,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isBadRequest());
@@ -163,6 +168,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())

@@ -21,6 +21,8 @@ import java.util.Optional;
 @Component
 @RequiredArgsConstructor
 public class PaymentFacade {
+    private static final String AMOUNT_MISMATCH_REASON = "결제 금액 불일치";
+
     private final PaymentService paymentService;
     private final PaymentCommandService paymentCommandService;
     private final PaymentGateway paymentGateway;
@@ -95,8 +97,10 @@ public class PaymentFacade {
         }
 
         if (!amountMatches(payment, pgPayment)) {
-            if (paymentCommandService.failPayment(payment.getPgId())) {
-                paymentGateway.cancelPayment(payment.getPgId(), "결제 금액 불일치", pgPayment.totalAmount());
+            // 결제 실패 처리와 보상 요청을 함께 커밋한 뒤 PG 취소를 즉시 한 번 시도한다.
+            if (paymentCommandService.failPaymentWithCompensation(
+                    payment.getPgId(), pgPayment.totalAmount(), AMOUNT_MISMATCH_REASON)) {
+                paymentGateway.cancelPayment(payment.getPgId(), AMOUNT_MISMATCH_REASON, pgPayment.totalAmount());
             } else {
                 log.error("금액 불일치 결제가 이미 처리됨, PG 보상 취소 생략: pgId={}", payment.getPgId());
             }

@@ -76,15 +76,18 @@ class RefreshTokenRepositoryIntegrationTest {
                 System.nanoTime() - beforeSave
         );
 
-        assertThat(savedHash).isEqualTo(expectedHash);
-        assertThat(savedHash).isNotEqualTo(refreshToken);
-        assertThat(remainingTtl).isNotNull().isPositive();
+        assertThat(savedHash)
+                .isEqualTo(expectedHash)
+                .isNotEqualTo(refreshToken);
 
         // 실제 경과 시간을 반영하고 밀리초 단위 반올림 오차를 허용한다.
-        assertThat(remainingTtl).isBetween(
-                Math.max(1L, refreshTokenExpiration - elapsedMillis - 100L),
-                refreshTokenExpiration
-        );
+        assertThat(remainingTtl)
+                .isNotNull()
+                .isPositive()
+                .isBetween(
+                        Math.max(1L, refreshTokenExpiration - elapsedMillis - 100L),
+                        refreshTokenExpiration
+                );
     }
 
     @Test

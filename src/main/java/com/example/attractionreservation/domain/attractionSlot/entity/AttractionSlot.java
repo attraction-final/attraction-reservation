@@ -56,4 +56,17 @@ public class AttractionSlot extends BaseTimeEntity {
         slot.status = SlotStatus.OPEN;
         return slot;
     }
+
+    // 종료 시각 = 시작 시각 + 어트랙션 탑승 소요 시간 (BR-SLT-01)
+    public static LocalDateTime calculateEndsAt(LocalDateTime startsAt, Integer durationMinutes) {
+        return startsAt.plusMinutes(durationMinutes);
+    }
+
+    // 시작~종료가 같은 날 10:00~22:00 안에 있는지 (BR-SLT-03)
+    public static boolean isWithinOperatingHours(LocalDateTime startsAt, LocalDateTime endsAt) {
+        boolean isSameDay = startsAt.toLocalDate().equals(endsAt.toLocalDate());
+        boolean isAfterOpen = !startsAt.toLocalTime().isBefore(PARK_OPEN_TIME);
+        boolean isBeforeClose = !endsAt.toLocalTime().isAfter(PARK_CLOSE_TIME);
+        return isSameDay && isAfterOpen && isBeforeClose;
+    }
 }

@@ -7,8 +7,11 @@ portone:
   channel-key: test-channel-key
   webhook-secret: whsec_dGVzdC13ZWJob29rLXNlY3JldA==  # SDK가 Base64로 디코드하므로 Base64 값이어야 한다
 
-# 테스트 중 스케줄러가 웹훅 테이블을 처리하지 않도록 끈다.
+# 테스트 중 스케줄러가 웹훅·보상 테이블을 처리하지 않도록 끈다.
 payment:
   webhook:
+    scheduler:
+      enabled: false
+  compensation:
     scheduler:
       enabled: false

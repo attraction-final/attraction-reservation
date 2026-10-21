@@ -72,4 +72,41 @@ public class TicketProduct extends BaseTimeEntity {
         this.stock = stock;
         this.status = status;
     }
+
+    // 티켓 상품 수정
+    public void updateTicketProduct(String name, int price, String description, int stock, TicketProductStatus status) {
+        if (this.status == TicketProductStatus.DELETED) {
+            throw new BusinessException(ErrorCode.TICKET_PRODUCT_ALREADY_DELETED);
+        }
+
+        if (name == null || name.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_NAME);
+        }
+
+        if (description == null || description.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
+        }
+
+        if (status == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
+        }
+
+        if (price < 0) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_PRICE);
+        }
+
+        if (stock < 0) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STOCK);
+        }
+
+        this.name = name;
+        this.price = price;
+        this.description = description;
+        this.stock = stock;
+        this.status = status;
+    }
+
+    public void delete() {
+        this.status = TicketProductStatus.DELETED;
+    }
 }

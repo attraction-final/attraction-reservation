@@ -109,7 +109,7 @@ class UserServiceTest {
         );
 
         SQLException sqlException = new SQLException(
-                "Duplicate entry 'duplicate@gmail.com' for key 'users.email'",
+                "Duplicate entry 'duplicate@gmail.com' for key 'uk_users_email'",
                 "23000",
                 1062
         );

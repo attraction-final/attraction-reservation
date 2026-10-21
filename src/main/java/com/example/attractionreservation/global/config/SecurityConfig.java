@@ -39,7 +39,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 회원가입과 로그인은 인증 없이 접근할 수 있다.
                         .requestMatchers(HttpMethod.POST, "/api/users/signup").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/auth/login",
+                                "/api/auth/refresh"
+                        ).permitAll()
 
                         // 티켓 상품 등록·수정·삭제는 관리자만 가능하다.
                         .requestMatchers(

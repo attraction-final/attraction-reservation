@@ -84,7 +84,10 @@ public class AttractionSlot extends BaseTimeEntity {
         if (now.isAfter(getReservationDeadline())) { // 마감 시각 정각은 허용 (9장 #2)
             return UnavailableReason.DEADLINE_PASSED;
         }
-        if (status == SlotStatus.CLOSED || isFull()) {
+        if (status == SlotStatus.CLOSED) {
+            return UnavailableReason.CLOSED;
+        }
+        if (isFull()) {
             return UnavailableReason.FULL;
         }
         return null;

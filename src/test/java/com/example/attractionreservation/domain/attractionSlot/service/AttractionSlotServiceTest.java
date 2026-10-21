@@ -35,6 +35,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import org.mockito.MockedStatic;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 @ExtendWith(MockitoExtension.class)
 class AttractionSlotServiceTest {
@@ -70,10 +73,6 @@ class AttractionSlotServiceTest {
 
     private AttractionSlot createTomorrowSlot(int reservedCount, SlotStatus status) {
         return createSlot(31L, TOMORROW.atTime(14, 0), 20, reservedCount, status);
-    }
-
-    private void givenSlot(AttractionSlot slot) {
-        given(attractionSlotRepository.findById(slot.getId())).willReturn(Optional.of(slot));
     }
 
     private void assertErrorCode(Runnable action, ErrorCode errorCode) {
@@ -222,6 +221,55 @@ class AttractionSlotServiceTest {
 
             assertErrorCode(() -> attractionSlotService.findAdminAttractionSlotsByDate(99L, TOMORROW, false),
                     ErrorCode.ATTRACTION_NOT_FOUND);
+        }
+    }
+
+    // 추가: 도메인 메서드 직접 검증
+    @Nested
+    @DisplayName("슬롯 예약 불가 사유 판단")
+    class FindUnavailableReason {
+
+        private final LocalDateTime startsAt = TOMORROW.atTime(14, 0);
+        private final LocalDateTime deadline = startsAt.minusMinutes(30); // 13:30
+
+        @Test
+        @DisplayName("마감 1초 전: 예약 가능(null)")
+        void oneSecondBeforeDeadline() {
+            AttractionSlot slot = createSlot(1L, startsAt, 20, 0, SlotStatus.OPEN);
+            assertThat(slot.findUnavailableReason(true, deadline.minusSeconds(1))).isNull();
+        }
+
+        @Test
+        @DisplayName("마감 정각: 예약 가능(null) — 9장 #2 정각 허용")
+        void atDeadline() {
+            AttractionSlot slot = createSlot(1L, startsAt, 20, 0, SlotStatus.OPEN);
+            assertThat(slot.findUnavailableReason(true, deadline)).isNull();
+        }
+
+        @Test
+        @DisplayName("마감 1초 후: DEADLINE_PASSED")
+        void oneSecondAfterDeadline() {
+            AttractionSlot slot = createSlot(1L, startsAt, 20, 0, SlotStatus.OPEN);
+            assertThat(slot.findUnavailableReason(true, deadline.plusSeconds(1)))
+                    .isEqualTo(UnavailableReason.DEADLINE_PASSED);
+        }
+
+        @Test
+        @DisplayName("잔여 1석: 예약 가능 / 잔여 0석: FULL")
+        void capacityBoundary() {
+            AttractionSlot oneLeft = createSlot(1L, startsAt, 20, 19, SlotStatus.OPEN);
+            AttractionSlot noneLeft = createSlot(2L, startsAt, 20, 20, SlotStatus.OPEN);
+
+            assertThat(oneLeft.findUnavailableReason(true, deadline)).isNull();
+            assertThat(noneLeft.findUnavailableReason(true, deadline)).isEqualTo(UnavailableReason.FULL);
+        }
+
+        @Test
+        @DisplayName("우선순위: SUSPENDED + 마감 지남이면 SUSPENDED가 먼저")
+        void suspendedBeatsDeadline() {
+            AttractionSlot slot = createSlot(1L, startsAt, 20, 0, SlotStatus.SUSPENDED);
+            assertThat(slot.findUnavailableReason(true, deadline.plusHours(1)))
+                    .isEqualTo(UnavailableReason.SUSPENDED);
         }
     }
 }

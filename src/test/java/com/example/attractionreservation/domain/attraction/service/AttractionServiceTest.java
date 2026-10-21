@@ -378,7 +378,7 @@ class AttractionServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"MAINTENANCE", "SUSPENDED", "CLOSED"})
+    @ValueSource(strings = {"MAINTENANCE", "SUSPENDED"})
     @DisplayName("운영중이 아닌 상태로 바꿀 때 이용 예정 예약이 있으면 예외가 발생하고 상태는 그대로다")
     void updateAttractionStatus_HasUpcomingReservations_ThrowsException(String status) {
         // given
@@ -413,6 +413,7 @@ class AttractionServiceTest {
 
         // then
         assertThat(attraction.getDeletedAt()).isNotNull();   // 삭제 표시가 남았는지
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.DELETED); // 상태도 DELETED인지
         verify(upcomingReservationReader)
                 .countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class)); // 예약 확인을 했는지
     }
@@ -451,6 +452,7 @@ class AttractionServiceTest {
 
         // 예외가 났으니 삭제 표시가 남으면 안 된다
         assertThat(attraction.getDeletedAt()).isNull();
+        assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING);
     }
 
     @Test

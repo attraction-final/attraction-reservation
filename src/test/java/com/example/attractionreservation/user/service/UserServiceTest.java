@@ -2,27 +2,30 @@ package com.example.attractionreservation.user.service;
 
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
 import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
+import com.example.attractionreservation.domain.user.dto.GetUserResponse;
 import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.domain.user.service.UserService;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.sql.SQLException;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
-
-import com.example.attractionreservation.global.exception.BusinessException;
-import com.example.attractionreservation.global.exception.ErrorCode;
-
-import org.springframework.dao.DataIntegrityViolationException;
-import java.sql.SQLException;
 
 class UserServiceTest {
 
@@ -41,24 +44,16 @@ class UserServiceTest {
 
     @Test
     void signup_success() {
-        // given
         CreateUserRequest request = new CreateUserRequest(
-                "test@gmail.com",
-                "Password123!",
-                "홍길동"
+                "test@gmail.com", "Password123!", "홍길동"
         );
 
-        when(userRepository.existsByEmail(request.email()))
-                .thenReturn(false);
-
+        when(userRepository.existsByEmail(request.email())).thenReturn(false);
         when(userRepository.saveAndFlush(any(User.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        // when
         CreateUserResponse response = userService.signup(request);
 
-        // then
-        // then
         assertThat(response.email()).isEqualTo("test@gmail.com");
         assertThat(response.nickname()).isEqualTo("홍길동");
 
@@ -70,30 +65,25 @@ class UserServiceTest {
         User savedUser = userCaptor.getValue();
 
         assertThat(savedUser.getPassword()).isNotEqualTo(request.password());
-        assertThat(passwordEncoder.matches(request.password(), savedUser.getPassword()))
-                .isTrue();
+        assertThat(passwordEncoder.matches(
+                request.password(), savedUser.getPassword()
+        )).isTrue();
     }
 
     @Test
     void signup_duplicateEmail_throwsException() {
-        // given
         CreateUserRequest request = new CreateUserRequest(
-                "test@gmail.com",
-                "Password123!",
-                "홍길동"
+                "test@gmail.com", "Password123!", "홍길동"
         );
 
-        when(userRepository.existsByEmail(request.email()))
-                .thenReturn(true);
+        when(userRepository.existsByEmail(request.email())).thenReturn(true);
 
-        // when & then
         assertThatThrownBy(() -> userService.signup(request))
-                .isInstanceOf(BusinessException.class)
-                .satisfies(exception -> {
-                    BusinessException businessException = (BusinessException) exception;
-                    assertThat(businessException.getErrorCode())
-                            .isEqualTo(ErrorCode.DUPLICATE_EMAIL);
-                });
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.DUPLICATE_EMAIL)
+                );
 
         verify(userRepository).existsByEmail("test@gmail.com");
         verify(userRepository, never()).saveAndFlush(any(User.class));
@@ -101,11 +91,8 @@ class UserServiceTest {
 
     @Test
     void signup_databaseDuplicateEmail_throwsBusinessException() {
-        // given
         CreateUserRequest request = new CreateUserRequest(
-                "duplicate@gmail.com",
-                "Password123!",
-                "홍길동"
+                "duplicate@gmail.com", "Password123!", "홍길동"
         );
 
         SQLException sqlException = new SQLException(
@@ -115,31 +102,25 @@ class UserServiceTest {
         );
 
         DataIntegrityViolationException exception =
-                new DataIntegrityViolationException("Duplicate email", sqlException);
+                new DataIntegrityViolationException(
+                        "Duplicate email", sqlException
+                );
 
-        when(userRepository.existsByEmail(request.email()))
-                .thenReturn(false);
+        when(userRepository.existsByEmail(request.email())).thenReturn(false);
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(exception);
 
-        when(userRepository.saveAndFlush(any(User.class)))
-                .thenThrow(exception);
-
-        // when & then
         assertThatThrownBy(() -> userService.signup(request))
-                .isInstanceOf(BusinessException.class)
-                .satisfies(thrown -> {
-                    BusinessException businessException = (BusinessException) thrown;
-                    assertThat(businessException.getErrorCode())
-                            .isEqualTo(ErrorCode.DUPLICATE_EMAIL);
-                });
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        thrown -> assertThat(thrown.getErrorCode())
+                                .isEqualTo(ErrorCode.DUPLICATE_EMAIL)
+                );
     }
 
     @Test
     void signup_otherDatabaseViolation_rethrowsOriginalException() {
-        // given
         CreateUserRequest request = new CreateUserRequest(
-                "test@gmail.com",
-                "Password123!",
-                "홍길동"
+                "test@gmail.com", "Password123!", "홍길동"
         );
 
         SQLException sqlException = new SQLException(
@@ -150,18 +131,74 @@ class UserServiceTest {
 
         DataIntegrityViolationException exception =
                 new DataIntegrityViolationException(
-                        "Foreign key violation",
-                        sqlException
+                        "Foreign key violation", sqlException
                 );
 
-        when(userRepository.existsByEmail(request.email()))
-                .thenReturn(false);
+        when(userRepository.existsByEmail(request.email())).thenReturn(false);
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(exception);
 
-        when(userRepository.saveAndFlush(any(User.class)))
-                .thenThrow(exception);
-
-        // when & then
         assertThatThrownBy(() -> userService.signup(request))
                 .isSameAs(exception);
+    }
+
+    @Test
+    void getMe_activeUser_returnsUserInfo() {
+        Long userId = 1L;
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password("encoded-password")
+                .nickname("홍길동")
+                .build();
+
+        ReflectionTestUtils.setField(user, "id", userId);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        GetUserResponse response = userService.getMe(userId);
+
+        assertThat(response).isEqualTo(new GetUserResponse(
+                userId, "test@gmail.com", "홍길동", "USER", "ACTIVE"
+        ));
+
+        verify(userRepository).findById(userId);
+        verifyNoMoreInteractions(userRepository);
+    }
+
+    @Test
+    void getMe_missingUser_throwsUnauthorized() {
+        Long userId = 1L;
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.getMe(userId))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+    }
+
+    @Test
+    void getMe_withdrawnUser_throwsUnauthorized() {
+        Long userId = 1L;
+        User user = User.builder()
+                .email("withdrawn@gmail.com")
+                .password("encoded-password")
+                .nickname("탈퇴회원")
+                .build();
+
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.getMe(userId))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
     }
 }

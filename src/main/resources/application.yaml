@@ -17,3 +17,11 @@ spring:
       ddl-auto: validate
     show-sql: false
     open-in-view: false
+
+# secret 값은 환경변수로만 주입한다.
+portone:
+  base-url: ${PORTONE_BASE_URL:https://api.portone.io}
+  api-secret: ${PORTONE_API_SECRET}
+  store-id: ${PORTONE_STORE_ID}
+  channel-key: ${PORTONE_CHANNEL_KEY}
+  webhook-secret: ${PORTONE_WEBHOOK_SECRET}

@@ -11,7 +11,7 @@ import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.Projections;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-import lombok.RequiredArgsConstructor;
+import jakarta.persistence.EntityManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -24,9 +24,14 @@ import java.util.List;
 import static com.example.attractionreservation.domain.payment.entity.QPayment.payment;
 
 @Repository
-@RequiredArgsConstructor
 public class PaymentCustomRepositoryImpl implements PaymentCustomRepository {
     private final JPAQueryFactory queryFactory;
+
+    // @DataJpaTest는 모든 리포지토리를 생성하지만 @Configuration 빈은 읽지 않는다.
+    // JPAQueryFactory 빈에 의존하면 QuerydslConfig를 import하지 않은 리포지토리 테스트가 모두 실패하므로 직접 생성한다.
+    public PaymentCustomRepositoryImpl(EntityManager entityManager) {
+        this.queryFactory = new JPAQueryFactory(entityManager);
+    }
 
     @Override
     public Page<PaymentResponse> searchAllByUserId(Long userId, Pageable pageable,

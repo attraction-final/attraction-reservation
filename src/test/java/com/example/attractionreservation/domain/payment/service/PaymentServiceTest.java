@@ -2,7 +2,6 @@ package com.example.attractionreservation.domain.payment.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
-import com.example.attractionreservation.domain.payment.dto.PgPaymentResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
@@ -57,7 +56,7 @@ class PaymentServiceTest {
         );
 
         //when
-        paymentService.createPayment(order);
+        String pgId = paymentService.createPayment(order);
 
         //then
         ArgumentCaptor<Payment> paymentArgumentCaptor = ArgumentCaptor.forClass(Payment.class);
@@ -67,6 +66,8 @@ class PaymentServiceTest {
         assertEquals(10000, payment.getAmount());
         assertNotNull(payment.getOrder());
         assertEquals(PaymentStatus.PENDING, payment.getStatus());
+        assertNotNull(pgId);
+        assertEquals(payment.getPgId(), pgId);
     }
 
     @Test
@@ -111,13 +112,13 @@ class PaymentServiceTest {
 
     @Test
     @DisplayName("본인의 결제 대기 상태 결제는 취소할 수 있다.")
-    void cancelPayment_pending_Success() {
+    void cancelledByUser_pending_Success() {
         //given
         Payment payment = createPayment(USER_ID);
         given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
 
         //when
-        paymentService.cancelPayment(USER_ID, ORDER_ID);
+        paymentService.cancelledByUser(USER_ID, ORDER_ID);
 
         //then
         assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
@@ -126,26 +127,26 @@ class PaymentServiceTest {
 
     @Test
     @DisplayName("존재하지 않는 결제는 취소할 수 없다.")
-    void cancelPayment_notFound_Fail() {
+    void cancelledByUser_notFound_Fail() {
         //given
         given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.empty());
 
         //when & then
-        assertThatThrownBy(() -> paymentService.cancelPayment(USER_ID, ORDER_ID))
+        assertThatThrownBy(() -> paymentService.cancelledByUser(USER_ID, ORDER_ID))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
     }
 
     @Test
     @DisplayName("다른 사용자의 결제는 취소할 수 없다.")
-    void cancelPayment_otherUser_Fail() {
+    void cancelledByUser_otherUser_Fail() {
         //given
         Long otherUserId = 2L;
         Payment payment = createPayment(otherUserId);
         given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
 
         //when & then
-        assertThatThrownBy(() -> paymentService.cancelPayment(USER_ID, ORDER_ID))
+        assertThatThrownBy(() -> paymentService.cancelledByUser(USER_ID, ORDER_ID))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
         assertEquals(PaymentStatus.PENDING, payment.getStatus());
@@ -154,13 +155,13 @@ class PaymentServiceTest {
     @ParameterizedTest
     @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "PENDING")
     @DisplayName("결제 대기 상태가 아닌 결제는 취소할 수 없다.")
-    void cancelPayment_notPending_Fail(PaymentStatus status) {
+    void cancelledByUser_notPending_Fail(PaymentStatus status) {
         //given
         Payment payment = createPaymentWithStatus(USER_ID, status);
         given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
 
         //when & then
-        assertThatThrownBy(() -> paymentService.cancelPayment(USER_ID, ORDER_ID))
+        assertThatThrownBy(() -> paymentService.cancelledByUser(USER_ID, ORDER_ID))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_CANCEL_PROHIBITED.getMessage());
         assertEquals(status, payment.getStatus());
@@ -168,86 +169,29 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("결제 대기 상태의 결제를 승인하면 결제와 주문이 결제 완료 상태가 된다.")
-    void approvePayment_pending_Success() {
+    @DisplayName("본인의 결제면 결제를 조회할 수 있다.")
+    void getOwnedPayment_owner_Success() {
         //given
         Payment payment = createPayment(USER_ID);
-        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
+        given(paymentRepository.findByPgIdAndUserId(payment.getPgId(), USER_ID)).willReturn(Optional.of(payment));
 
         //when
-        paymentService.approvePayment(createPgPaymentResult(payment, payment.getAmount()));
+        Payment found = paymentService.getOwnedPayment(USER_ID, payment.getPgId());
 
         //then
-        assertEquals(PaymentStatus.PAID, payment.getStatus());
-        assertEquals(APPROVED_AT, payment.getPaidAt());
-        assertEquals(OrderStatus.PAID, payment.getOrder().getStatus());
+        assertEquals(payment, found);
     }
 
     @Test
-    @DisplayName("이미 결제 완료된 결제를 다시 승인하면 예외 없이 기존 상태를 유지한다.")
-    void approvePayment_alreadyPaid_Skip() {
+    @DisplayName("다른 사용자의 결제거나 없는 결제면 결제를 찾을 수 없다는 예외가 발생한다.")
+    void getOwnedPayment_notOwner_Fail() {
         //given
-        Payment payment = createPayment(USER_ID);
-        payment.markAsPaid(APPROVED_AT);
-        payment.getOrder().markAsPaid();
-        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
-        PgPaymentResult duplicated = new PgPaymentResult(payment.getPgId(), payment.getAmount(), APPROVED_AT.plusSeconds(5));
-
-        //when
-        paymentService.approvePayment(duplicated);
-
-        //then
-        assertEquals(PaymentStatus.PAID, payment.getStatus());
-        assertEquals(APPROVED_AT, payment.getPaidAt());
-        assertEquals(OrderStatus.PAID, payment.getOrder().getStatus());
-    }
-
-    @Test
-    @DisplayName("존재하지 않는 결제는 승인할 수 없다.")
-    void approvePayment_notFound_Fail() {
-        //given
-        given(paymentRepository.findWithLockByPgId("unknown-pg-id")).willReturn(Optional.empty());
-        PgPaymentResult result = new PgPaymentResult("unknown-pg-id", 10000, APPROVED_AT);
+        given(paymentRepository.findByPgIdAndUserId("pg-id", USER_ID)).willReturn(Optional.empty());
 
         //when & then
-        assertThatThrownBy(() -> paymentService.approvePayment(result))
+        assertThatThrownBy(() -> paymentService.getOwnedPayment(USER_ID, "pg-id"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
-    }
-
-    @Test
-    @DisplayName("PG 승인 금액이 결제 원장 금액과 다르면 승인할 수 없다.")
-    void approvePayment_incorrectAmount_Fail() {
-        //given
-        Payment payment = createPayment(USER_ID);
-        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
-
-        //when & then
-        assertThatThrownBy(() -> paymentService.approvePayment(createPgPaymentResult(payment, payment.getAmount() - 1)))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
-        assertEquals(PaymentStatus.PENDING, payment.getStatus());
-        assertEquals(OrderStatus.PENDING, payment.getOrder().getStatus());
-    }
-
-    @ParameterizedTest
-    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PENDING", "PAID"})
-    @DisplayName("결제 대기·결제 완료가 아닌 결제는 승인할 수 없다.")
-    void approvePayment_notPendingOrPaid_Fail(PaymentStatus status) {
-        //given
-        Payment payment = createPaymentWithStatus(USER_ID, status);
-        given(paymentRepository.findWithLockByPgId(payment.getPgId())).willReturn(Optional.of(payment));
-
-        //when & then
-        assertThatThrownBy(() -> paymentService.approvePayment(createPgPaymentResult(payment, payment.getAmount())))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
-        assertEquals(status, payment.getStatus());
-        assertEquals(OrderStatus.PENDING, payment.getOrder().getStatus());
-    }
-
-    private PgPaymentResult createPgPaymentResult(Payment payment, int amount) {
-        return new PgPaymentResult(payment.getPgId(), amount, APPROVED_AT);
     }
 
     private Payment createPayment(Long userId) {

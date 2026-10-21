@@ -3,7 +3,6 @@ package com.example.attractionreservation.domain.payment.service;
 import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
-import com.example.attractionreservation.domain.payment.dto.PgPaymentResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
@@ -42,6 +41,9 @@ class PaymentServiceConcurrencyTest {
 
     @Autowired
     private PaymentService paymentService;
+
+    @Autowired
+    private PaymentCommandService paymentCommandService;
 
     @Autowired
     private PaymentRepository paymentRepository;
@@ -91,7 +93,7 @@ class PaymentServiceConcurrencyTest {
 
     @Test
     @DisplayName("결제 승인 트랜잭션이 락을 잡고 있으면 취소는 대기하고, 승인 커밋 후 결제 완료 상태를 읽어 취소가 거부된다.")
-    void cancelPayment_waitForApproveLock_Fail() throws Exception {
+    void cancelledByUser_waitForApproveLock_Fail() throws Exception {
         //given
         ExecutorService executor = Executors.newSingleThreadExecutor();
         List<Future<?>> cancelFutures = new ArrayList<>();
@@ -104,7 +106,7 @@ class PaymentServiceConcurrencyTest {
                 assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PENDING);
 
                 // 그 사이 다른 스레드에서 취소를 요청하면 락 해제까지 대기한다.
-                Future<?> cancelFuture = executor.submit(() -> paymentService.cancelPayment(userId, orderId));
+                Future<?> cancelFuture = executor.submit(() -> paymentService.cancelledByUser(userId, orderId));
                 cancelFutures.add(cancelFuture);
                 assertThatThrownBy(() -> cancelFuture.get(1, TimeUnit.SECONDS))
                         .isInstanceOf(TimeoutException.class);
@@ -128,7 +130,7 @@ class PaymentServiceConcurrencyTest {
 
     @Test
     @DisplayName("다른 트랜잭션이 락을 3초 넘게 잡고 있으면 취소는 락 획득 실패로 끝나고 결제 상태는 바뀌지 않는다.")
-    void cancelPayment_lockWaitTimeout_Fail() {
+    void cancelledByUser_lockWaitTimeout_Fail() {
         //given
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -138,7 +140,7 @@ class PaymentServiceConcurrencyTest {
                 // 다른 트랜잭션이 결제에 비관적 락을 잡은 상태를 유지한다.
                 paymentRepository.findWithLockByOrderId(orderId).orElseThrow();
 
-                Future<?> cancelFuture = executor.submit(() -> paymentService.cancelPayment(userId, orderId));
+                Future<?> cancelFuture = executor.submit(() -> paymentService.cancelledByUser(userId, orderId));
                 assertThatThrownBy(() -> cancelFuture.get(10, TimeUnit.SECONDS))
                         .isInstanceOf(ExecutionException.class)
                         .cause()
@@ -154,7 +156,7 @@ class PaymentServiceConcurrencyTest {
 
     @Test
     @DisplayName("같은 결제에 취소 요청이 동시에 들어와도 한 건만 성공한다.")
-    void cancelPayment_concurrentRequests_OnlyOneSuccess() throws Exception {
+    void cancelledByUser_concurrentRequests_OnlyOneSuccess() throws Exception {
         //given
         int threadCount = 10;
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
@@ -169,7 +171,7 @@ class PaymentServiceConcurrencyTest {
             futures.add(executor.submit(() -> {
                 try {
                     startLatch.await();
-                    paymentService.cancelPayment(userId, orderId);
+                    paymentService.cancelledByUser(userId, orderId);
                     successCount.incrementAndGet();
                 } catch (BusinessException e) {
                     if (e.getErrorCode() == ErrorCode.PAYMENT_CANCEL_PROHIBITED) {
@@ -219,7 +221,7 @@ class PaymentServiceConcurrencyTest {
 
                 // 그 사이 도착한 승인(예: 웹훅)은 락 해제까지 대기한다.
                 Future<?> approveFuture = executor.submit(() ->
-                        paymentService.approvePayment(new PgPaymentResult(pgId, 10000, secondApprovedAt)));
+                        paymentCommandService.approvePayment(pgId, secondApprovedAt));
                 approveFutures.add(approveFuture);
                 assertThatThrownBy(() -> approveFuture.get(1, TimeUnit.SECONDS))
                         .isInstanceOf(TimeoutException.class);
@@ -248,13 +250,13 @@ class PaymentServiceConcurrencyTest {
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
         List<Future<?>> futures = new ArrayList<>();
-        PgPaymentResult result = new PgPaymentResult(pgId, 10000, Instant.parse("2026-10-20T01:00:00Z"));
+        Instant paidAt = Instant.parse("2026-10-20T01:00:00Z");
 
         //when
         for (int i = 0; i < threadCount; i++) {
             futures.add(executor.submit(() -> {
                 startLatch.await();
-                paymentService.approvePayment(result);
+                paymentCommandService.approvePayment(pgId, paidAt);
                 return null;
             }));
         }

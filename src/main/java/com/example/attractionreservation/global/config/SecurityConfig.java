@@ -23,6 +23,9 @@ public class SecurityConfig {
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
     private final JwtAccessDeniedHandler jwtAccessDeniedHandler;
     private final UserRepository userRepository;
+    private static final String TICKET_PRODUCTS_PATH = "/api/ticket-products";
+    private static final String TICKET_PRODUCTS_SUB_PATH = "/api/ticket-products/**";
+    private static final String ADMIN_ROLE = "ADMIN";
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -44,24 +47,24 @@ public class SecurityConfig {
                         // 티켓 상품 등록·수정·삭제는 관리자만 가능하다.
                         .requestMatchers(
                                 HttpMethod.POST,
-                                "/api/ticket-products",
-                                "/api/ticket-products/**"
-                        ).hasRole("ADMIN")
+                                TICKET_PRODUCTS_PATH,
+                                TICKET_PRODUCTS_SUB_PATH
+                        ).hasRole(ADMIN_ROLE)
                         .requestMatchers(
                                 HttpMethod.PUT,
-                                "/api/ticket-products",
-                                "/api/ticket-products/**"
-                        ).hasRole("ADMIN")
+                                TICKET_PRODUCTS_PATH,
+                                TICKET_PRODUCTS_SUB_PATH
+                        ).hasRole(ADMIN_ROLE)
                         .requestMatchers(
                                 HttpMethod.PATCH,
-                                "/api/ticket-products",
-                                "/api/ticket-products/**"
-                        ).hasRole("ADMIN")
+                                TICKET_PRODUCTS_PATH,
+                                TICKET_PRODUCTS_SUB_PATH
+                        ).hasRole(ADMIN_ROLE)
                         .requestMatchers(
                                 HttpMethod.DELETE,
-                                "/api/ticket-products",
-                                "/api/ticket-products/**"
-                        ).hasRole("ADMIN")
+                                TICKET_PRODUCTS_PATH,
+                                TICKET_PRODUCTS_SUB_PATH
+                        ).hasRole(ADMIN_ROLE)
 
                         // 그 외 API는 로그인한 사용자만 접근할 수 있다.
                         .anyRequest().authenticated())

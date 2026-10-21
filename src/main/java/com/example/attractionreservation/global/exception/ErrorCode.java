@@ -38,6 +38,7 @@ public enum ErrorCode {
     INVALID_TICKET_VALID_DATE(HttpStatus.BAD_REQUEST, "입장권 방문일은 필수입니다."),
     INVALID_TICKET_ORDER_ITEM(HttpStatus.BAD_REQUEST, "입장권의 주문 항목은 필수입니다."),
     INVALID_TICKET_SORT(HttpStatus.BAD_REQUEST, "지원하지 않는 티켓 정렬 기준입니다."),
+    TICKET_NOT_FOUND(HttpStatus.NOT_FOUND, "티켓을 찾을 수 없습니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

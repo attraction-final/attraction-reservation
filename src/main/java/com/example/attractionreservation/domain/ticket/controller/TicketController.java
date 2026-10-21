@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.ticket.controller;
 
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition;
+import com.example.attractionreservation.domain.ticket.dto.SearchTicketDetailResponse;
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketListResponse;
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
@@ -12,10 +13,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 
 @RestController
@@ -46,5 +44,15 @@ public class TicketController {
         SearchTicketListResponse response = SearchTicketListResponse.from(result);
 
         return ResponseEntity.ok(ApiResponse.ok("내 티켓 목록 조회에 성공했습니다.", response));
+    }
+
+    // 내 티켓 상세 조회
+    // TODO : 추후 인증 완료 후 인증 검사
+    @GetMapping("/{ticketId}")
+    public ResponseEntity<ApiResponse<SearchTicketDetailResponse>> getTicketById(
+            @PathVariable Long ticketId
+    ) {
+        SearchTicketDetailResponse response = ticketService.findTicketById(ticketId);
+        return ResponseEntity.ok(ApiResponse.ok("티켓 상세 조회에 성공했습니다.", response));
     }
 }

@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -56,6 +57,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -97,6 +99,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -123,6 +126,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -149,6 +153,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -173,6 +178,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -196,6 +202,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -220,6 +227,7 @@ class TicketProductControllerIntegrationTest {
 
         // when & then
         mockMvc.perform(post("/api/ticket-products")
+                        .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())

@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.attractionSlot.service;
 
+import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.dto.SearchAttractionSlotResponse;
@@ -7,6 +9,7 @@ import com.example.attractionreservation.domain.attractionSlot.entity.Attraction
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

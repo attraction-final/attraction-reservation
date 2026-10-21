@@ -55,7 +55,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -96,7 +96,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -122,7 +122,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -148,7 +148,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -172,7 +172,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -195,7 +195,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -219,7 +219,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())

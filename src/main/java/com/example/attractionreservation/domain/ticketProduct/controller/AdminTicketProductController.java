@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/admin/ticket-product")
+@RequestMapping("/api/admin/ticket-products")
 public class AdminTicketProductController {
 
     private final TicketProductService ticketProductService;

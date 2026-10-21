@@ -81,6 +81,7 @@ public class Attraction extends BaseTimeEntity {
 
     // Attraction Service 삭제에 필요
     public void delete() {
+        this.operationStatus = OperationStatus.DELETED;
         this.deletedAt = Instant.now();
     }
 

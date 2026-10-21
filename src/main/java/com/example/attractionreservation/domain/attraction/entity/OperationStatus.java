@@ -14,12 +14,13 @@ public enum OperationStatus {
     OPERATING("운영중"),
     MAINTENANCE("점검"),
     SUSPENDED("일시중단"),
-    CLOSED("운영 종료");
+    DELETED("운영 종료");
 
     private final String description; // 각 Enum 상수의 설명을 저장하는 필드
 
     public static OperationStatus from(String value) {
         return Arrays.stream(values())
+                .filter(status -> status != DELETED)
                 .filter(status -> status.name().equals(value))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_ATTRACTION_STATUS));

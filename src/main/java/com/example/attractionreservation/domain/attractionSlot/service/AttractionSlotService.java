@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.SearchAdminAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.dto.SearchAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
@@ -79,5 +80,14 @@ public class AttractionSlotService {
         LocalDateTime nextDayStart = date.plusDays(1).atStartOfDay();
         return attractionSlotRepository.findSlotsByAttractionIdAndDate(
                 attractionId, dayStart, nextDayStart, includeCancelled);
+    }
+
+    // 관리자 날짜별 조회
+    @Transactional(readOnly = true)
+    public SearchAdminAttractionSlotResponse findAdminAttractionSlotsByDate(Long attractionId, LocalDate date,
+                                                                            boolean includeCancelled) {
+        Attraction attraction = findActiveAttraction(attractionId);
+        List<AttractionSlot> slots = findSlotsOfDay(attractionId, date, includeCancelled);
+        return SearchAdminAttractionSlotResponse.of(attraction, date, slots);
     }
 }

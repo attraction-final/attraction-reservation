@@ -87,4 +87,30 @@ public class AttractionSlot extends BaseTimeEntity {
         }
         return null;
     }
+
+    // 조회용 계산
+    public int getRemainingCount() {
+        return capacity - reservedCount;
+    }
+
+    public LocalDateTime getReservationDeadline() {
+        return startsAt.minusMinutes(RESERVATION_DEADLINE_MINUTES);
+    }
+
+    public boolean isFull() {
+        return getRemainingCount() <= 0;
+    }
+
+    public boolean hasReservations() {
+        return reservedCount > 0;
+    }
+
+    public boolean isCancelled() {
+        return status == SlotStatus.CANCELLED;
+    }
+
+    // 종료 시각이 지났으면(같은 시각 포함) 종료된 슬롯
+    public boolean isEnded(LocalDateTime now) {
+        return !now.isBefore(endsAt);
+    }
 }

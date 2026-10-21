@@ -70,4 +70,13 @@ public class TicketProductController {
 
         return ResponseEntity.ok(ApiResponse.ok("티켓 상품 목록 조회에 성공했습니다.", response));
     }
+
+    // 티켓 상품 상세 조회
+    @GetMapping("/{ticketProductId}")
+    public ResponseEntity<ApiResponse<SearchTicketProductResponse>> getTicketProductById(
+            @PathVariable Long ticketProductId
+    ) {
+        SearchTicketProductResponse response = ticketProductService.findTicketProductById(ticketProductId);
+        return ResponseEntity.ok(ApiResponse.ok("티켓 상품 상세 조회에 성공했습니다.", response));
+    }
 }

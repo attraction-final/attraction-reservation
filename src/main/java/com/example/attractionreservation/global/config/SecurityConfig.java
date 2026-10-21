@@ -73,6 +73,16 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/users/signup").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
 
+                        // 관리자 전용 API는 ADMIN 권한이 있는 회원만 접근할 수 있다.
+                        .requestMatchers("/api/admin/**").hasRole(ADMIN_ROLE)
+
+                        // 어트랙션 목록·상세 조회는 인증 없이 접근할 수 있다.
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/attractions",
+                                "/api/attractions/{attractionId}"
+                        ).permitAll()
+
                         // 티켓 상품 등록·수정·삭제는 관리자만 가능하다.
                         .requestMatchers(
                                 HttpMethod.POST,

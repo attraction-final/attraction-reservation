@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.attractionSlot.service;
 
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.SearchAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -10,7 +11,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -54,5 +57,24 @@ public class AttractionSlotService {
         if (!AttractionSlot.isWithinOperatingHours(startsAt, endsAt)) { // BR-SLT-03
             throw new BusinessException(ErrorCode.SLOT_OUT_OF_OPERATING_HOURS);
         }
+    }
+
+    // 사용자 날짜별 조회
+    @Transactional(readOnly = true)
+    public SearchAttractionSlotResponse findAttractionSlotsByDate(Long attractionId, LocalDate date) {
+        Attraction attraction = findActiveAttraction(attractionId);
+        LocalDateTime now = KstTime.now();
+        LocalDate targetDate = (date != null) ? date : now.toLocalDate(); // 날짜가 없으면 오늘
+
+        List<AttractionSlot> slots = findSlotsOfDay(attractionId, targetDate, false); // 취소 슬롯은 숨김
+        return SearchAttractionSlotResponse.of(attraction, targetDate, slots, now);
+    }
+
+    // 하루 범위: [그날 00:00, 다음날 00:00)
+    private List<AttractionSlot> findSlotsOfDay(Long attractionId, LocalDate date, boolean includeCancelled) {
+        LocalDateTime dayStart = date.atStartOfDay();
+        LocalDateTime nextDayStart = date.plusDays(1).atStartOfDay();
+        return attractionSlotRepository.findSlotsByAttractionIdAndDate(
+                attractionId, dayStart, nextDayStart, includeCancelled);
     }
 }

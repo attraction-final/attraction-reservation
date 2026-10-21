@@ -1,5 +1,8 @@
 package com.example.attractionreservation.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
@@ -343,4 +346,115 @@ class UserControllerTest {
 
         verifyNoInteractions(userService);
     }
+
+    @Test
+    void updatePassword_authenticated_returnsOk() throws Exception {
+        Long userId = 1L;
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                userId,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        // 다른 회원 ID를 보내더라도 인증된 본인의 비밀번호만 변경한다.
+        mockMvc.perform(patch("/api/users/me/password")
+                        .with(authentication(authenticatedUser))
+                        .param("userId", "999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "currentPassword": "Password!123",
+                                "newPassword": "NewPassword!456"
+                            }
+                            """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("비밀번호 변경에 성공했습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.password").doesNotExist());
+
+        verify(userService).updatePassword(
+                userId,
+                new UpdatePasswordRequest("Password!123", "NewPassword!456")
+        );
+        verifyNoMoreInteractions(userService);
+    }
+
+    @Test
+    void updatePassword_wrongCurrentPassword_returnsBadRequest() throws Exception {
+        Long userId = 1L;
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                userId,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+        UpdatePasswordRequest request = new UpdatePasswordRequest(
+                "WrongPassword!123", "NewPassword!456"
+        );
+
+        doThrow(new BusinessException(ErrorCode.CURRENT_PASSWORD_MISMATCH))
+                .when(userService).updatePassword(userId, request);
+
+        mockMvc.perform(patch("/api/users/me/password")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "currentPassword": "WrongPassword!123",
+                                "newPassword": "NewPassword!456"
+                            }
+                            """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.CURRENT_PASSWORD_MISMATCH.getMessage()));
+
+        verify(userService).updatePassword(userId, request);
+    }
+
+    @Test
+    void updatePassword_withoutAuthentication_returnsUnauthorized()
+            throws Exception {
+        mockMvc.perform(patch("/api/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "currentPassword": "Password!123",
+                                "newPassword": "NewPassword!456"
+                            }
+                            """))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(userService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}",
+            "{\"currentPassword\":\"Password!123\"}",
+            "{\"newPassword\":\"NewPassword!456\"}",
+            "{\"currentPassword\":\"   \",\"newPassword\":\"NewPassword!456\"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"   \"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"Ab1!\"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"abcdefgh123\"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"Abcdefghijklmnopqr123!\"}"
+    })
+    void updatePassword_invalidInput_returnsBadRequest(String requestBody)
+            throws Exception {
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        mockMvc.perform(patch("/api/users/me/password")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(userService);
+    }
+
 }

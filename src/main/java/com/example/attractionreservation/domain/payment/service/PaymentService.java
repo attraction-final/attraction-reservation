@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
@@ -46,6 +48,12 @@ public class PaymentService {
 
         // TODO: 재고 복구 로직 필요
         paymentRepository.save(found);
+    }
+
+    // 웹훅처럼 로그인 사용자가 없는 경로에서 사용한다. 소유자를 확인하지 않는다.
+    @Transactional(readOnly = true)
+    public Optional<Payment> findByPgId(String pgId) {
+        return paymentRepository.findByPgId(pgId);
     }
 
     @Transactional(readOnly = true)

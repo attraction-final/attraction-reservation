@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.attraction.entity;
 
+import com.example.attractionreservation.domain.attraction.entity.Enum.OperationStatus;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -80,7 +81,7 @@ public class Attraction extends BaseTimeEntity {
     }
 
     // Attraction Service 삭제에 필요
-    public void delete() {
+    public void deleted() {
         this.operationStatus = OperationStatus.DELETED;
         this.deletedAt = Instant.now();
     }

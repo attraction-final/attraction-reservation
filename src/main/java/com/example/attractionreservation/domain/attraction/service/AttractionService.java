@@ -2,7 +2,7 @@ package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
-import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
+import com.example.attractionreservation.domain.attraction.entity.Enum.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -178,6 +178,6 @@ public class AttractionService {
     public void deleteAttraction(Long attractionId) {
         Attraction attraction = findActiveAttraction(attractionId);
         validateNoUpcomingReservations(attractionId, "삭제"); // BR-ATR-06
-        attraction.delete();
+        attraction.deleted();
     }
 }

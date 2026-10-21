@@ -4,8 +4,6 @@ import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketListResponse;
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
-import com.example.attractionreservation.global.exception.BusinessException;
-import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -19,7 +17,6 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Set;
 
 @RestController
 @RequiredArgsConstructor
@@ -27,9 +24,6 @@ import java.util.Set;
 public class TicketController {
 
     private final TicketService ticketService;
-
-    private static final Set<String> ALLOWED_SORT_PROPERTIES =
-            Set.of("status", "name", "type", "validDate", "id");
 
     // 내 티켓 목록 조회 (이름, 종류, 상태, 페이징)
     // TODO: 추후 인증 완료 후 인증 검사
@@ -40,12 +34,6 @@ public class TicketController {
 
     ) {
         Sort sort = pageable.getSort();
-
-        for (Sort.Order order :sort) {
-            if (!ALLOWED_SORT_PROPERTIES.contains(order.getProperty())) {
-                throw new BusinessException(ErrorCode.INVALID_TICKET_SORT);
-            }
-        }
 
         if (sort.getOrderFor("id") == null) {
             sort = sort.and(Sort.by(Sort.Direction.DESC, "id"));

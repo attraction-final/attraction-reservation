@@ -35,6 +35,9 @@ public class Ticket extends BaseTimeEntity {
     @Column(name = "code", nullable = false, length = 50, unique = true)
     private String code;
 
+    @Column(name = "name", nullable = false, length = 80)
+    private String name;
+
     @Column(name = "type", nullable = false)
     @Enumerated(EnumType.STRING)
     private TicketType type;
@@ -61,6 +64,7 @@ public class Ticket extends BaseTimeEntity {
         this.validDate = validDate;
         this.code = "TKT-" + UUID.randomUUID().toString();
         this.status = TicketStatus.UNUSED;
+        this.name = orderItem.getTicketProduct().getName();
         this.type = orderItem.getTicketProduct().getType();
         this.orderItem = orderItem;
     }

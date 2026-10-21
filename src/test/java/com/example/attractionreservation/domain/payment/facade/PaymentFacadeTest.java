@@ -54,6 +54,9 @@ class PaymentFacadeTest {
     @Mock
     private PaymentGateway paymentGateway;
 
+    @Mock
+    private PaymentCompensationProcessor paymentCompensationProcessor;
+
     @InjectMocks
     private PaymentFacade paymentFacade;
 
@@ -187,34 +190,35 @@ class PaymentFacadeTest {
     }
 
     @Test
-    @DisplayName("PG 결제 금액이 원장과 다르면 결제를 실패 처리한 뒤 PG 결제를 취소한다.")
-    void confirmPayment_amountMismatch_CancelPgPayment() {
+    @DisplayName("PG 결제 금액이 원장과 다르면 실패 처리·보상 요청 후 보상 취소를 즉시 한 번 시도한다.")
+    void confirmPayment_amountMismatch_RequestCompensation() {
         //given
         given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
-        given(paymentCommandService.failPayment(pgId)).willReturn(true);
+        given(paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치")).willReturn(true);
 
         //when & then
         assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
-        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+        verify(paymentCompensationProcessor).processByPgId(pgId);
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
         verify(paymentCommandService, never()).approvePayment(anyString(), any());
     }
 
     @Test
-    @DisplayName("금액 불일치 결제가 이미 다른 요청에서 처리됐으면 PG 취소를 하지 않는다.")
-    void confirmPayment_amountMismatchAlreadyProcessed_SkipCancel() {
+    @DisplayName("금액 불일치 결제가 이미 다른 요청에서 처리됐으면 보상 취소를 시도하지 않는다.")
+    void confirmPayment_amountMismatchAlreadyProcessed_SkipCompensation() {
         //given
         given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
-        given(paymentCommandService.failPayment(pgId)).willReturn(false);
+        given(paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치")).willReturn(false);
 
         //when & then
         assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
-        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+        verifyNoInteractions(paymentCompensationProcessor);
     }
 
     @Test
@@ -306,36 +310,19 @@ class PaymentFacadeTest {
     }
 
     @Test
-    @DisplayName("웹훅 동기화: 금액이 다르면 실패 처리 후 PG 취소하고 COMPENSATED를 반환한다.")
+    @DisplayName("웹훅 동기화: 금액이 다르면 실패 처리·보상 요청 후 즉시 시도하고 COMPENSATED를 반환한다.")
     void syncPayment_amountMismatch_Compensated() {
         //given
         given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
-        given(paymentCommandService.failPayment(pgId)).willReturn(true);
+        given(paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치")).willReturn(true);
 
         //when
         PaymentSyncResult result = paymentFacade.syncPayment(pgId);
 
         //then
         assertEquals(PaymentSyncResult.COMPENSATED, result);
-        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
-    }
-
-    @Test
-    @DisplayName("웹훅 동기화: 금액 불일치 보상 취소가 실패하면 COMPENSATION_FAILED를 반환한다.")
-    void syncPayment_cancellationFailed_CompensationFailed() {
-        //given
-        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
-        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
-        given(paymentCommandService.failPayment(pgId)).willReturn(true);
-        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
-                .given(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
-
-        //when
-        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
-
-        //then
-        assertEquals(PaymentSyncResult.COMPENSATION_FAILED, result);
+        verify(paymentCompensationProcessor).processByPgId(pgId);
     }
 
     @ParameterizedTest

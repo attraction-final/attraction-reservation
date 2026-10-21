@@ -133,16 +133,16 @@ class WebhookEventProcessorTest {
 
     @Test
     @DisplayName("수동 처리가 필요한 결과도 결과로 기록하고 실패로 기록하지 않는다.")
-    void process_compensationFailed_RecordResult() {
+    void process_stateConflict_RecordResult() {
         //given
         given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
-        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.COMPENSATION_FAILED);
+        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.STATE_CONFLICT);
 
         //when
         webhookEventProcessor.process(EVENT_ID);
 
         //then
-        verify(webhookEventCommandService).recordResult(eq(EVENT_ID), eq(PaymentSyncResult.COMPENSATION_FAILED), any());
+        verify(webhookEventCommandService).recordResult(eq(EVENT_ID), eq(PaymentSyncResult.STATE_CONFLICT), any());
         verify(webhookEventCommandService, never()).recordFailure(anyLong(), any(), any());
     }
 

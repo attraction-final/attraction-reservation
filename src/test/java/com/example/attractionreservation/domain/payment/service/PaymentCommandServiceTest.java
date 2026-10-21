@@ -27,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentCommandServiceTest {
@@ -37,6 +39,9 @@ class PaymentCommandServiceTest {
 
     @Mock
     private PaymentRepository paymentRepository;
+
+    @Mock
+    private PaymentCompensationService paymentCompensationService;
 
     @InjectMocks
     private PaymentCommandService paymentCommandService;
@@ -132,6 +137,54 @@ class PaymentCommandServiceTest {
         assertFalse(failed);
         assertEquals(status, payment.getStatus());
         assertEquals(orderStatus, payment.getOrder().getStatus());
+    }
+
+    @Test
+    @DisplayName("PG 결제 실패로 실패 처리할 때는 보상 요청을 저장하지 않는다.")
+    void failPayment_pending_NoCompensation() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.failPayment(PG_ID);
+
+        //then
+        verifyNoInteractions(paymentCompensationService);
+    }
+
+    @Test
+    @DisplayName("금액 불일치로 실패 처리하면 결제 실패·주문 취소와 함께 PG 결제 금액으로 보상 요청을 저장한다.")
+    void failPaymentWithCompensation_pending_SaveCompensation() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        boolean failed = paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        assertTrue(failed);
+        assertEquals(PaymentStatus.FAILED, payment.getStatus());
+        assertEquals(OrderStatus.CANCELLED, payment.getOrder().getStatus());
+        verify(paymentCompensationService).saveCompensatingEvent(PG_ID, 9999L, "결제 금액 불일치");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "PENDING")
+    @DisplayName("이미 처리된 결제는 실패 처리하지 않고 보상 요청도 저장하지 않는다.")
+    void failPaymentWithCompensation_notPending_Skip(PaymentStatus status) {
+        //given
+        Payment payment = createPaymentWithStatus(status);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        boolean failed = paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        assertFalse(failed);
+        assertEquals(status, payment.getStatus());
+        verifyNoInteractions(paymentCompensationService);
     }
 
     @Test

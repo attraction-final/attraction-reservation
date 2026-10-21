@@ -5,4 +5,4 @@ portone:
   api-secret: test-api-secret
   store-id: test-store-id
   channel-key: test-channel-key
-  webhook-secret: test-webhook-secret
+  webhook-secret: whsec_dGVzdC13ZWJob29rLXNlY3JldA==  # SDK가 Base64로 디코드하므로 Base64 값이어야 한다

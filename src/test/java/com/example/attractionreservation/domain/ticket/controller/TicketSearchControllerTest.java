@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -211,5 +212,54 @@ class TicketSearchControllerTest {
                         invocation.getArgument(2, Pageable.class)
                 )
         );
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "foo",
+            "orderItem.order.user.id",
+            "code"
+    })
+    @DisplayName("허용하지 않은 정렬 필드는 400으로 거부한다")
+    void getTicketAll_InvalidSort_BadRequest(String property) throws Exception {
+        // when & then
+        mockMvc.perform(get("/api/tickets/me")
+                        .param("sort", property + ",asc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.INVALID_TICKET_SORT.getMessage()));
+
+        verifyNoInteractions(ticketService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"status", "name", "type", "validDate", "id"})
+    @DisplayName("허용한 정렬 필드는 조회에 전달한다")
+    void getTicketAll_AllowedSort_Success(String property) throws Exception {
+        // given
+        givenEmptyPage();
+
+        // when & then
+        mockMvc.perform(get("/api/tickets/me")
+                        .param("sort", property + ",asc"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> captor =
+                ArgumentCaptor.forClass(Pageable.class);
+
+        verify(ticketService).findTicketAll(
+                eq(1L),
+                any(SearchTicketCondition.class),
+                captor.capture()
+        );
+
+        Sort expected = Sort.by(Sort.Direction.ASC, property);
+
+        if (!property.equals("id")) {
+            expected = expected.and(Sort.by(Sort.Direction.DESC, "id"));
+        }
+
+        assertThat(captor.getValue().getSort()).isEqualTo(expected);
     }
 }

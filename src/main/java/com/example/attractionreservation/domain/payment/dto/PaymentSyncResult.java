@@ -14,8 +14,6 @@ public enum PaymentSyncResult {
     COMPENSATED,
     // 우리 원장에 없는 결제
     NOT_OUR_PAYMENT,
-    // PG 보상 취소 실패. PG에는 결제가 남아 있어 수동 환불이 필요하다.
-    COMPENSATION_FAILED,
     // 원장 상태가 이미 끝나(CANCELLED 등) 반영할 수 없다. 수동 확인이 필요하다.
     STATE_CONFLICT
 }

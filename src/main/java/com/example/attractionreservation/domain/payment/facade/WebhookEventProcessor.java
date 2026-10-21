@@ -65,8 +65,6 @@ public class WebhookEventProcessor {
 
     private void logResult(Long eventId, String pgId, PaymentSyncResult result) {
         switch (result) {
-            case COMPENSATION_FAILED ->
-                    log.error("[Webhook] PG 보상 취소 실패, 수동 환불 필요: eventId={}, pgId={}", eventId, pgId);
             case STATE_CONFLICT ->
                     log.error("[Webhook] 원장 상태와 충돌, 수동 확인 필요: eventId={}, pgId={}", eventId, pgId);
             default -> log.info("[Webhook] 처리 완료: eventId={}, pgId={}, result={}", eventId, pgId, result);

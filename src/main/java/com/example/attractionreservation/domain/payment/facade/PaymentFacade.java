@@ -43,7 +43,8 @@ public class PaymentFacade {
      *
      * <p>웹훅 본문은 신뢰하지 않으므로 이벤트 종류와 무관하게 PG를 다시 조회해 판단한다.
      * 업무상 예상되는 결과는 {@link PaymentSyncResult}로 반환하고,
-     * 재시도가 필요한 오류(PG 조회·취소 실패, 락 충돌 등)만 예외로 던진다.
+     * 재시도가 필요한 오류(PG 조회 실패, 락 충돌 등)만 예외로 던진다.
+     * 금액 불일치 보상 취소는 보상 Outbox가 따로 재시도하므로 결과에 영향을 주지 않는다(COMPENSATED).
      */
     public PaymentSyncResult syncPayment(String pgId) {
         Optional<Payment> found = paymentService.findByPgId(pgId);
@@ -65,8 +66,6 @@ public class PaymentFacade {
                 case PAYMENT_NOT_PAID -> PaymentSyncResult.NOT_PAID;
                 case PAYMENT_PG_FAILED -> PaymentSyncResult.PG_FAILED;
                 case PAYMENT_INCORRECT_AMOUNT -> PaymentSyncResult.COMPENSATED;
-                // 결제 실패가 커밋된 뒤라 재시도하면 ALREADY_DONE으로 끝나 보상이 가려진다.
-                case PAYMENT_CANCELLATION_FAILED -> PaymentSyncResult.COMPENSATION_FAILED;
                 // approvePayment가 PAID·FAILED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다.
                 case PAYMENT_INVALID_STATUS_TRANSITION, ORDER_INVALID_STATUS_TRANSITION -> PaymentSyncResult.STATE_CONFLICT;
                 default -> throw e;

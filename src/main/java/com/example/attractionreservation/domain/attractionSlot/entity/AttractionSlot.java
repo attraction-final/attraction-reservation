@@ -69,4 +69,22 @@ public class AttractionSlot extends BaseTimeEntity {
         boolean isBeforeClose = !endsAt.toLocalTime().isAfter(PARK_CLOSE_TIME);
         return isSameDay && isAfterOpen && isBeforeClose;
     }
+
+    // 사용자 날짜별 조회
+    // 지금 예약할 수 없는 이유를 돌려준다. 예약 가능하면 null.
+    public UnavailableReason findUnavailableReason(boolean isAttractionOperating, LocalDateTime now) {
+        if (!isAttractionOperating) {
+            return UnavailableReason.ATTRACTION_NOT_OPERATING;
+        }
+        if (status == SlotStatus.SUSPENDED) {
+            return UnavailableReason.SUSPENDED;
+        }
+        if (now.isAfter(getReservationDeadline())) { // 마감 시각 정각은 허용 (9장 #2)
+            return UnavailableReason.DEADLINE_PASSED;
+        }
+        if (status == SlotStatus.CLOSED || isFull()) {
+            return UnavailableReason.FULL;
+        }
+        return null;
+    }
 }

@@ -1,7 +1,7 @@
 package com.example.attractionreservation.domain.attraction.dto;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
-import com.example.attractionreservation.domain.attraction.entity.Enum.OperationStatus;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.global.util.KstTime;
 import com.fasterxml.jackson.annotation.JsonFormat;
 

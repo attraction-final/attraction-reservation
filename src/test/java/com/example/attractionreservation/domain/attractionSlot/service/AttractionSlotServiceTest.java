@@ -1,12 +1,15 @@
 package com.example.attractionreservation.domain.attractionSlot.service;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
-import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.SearchAdminAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.SearchAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
-import com.example.attractionreservation.domain.attractionSlot.entity.SlotStatus;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.UnavailableReason;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -22,6 +25,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,7 +37,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
-public class AttractionSlotServiceTest {
+class AttractionSlotServiceTest {
 
     @Mock
     private AttractionSlotRepository attractionSlotRepository;
@@ -142,6 +146,82 @@ public class AttractionSlotServiceTest {
             assertErrorCode(() -> attractionSlotService.createAttractionSlot(
                     1L, new CreateAttractionSlotRequest(TOMORROW.atTime(14, 0), 20)), ErrorCode.SLOT_TIME_OVERLAP);
             verify(attractionSlotRepository, never()).save(any());
+        }
+    }
+
+    // 날짜별 조회
+    @Nested
+    @DisplayName("날짜별 조회")
+    class Search {
+
+        @Test
+        @DisplayName("사용자: 날짜 없으면 오늘, 취소 슬롯 제외로 조회")
+        void userDefaultToday() {
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+                    .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
+            LocalDate today = KstTime.now().toLocalDate();
+            given(attractionSlotRepository.findSlotsByAttractionIdAndDate(
+                    1L, today.atStartOfDay(), today.plusDays(1).atStartOfDay(), false)).willReturn(List.of());
+
+            SearchAttractionSlotResponse response = attractionSlotService.findAttractionSlotsByDate(1L, null);
+
+            assertThat(response.date()).isEqualTo(today);
+            assertThat(response.slots()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("사용자: 어트랙션이 운영중이 아니면 모든 슬롯 예약 불가")
+        void userAttractionNotOperating() {
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+                    .willReturn(Optional.of(createAttraction(OperationStatus.MAINTENANCE)));
+            given(attractionSlotRepository.findSlotsByAttractionIdAndDate(eq(1L), any(), any(), eq(false)))
+                    .willReturn(List.of(createTomorrowSlot(0, SlotStatus.OPEN)));
+
+            SearchAttractionSlotResponse response = attractionSlotService.findAttractionSlotsByDate(1L, TOMORROW);
+
+            SearchAttractionSlotResponse.SlotItem item = response.slots().get(0);
+            assertThat(item.reservable()).isFalse();
+            assertThat(item.unavailableReason()).isEqualTo(UnavailableReason.ATTRACTION_NOT_OPERATING);
+        }
+
+        @Test
+        @DisplayName("사용자: 내일 OPEN 슬롯은 예약 가능")
+        void userReservable() {
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+                    .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
+            given(attractionSlotRepository.findSlotsByAttractionIdAndDate(eq(1L), any(), any(), eq(false)))
+                    .willReturn(List.of(createTomorrowSlot(12, SlotStatus.OPEN)));
+
+            SearchAttractionSlotResponse.SlotItem item =
+                    attractionSlotService.findAttractionSlotsByDate(1L, TOMORROW).slots().get(0);
+
+            assertThat(item.reservable()).isTrue();
+            assertThat(item.unavailableReason()).isNull();
+            assertThat(item.remainingCount()).isEqualTo(8);
+        }
+
+        @Test
+        @DisplayName("관리자: includeCancelled 값을 그대로 전달")
+        void adminIncludeCancelled() {
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+                    .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
+            given(attractionSlotRepository.findSlotsByAttractionIdAndDate(eq(1L), any(), any(), eq(true)))
+                    .willReturn(List.of(createTomorrowSlot(0, SlotStatus.CANCELLED)));
+
+            SearchAdminAttractionSlotResponse response =
+                    attractionSlotService.findAdminAttractionSlotsByDate(1L, TOMORROW, true);
+
+            assertThat(response.slots()).hasSize(1);
+            assertThat(response.slots().get(0).status()).isEqualTo(SlotStatus.CANCELLED);
+        }
+
+        @Test
+        @DisplayName("실패: 어트랙션 없음")
+        void attractionNotFound() {
+            given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+
+            assertErrorCode(() -> attractionSlotService.findAdminAttractionSlotsByDate(99L, TOMORROW, false),
+                    ErrorCode.ATTRACTION_NOT_FOUND);
         }
     }
 }

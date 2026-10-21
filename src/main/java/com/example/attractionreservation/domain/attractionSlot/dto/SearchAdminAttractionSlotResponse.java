@@ -2,7 +2,7 @@ package com.example.attractionreservation.domain.attractionSlot.dto;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
-import com.example.attractionreservation.domain.attractionSlot.entity.SlotStatus;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.time.LocalDate;

@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.attractionSlot.entity;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.UnavailableReason;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;

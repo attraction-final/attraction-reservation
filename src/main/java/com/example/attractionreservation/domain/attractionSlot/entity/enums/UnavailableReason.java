@@ -1,4 +1,4 @@
-package com.example.attractionreservation.domain.attractionSlot.entity;
+package com.example.attractionreservation.domain.attractionSlot.entity.enums;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;

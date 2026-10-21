@@ -50,9 +50,12 @@ public class UserService {
         return new CreateUserResponse(
                 savedUser.getId(),
                 savedUser.getEmail(),
-                savedUser.getNickname()
+                savedUser.getNickname(),
+                savedUser.getRole().name(),
+                savedUser.getStatus().name()
         );
     }
+
 
     private boolean isDuplicateEmailViolation(DataIntegrityViolationException exception) {
         Throwable cause = exception;
@@ -60,9 +63,13 @@ public class UserService {
         while (cause != null) {
             if (cause instanceof SQLException sqlException
                     && sqlException.getErrorCode() == 1062
-                    && sqlException.getMessage() != null
-                    && sqlException.getMessage().contains("email")) {
-                return true;
+                    && sqlException.getMessage() != null) {
+
+                String message = sqlException.getMessage();
+
+                // 이메일 UNIQUE 제약조건 위반만 중복 이메일 오류로 처리한다.
+                return message.contains("uk_users_email")
+                        || message.contains("UK6dotkott2kjsp8vw4d0m25fb7");
             }
 
             cause = cause.getCause();
@@ -70,4 +77,5 @@ public class UserService {
 
         return false;
     }
+
 }

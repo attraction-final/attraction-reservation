@@ -33,7 +33,9 @@ class UserControllerTest {
         CreateUserResponse response = new CreateUserResponse(
                 1L,
                 "test@gmail.com",
-                "홍길동"
+                "홍길동",
+                "USER",
+                "ACTIVE"
         );
 
         when(userService.signup(any()))
@@ -52,7 +54,10 @@ class UserControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.id").value(1))
                 .andExpect(jsonPath("$.data.email").value("test@gmail.com"))
-                .andExpect(jsonPath("$.data.nickname").value("홍길동"));
+                .andExpect(jsonPath("$.data.nickname").value("홍길동"))
+                .andExpect(jsonPath("$.data.role").value("USER"))
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+
     }
 
     @Test
@@ -109,5 +114,39 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(userService, never()).signup(any());
+    }
+
+    @Test
+    void signup_passwordExactly72Bytes_returnsCreated() throws Exception {
+        // given: 영문 2바이트 + 이모지 68바이트 + é 2바이트 = 72바이트
+        String password = "a1" + "😀".repeat(17) + "é";
+
+        CreateUserResponse response = new CreateUserResponse(
+                1L,
+                "test@gmail.com",
+                "홍길동",
+                "USER",
+                "ACTIVE"
+        );
+
+        when(userService.signup(any()))
+                .thenReturn(response);
+
+        String requestBody = """
+            {
+                "email": "test@gmail.com",
+                "password": "%s",
+                "nickname": "홍길동"
+            }
+            """.formatted(password);
+
+        // when & then
+        mockMvc.perform(post("/api/users/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.id").value(1));
+
+        verify(userService, times(1)).signup(any());
     }
 }

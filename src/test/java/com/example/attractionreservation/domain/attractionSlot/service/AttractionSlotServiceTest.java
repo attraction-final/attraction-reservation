@@ -374,4 +374,56 @@ class AttractionSlotServiceTest {
                     31L, new UpdateAttractionSlotCapacityRequest(30)), ErrorCode.SLOT_ALREADY_CANCELLED);
         }
     }
+
+    // 슬로 상태 변경
+    @Nested
+    @DisplayName("슬롯 상태 변경")
+    class UpdateStatus {
+
+        @Test
+        @DisplayName("성공: OPEN → SUSPENDED (예약 없음)")
+        void success() {
+            givenSlot(createTomorrowSlot(0, SlotStatus.OPEN));
+
+            UpdateAttractionSlotStatusResponse response = attractionSlotService.updateAttractionSlotStatus(
+                    31L, new UpdateAttractionSlotStatusRequest("SUSPENDED"));
+
+            assertThat(response.previousStatus()).isEqualTo(SlotStatus.OPEN);
+            assertThat(response.status()).isEqualTo(SlotStatus.SUSPENDED);
+        }
+
+        @Test
+        @DisplayName("실패: 허용되지 않은 값(CANCELLED)")
+        void invalidStatus() {
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+                    31L, new UpdateAttractionSlotStatusRequest("CANCELLED")), ErrorCode.INVALID_SLOT_STATUS);
+        }
+
+        @Test
+        @DisplayName("실패: 현재 상태와 같음")
+        void same() {
+            givenSlot(createTomorrowSlot(0, SlotStatus.OPEN));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+                    31L, new UpdateAttractionSlotStatusRequest("OPEN")), ErrorCode.SLOT_STATUS_SAME);
+        }
+
+        @Test
+        @DisplayName("실패: 잔여 0인데 OPEN으로")
+        void openWhenFull() {
+            givenSlot(createTomorrowSlot(20, SlotStatus.CLOSED));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+                    31L, new UpdateAttractionSlotStatusRequest("OPEN")), ErrorCode.SLOT_FULL);
+        }
+
+        @Test
+        @DisplayName("실패: 예약이 있는데 SUSPENDED로")
+        void suspendWithReservations() {
+            givenSlot(createTomorrowSlot(3, SlotStatus.OPEN));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+                    31L, new UpdateAttractionSlotStatusRequest("SUSPENDED")), ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+    }
 }

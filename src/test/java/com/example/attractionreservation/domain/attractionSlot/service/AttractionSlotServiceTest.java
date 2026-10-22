@@ -3,10 +3,7 @@ package com.example.attractionreservation.domain.attractionSlot.service;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
-import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
-import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
-import com.example.attractionreservation.domain.attractionSlot.dto.SearchAdminAttractionSlotResponse;
-import com.example.attractionreservation.domain.attractionSlot.dto.SearchAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.*;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.UnavailableReason;
@@ -267,6 +264,76 @@ class AttractionSlotServiceTest {
             AttractionSlot slot = createSlot(1L, startsAt, 20, 0, SlotStatus.SUSPENDED);
             assertThat(slot.findUnavailableReason(true, deadline.plusHours(1)))
                     .isEqualTo(UnavailableReason.SUSPENDED);
+        }
+    }
+
+    // 슬롯 시간 수정
+    @Nested
+    @DisplayName("슬롯 시간 수정")
+    class UpdateTime {
+
+        @Test
+        @DisplayName("성공: 시작·종료 시각 변경")
+        void success() {
+            AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
+            givenSlot(slot);
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(slot.getAttraction()));
+            given(attractionSlotRepository.countOverlappingSlotsExcludingSlotId(eq(1L), eq(31L), any(), any()))
+                    .willReturn(0L);
+
+            UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(
+                    31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30)));
+
+            assertThat(response.startsAt()).isEqualTo(TOMORROW.atTime(14, 30));
+            assertThat(response.endsAt()).isEqualTo(TOMORROW.atTime(14, 40));
+        }
+
+        @Test
+        @DisplayName("실패: 슬롯 없음")
+        void notFound() {
+            given(attractionSlotRepository.findById(99L)).willReturn(Optional.empty());
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                    99L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("실패: 예약이 있는 슬롯")
+        void hasReservations() {
+            givenSlot(createTomorrowSlot(1, SlotStatus.OPEN));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                            31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
+                    ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+
+        @Test
+        @DisplayName("실패: 이미 종료된 슬롯")
+        void ended() {
+            LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
+            givenSlot(createSlot(31L, yesterday, 20, 0, SlotStatus.OPEN));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                            31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
+                    ErrorCode.SLOT_ALREADY_ENDED);
+        }
+
+        @Test
+        @DisplayName("실패: 다른 슬롯과 겹침")
+        void overlap() {
+            AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
+            givenSlot(slot);
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(slot.getAttraction()));
+            given(attractionSlotRepository.countOverlappingSlotsExcludingSlotId(eq(1L), eq(31L), any(), any()))
+                    .willReturn(1L);
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                    31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_TIME_OVERLAP);
+            assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0)); // 바뀌지 않음
+        }
+
+        private void givenSlot(AttractionSlot slot) {
+            given(attractionSlotRepository.findById(slot.getId())).willReturn(Optional.of(slot));
         }
     }
 }

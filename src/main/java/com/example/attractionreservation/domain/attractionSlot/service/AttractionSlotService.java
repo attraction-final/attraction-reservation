@@ -2,10 +2,7 @@ package com.example.attractionreservation.domain.attractionSlot.service;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
-import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
-import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
-import com.example.attractionreservation.domain.attractionSlot.dto.SearchAdminAttractionSlotResponse;
-import com.example.attractionreservation.domain.attractionSlot.dto.SearchAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.*;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -18,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+
+import static com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot.calculateEndsAt;
 
 @Service
 @RequiredArgsConstructor
@@ -34,7 +33,7 @@ public class AttractionSlotService {
 
         // 2. 종료 시각 계산 후 시간 규칙 검사
         LocalDateTime startsAt = request.startsAt();
-        LocalDateTime endsAt = AttractionSlot.calculateEndsAt(startsAt, attraction.getDurationMinutes());
+        LocalDateTime endsAt = calculateEndsAt(startsAt, attraction.getDurationMinutes());
         validateSlotTime(startsAt, endsAt, KstTime.now());
 
         // 3. 같은 어트랙션의 다른 슬롯과 겹치는지 검사 (BR-SLT-02)
@@ -89,5 +88,50 @@ public class AttractionSlotService {
         Attraction attraction = findActiveAttraction(attractionId);
         List<AttractionSlot> slots = findSlotsOfDay(attractionId, date, includeCancelled);
         return SearchAdminAttractionSlotResponse.of(attraction, date, slots);
+    }
+
+    // 슬롯 시간 수정
+    @Transactional
+    public UpdateAttractionSlotTimeResponse updateAttractionSlotTime(Long slotId,
+                                                                     UpdateAttractionSlotTimeRequest request) {
+        AttractionSlot slot = findSlot(slotId);
+        LocalDateTime now = KstTime.now();
+        validateModifiable(slot, now);
+
+        if (slot.hasReservations()) { // BR-SLT-06
+            throw new BusinessException(ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+
+        // 종료 시각 계산에 어트랙션 소요 시간이 필요
+        Long attractionId = slot.getAttraction().getId();
+        Attraction attraction = findActiveAttraction(attractionId);
+
+        LocalDateTime newStartsAt = request.startsAt();
+        LocalDateTime newEndsAt = calculateEndsAt(newStartsAt, attraction.getDurationMinutes());
+        validateSlotTime(newStartsAt, newEndsAt, now);
+
+        // 자기 자신은 빼고 겹침 검사
+        if (attractionSlotRepository.countOverlappingSlotsExcludingSlotId(
+                attractionId, slotId, newStartsAt, newEndsAt) > 0) {
+            throw new BusinessException(ErrorCode.SLOT_TIME_OVERLAP);
+        }
+
+        slot.changeTime(newStartsAt); // 변경 감지(dirty checking)로 커밋 시 UPDATE
+        return UpdateAttractionSlotTimeResponse.from(slot);
+    }
+
+    private AttractionSlot findSlot(Long slotId) {
+        return attractionSlotRepository.findById(slotId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
+    }
+
+    // 수정·상태 변경·삭제 공통 검사: 취소된 슬롯, 종료된 슬롯은 건드릴 수 없음
+    private void validateModifiable(AttractionSlot slot, LocalDateTime now) {
+        if (slot.isCancelled()) {
+            throw new BusinessException(ErrorCode.SLOT_ALREADY_CANCELLED);
+        }
+        if (slot.isEnded(now)) {
+            throw new BusinessException(ErrorCode.SLOT_ALREADY_ENDED);
+        }
     }
 }

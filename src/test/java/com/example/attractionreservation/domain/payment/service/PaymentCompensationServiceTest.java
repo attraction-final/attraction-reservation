@@ -86,6 +86,54 @@ class PaymentCompensationServiceTest {
     }
 
     @Test
+    @DisplayName("처리 중으로 멈춘 시각이 기준 시간보다 이전이면 처리 대상으로 조회되고 다시 점유된다.")
+    void claim_staleProcessing_Claimed() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        claimAndStallAt(id, now.minus(PaymentCompensationService.STALE_PROCESSING_TIMEOUT).minusMillis(1));
+
+        //when
+        List<Long> ids = paymentCompensationService.findProcessableIds(now, 10);
+        Optional<ClaimedCompensation> claimed = paymentCompensationService.claim(id, now);
+
+        //then
+        assertThat(ids).containsExactly(id);
+        assertThat(claimed).isPresent();
+        assertThat(find(id).getStatus()).isEqualTo(CompensationStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("처리 중으로 멈춘 시각이 기준 시간과 정확히 같으면 처리 대상으로 조회된다.")
+    void findProcessableIds_staleProcessingAtBoundary_Included() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        claimAndStallAt(id, now.minus(PaymentCompensationService.STALE_PROCESSING_TIMEOUT));
+
+        //when
+        List<Long> ids = paymentCompensationService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(id);
+    }
+
+    @Test
+    @DisplayName("처리 중으로 멈춘 보상 요청을 다시 점유하면 시도 횟수가 증가한다.")
+    void claim_staleProcessing_IncreaseAttemptCount() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        claimAndStallAt(id, now.minus(PaymentCompensationService.STALE_PROCESSING_TIMEOUT).minusMillis(1));
+
+        //when
+        paymentCompensationService.claim(id, now);
+
+        //then
+        assertThat(find(id).getAttemptCount()).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("완료된 보상 요청은 점유하지 않는다.")
     void claim_done_NotClaimed() {
         //given
@@ -190,6 +238,17 @@ class PaymentCompensationServiceTest {
     private Long save(String pgId, Instant requestedAt) {
         return paymentCompensationRepository.saveAndFlush(
                 PaymentCompensation.request(pgId, 9999L, "결제 금액 불일치", requestedAt)).getId();
+    }
+
+    // 점유한 뒤 처리 중 상태로 멈춘 것처럼 updated_at을 지정한다. 벌크 UPDATE는 Auditing을 거치지 않아 값이 유지된다.
+    private void claimAndStallAt(Long id, Instant updatedAt) {
+        paymentCompensationService.claim(id, updatedAt);
+        flushAndClear();
+        entityManager.createQuery("update PaymentCompensation c set c.updatedAt = :updatedAt where c.id = :id")
+                .setParameter("updatedAt", updatedAt)
+                .setParameter("id", id)
+                .executeUpdate();
+        flushAndClear();
     }
 
     private PaymentCompensation find(Long id) {

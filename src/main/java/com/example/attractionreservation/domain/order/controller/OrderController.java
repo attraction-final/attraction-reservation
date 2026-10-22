@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.order.controller;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,7 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
+import org.springframework.web.bind.annotation.ModelAttribute;
 
 @RestController
 @RequiredArgsConstructor
@@ -48,6 +50,20 @@ public class OrderController {
 
         return ResponseEntity.ok(
                 ApiResponse.ok("주문 상세 조회에 성공했습니다.", response)
+        );
+    }
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<SearchOrderListResponse>> getOrderAll(
+            @AuthenticationPrincipal Long userId,
+            @Valid @ModelAttribute SearchOrderCondition condition
+    ) {
+        // 회원 ID는 인증 정보에서, 페이지 조건은 쿼리 파라미터에서 받는다.
+        SearchOrderListResponse response =
+                orderService.findOrdersByUserId(userId, condition);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("주문 목록 조회에 성공했습니다.", response)
         );
     }
 }

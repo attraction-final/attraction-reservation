@@ -4,6 +4,7 @@ package com.example.attractionreservation.domain.ticketProduct.entity;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -134,6 +135,40 @@ class TicketProductTest {
         );
 
         assertThat(ticketProduct.getStock()).isZero();
+    }
+
+    @Test
+    @DisplayName("삭제된 상품은 수정할 수 없으며 기존 값이 유지된다")
+    void updateTicketProduct_DeletedProduct_Fail() {
+        // given
+        TicketProduct ticketProduct = new TicketProduct(
+                "종일이용권",
+                50000,
+                "기존 설명",
+                TicketType.ALL_DAY,
+                100,
+                TicketProductStatus.DELETED
+        );
+
+        // when & then
+        assertThatThrownBy(() -> ticketProduct.updateTicketProduct(
+                "변경된 상품명",
+                30000,
+                "변경된 설명",
+                50,
+                TicketProductStatus.ON_SALE
+        ))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.TICKET_PRODUCT_ALREADY_DELETED)
+                );
+
+        assertThat(ticketProduct.getName()).isEqualTo("종일이용권");
+        assertThat(ticketProduct.getPrice()).isEqualTo(50000);
+        assertThat(ticketProduct.getDescription()).isEqualTo("기존 설명");
+        assertThat(ticketProduct.getStock()).isEqualTo(100);
+        assertThat(ticketProduct.getStatus())
+                .isEqualTo(TicketProductStatus.DELETED);
     }
 
     private TicketProduct createTicketProduct(

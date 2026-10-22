@@ -13,3 +13,10 @@ spring:
       hibernate:
         format_sql: true
     open-in-view: false
+
+# 테스트 환경에서만 사용하는 JWT 설정
+jwt:
+  # 32바이트 테스트 전용 키를 Base64로 인코딩한 값
+  secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  access-token-expiration: 600000
+  refresh-token-expiration: 604800000

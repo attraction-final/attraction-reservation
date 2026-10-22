@@ -426,4 +426,37 @@ class AttractionSlotServiceTest {
                     31L, new UpdateAttractionSlotStatusRequest("SUSPENDED")), ErrorCode.SLOT_HAS_RESERVATIONS);
         }
     }
+
+    // 삭제(취소)
+    @Nested
+    @DisplayName("슬롯 삭제")
+    class Delete {
+
+        @Test
+        @DisplayName("성공: 상태가 CANCELLED로 바뀜")
+        void success() {
+            AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
+            givenSlot(slot);
+
+            attractionSlotService.deleteAttractionSlot(31L);
+
+            assertThat(slot.getStatus()).isEqualTo(SlotStatus.CANCELLED);
+        }
+
+        @Test
+        @DisplayName("실패: 이미 취소됨")
+        void alreadyCancelled() {
+            givenSlot(createTomorrowSlot(0, SlotStatus.CANCELLED));
+
+            assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(31L), ErrorCode.SLOT_ALREADY_CANCELLED);
+        }
+
+        @Test
+        @DisplayName("실패: 예약이 있음")
+        void hasReservations() {
+            givenSlot(createTomorrowSlot(1, SlotStatus.OPEN));
+
+            assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(31L), ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+    }
 }

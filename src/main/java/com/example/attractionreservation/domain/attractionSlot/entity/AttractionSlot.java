@@ -118,4 +118,10 @@ public class AttractionSlot extends BaseTimeEntity {
     public boolean isEnded(LocalDateTime now) {
         return !now.isBefore(endsAt);
     }
+
+    // AttractionSlot service의 시간 수정에 필요
+    public void changeTime(LocalDateTime newStartsAt) {
+        this.startsAt = newStartsAt;
+        this.endsAt = calculateEndsAt(newStartsAt, attraction.getDurationMinutes());
+    }
 }

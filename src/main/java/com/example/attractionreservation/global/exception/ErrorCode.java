@@ -24,6 +24,7 @@ public enum ErrorCode {
   
     // user
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
+
     // ticketProduct
     INVALID_TICKET_PRODUCT_PRICE(HttpStatus.BAD_REQUEST, "티켓 상품 가격은 0원 이상이어야 합니다."),
     INVALID_TICKET_PRODUCT_STOCK(HttpStatus.BAD_REQUEST, "티켓 상품 재고는 0개 이상이어야 합니다."),
@@ -42,6 +43,11 @@ public enum ErrorCode {
     TICKET_ENTRY_NOT_ALLOWED_STATUS(HttpStatus.CONFLICT, "입장 가능한 티켓 상태가 아닙니다."),
     TICKET_ENTRY_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓의 방문일이 아닙니다."),
     TICKET_ENTRY_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "해당 티켓의 입장 가능 시간이 아닙니다."),
+
+    // reservation
+    INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),
+    INVALID_RESERVATION_TICKET(HttpStatus.BAD_REQUEST, "예약에 사용할 티켓 정보가 필요합니다."),
+    INVALID_RESERVATION_SLOT(HttpStatus.BAD_REQUEST, "예약할 슬롯 정보가 필요합니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

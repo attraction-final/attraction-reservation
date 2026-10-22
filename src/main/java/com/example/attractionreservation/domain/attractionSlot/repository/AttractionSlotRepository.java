@@ -39,4 +39,19 @@ public interface AttractionSlotRepository extends JpaRepository<AttractionSlot, 
                                                         @Param("dayStart") LocalDateTime dayStart,
                                                         @Param("nextDayStart") LocalDateTime nextDayStart,
                                                         @Param("includeCancelled") boolean includeCancelled);
+
+    // 시간이 겹치는 슬롯 개수 (시간 수정용, 자기 자신은 제외)
+    @Query(value = """
+        SELECT COUNT(*)
+          FROM attraction_slots s
+         WHERE s.attraction_id = :attractionId
+           AND s.id <> :excludeSlotId
+           AND s.status <> 'CANCELLED'
+           AND s.starts_at < :endsAt
+           AND s.ends_at > :startsAt
+        """, nativeQuery = true)
+    long countOverlappingSlotsExcludingSlotId(@Param("attractionId") Long attractionId,
+                                              @Param("excludeSlotId") Long excludeSlotId,
+                                              @Param("startsAt") LocalDateTime startsAt,
+                                              @Param("endsAt") LocalDateTime endsAt);
 }

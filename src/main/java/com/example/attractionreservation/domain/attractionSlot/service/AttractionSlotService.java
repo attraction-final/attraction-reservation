@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.dto.*;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -149,4 +150,29 @@ public class AttractionSlotService {
         slot.changeCapacity(request.capacity()); // 잔여 정원에 맞춰 OPEN/CLOSED 자동 조정
         return UpdateAttractionSlotCapacityResponse.from(slot);
     }
+
+    // 슬롯 상태 변경
+    @Transactional
+    public UpdateAttractionSlotStatusResponse updateAttractionSlotStatus(Long slotId,
+                                                                         UpdateAttractionSlotStatusRequest request) {
+        SlotStatus newStatus = SlotStatus.from(request.status()); // 허용되지 않은 값이면 400
+        AttractionSlot slot = findSlot(slotId);
+        validateModifiable(slot, KstTime.now());
+
+        SlotStatus previousStatus = slot.getStatus();
+        if (previousStatus == newStatus) {
+            throw new BusinessException(ErrorCode.SLOT_STATUS_SAME);
+        }
+        if (newStatus == SlotStatus.OPEN && slot.isFull()) {
+            throw new BusinessException(ErrorCode.SLOT_FULL, "잔여 정원이 없어 OPEN으로 바꿀 수 없습니다.");
+        }
+        if (newStatus == SlotStatus.SUSPENDED && slot.hasReservations()) {
+            throw new BusinessException(ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+
+        slot.changeStatus(newStatus);
+        return UpdateAttractionSlotStatusResponse.of(slot, previousStatus);
+    }
+
+
 }

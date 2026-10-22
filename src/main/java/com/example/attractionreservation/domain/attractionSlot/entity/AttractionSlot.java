@@ -74,22 +74,24 @@ public class AttractionSlot extends BaseTimeEntity {
 
     // 사용자 날짜별 조회
     // 지금 예약할 수 없는 이유를 돌려준다. 예약 가능하면 null.
-    public UnavailableReason findUnavailableReason(boolean isAttractionOperating, LocalDateTime now) {
-        if (!isAttractionOperating) {
+    public UnavailableReason findUnavailableReason(boolean attractionOperating, LocalDateTime now) {
+        // 어트랙션 자체가 운영 안 함
+        if (!attractionOperating) {
             return UnavailableReason.ATTRACTION_NOT_OPERATING;
         }
+        // 이 슬롯만 운영 중단
         if (status == SlotStatus.SUSPENDED) {
             return UnavailableReason.SUSPENDED;
         }
-        if (now.isAfter(getReservationDeadline())) { // 마감 시각 정각은 허용 (9장 #2)
+        // 예약 마감 시각(시작 30분 전)이 지남
+        if (now.isAfter(startsAt.minusMinutes(30))) {
             return UnavailableReason.DEADLINE_PASSED;
         }
-        if (status == SlotStatus.CLOSED) {
-            return UnavailableReason.CLOSED;
-        }
-        if (isFull()) {
+        // 자리가 없음 (CLOSED 상태도 여기로 모음)
+        if (status == SlotStatus.CLOSED || getRemainingCount() <= 0) {
             return UnavailableReason.FULL;
         }
+        // 아무 문제 없음: 예약 가능
         return null;
     }
 
@@ -138,5 +140,10 @@ public class AttractionSlot extends BaseTimeEntity {
         } else if (status == SlotStatus.CLOSED && !isFull()) {
             this.status = SlotStatus.OPEN;
         }
+    }
+
+    // AttractionSlot service의 상태 변경에 필요
+    public void changeStatus(SlotStatus newStatus) {
+        this.status = newStatus;
     }
 }

@@ -30,8 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AttractionSlotServiceTest {
@@ -336,6 +335,62 @@ class AttractionSlotServiceTest {
                     31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_TIME_OVERLAP);
             assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0)); // 바뀌지 않음
         }
+
+        // ===== 시간 검증 예외 경로 =====
+
+        // 예약 0명, 내일 14:00 OPEN 슬롯 + 어트랙션 조회까지 준비 (시간 검사 직전 단계까지 통과시키기 위함)
+        private AttractionSlot givenModifiableSlotWithAttraction() {
+            AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
+            givenSlot(slot);
+            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(slot.getAttraction()));
+            return slot;
+        }
+
+        @Test
+        @DisplayName("실패: 과거 시작 시각 → SLOT_START_IN_PAST, 겹침 검사 안 함, 시간 그대로")
+        void startInPast() {
+            AttractionSlot slot = givenModifiableSlotWithAttraction();
+            LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                    31L, new UpdateAttractionSlotTimeRequest(yesterday)), ErrorCode.SLOT_START_IN_PAST);
+
+            verify(attractionSlotRepository, never())
+                    .countOverlappingSlotsExcludingSlotId(any(), any(), any(), any());
+            assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0));
+            assertThat(slot.getEndsAt()).isEqualTo(TOMORROW.atTime(14, 10));
+        }
+
+        @Test
+        @DisplayName("실패: 21:55 시작(종료 22:05) → SLOT_OUT_OF_OPERATING_HOURS, 겹침 검사 안 함, 시간 그대로")
+        void outOfOperatingHours() {
+            AttractionSlot slot = givenModifiableSlotWithAttraction();
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                            31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(21, 55))),
+                    ErrorCode.SLOT_OUT_OF_OPERATING_HOURS);
+
+            verify(attractionSlotRepository, never())
+                    .countOverlappingSlotsExcludingSlotId(any(), any(), any(), any());
+            assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0));
+            assertThat(slot.getEndsAt()).isEqualTo(TOMORROW.atTime(14, 10));
+        }
+
+        @Test
+        @DisplayName("실패: CANCELLED 슬롯 → SLOT_ALREADY_CANCELLED, 어트랙션 조회·겹침 검사 안 함")
+        void cancelled() {
+            AttractionSlot slot = createTomorrowSlot(0, SlotStatus.CANCELLED);
+            givenSlot(slot);
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+                            31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
+                    ErrorCode.SLOT_ALREADY_CANCELLED);
+
+            verifyNoInteractions(attractionRepository); // 취소 검사가 어트랙션 조회보다 먼저
+            verify(attractionSlotRepository, never())
+                    .countOverlappingSlotsExcludingSlotId(any(), any(), any(), any());
+            assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0));
+        }
     }
 
     // 정원 수정
@@ -372,6 +427,24 @@ class AttractionSlotServiceTest {
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
                     31L, new UpdateAttractionSlotCapacityRequest(30)), ErrorCode.SLOT_ALREADY_CANCELLED);
+        }
+
+        // 추가
+        @Test
+        @DisplayName("잔여가 있는 수동 CLOSED 슬롯: 정원을 늘려도 CLOSED 유지 (사용자에게 다시 노출 안 됨)")
+        void manualClosedStaysClosed() {
+            AttractionSlot slot = createTomorrowSlot(12, SlotStatus.OPEN);
+            givenSlot(slot);
+
+            // 1. 관리자가 상태 변경 API로 직접 마감
+            attractionSlotService.updateAttractionSlotStatus(31L, new UpdateAttractionSlotStatusRequest("CLOSED"));
+
+            // 2. 같은 슬롯의 정원을 늘림
+            UpdateAttractionSlotCapacityResponse response =
+                    attractionSlotService.updateAttractionSlotCapacity(31L, new UpdateAttractionSlotCapacityRequest(25));
+
+            assertThat(response.status()).isEqualTo(SlotStatus.CLOSED);
+            assertThat(response.remainingCount()).isEqualTo(13);
         }
     }
 

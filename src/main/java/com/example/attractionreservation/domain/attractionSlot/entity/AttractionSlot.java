@@ -47,6 +47,12 @@ public class AttractionSlot extends BaseTimeEntity {
     @Column(name = "status", nullable = false, length = 20)
     private SlotStatus status;
 
+    // 필드 추가
+    // true  = 잔여 정원이 0이 되어 시스템이 자동으로 마감함 → 정원이 생기면 자동으로 다시 OPEN
+    // false = 그 외 (관리자가 직접 CLOSED로 바꾼 경우 포함) → 자동으로 다시 열지 않음
+    @Column(name = "auto_closed", nullable = false)
+    private boolean autoClosed;
+
     // 슬롯 등록
     public static AttractionSlot create(Attraction attraction, LocalDateTime startsAt, Integer capacity) {
         AttractionSlot slot = new AttractionSlot();
@@ -56,6 +62,7 @@ public class AttractionSlot extends BaseTimeEntity {
         slot.capacity = capacity;
         slot.reservedCount = 0;
         slot.status = SlotStatus.OPEN;
+        slot.autoClosed = false; // 새 슬롯은 마감 상태가 아님
         return slot;
     }
 
@@ -137,19 +144,23 @@ public class AttractionSlot extends BaseTimeEntity {
     private void syncStatusWithRemainingCount() {
         if (status == SlotStatus.OPEN && isFull()) {
             this.status = SlotStatus.CLOSED;
-        } else if (status == SlotStatus.CLOSED && !isFull()) {
+            this.autoClosed = true;  // "정원 때문에 닫았다"고 기록
+        } else if (status == SlotStatus.CLOSED && autoClosed && !isFull()) {
             this.status = SlotStatus.OPEN;
+            this.autoClosed = false; // 다시 열었으니 표시 지움
         }
     }
 
     // AttractionSlot service의 상태 변경에 필요
     public void changeStatus(SlotStatus newStatus) {
         this.status = newStatus;
+        this.autoClosed = false; // 관리자의 의도가 우선 → 자동 재오픈 대상에서 빠짐
     }
 
     // AttractionSlot service의 삭제에 필요
     public void cancel() {
         this.status = SlotStatus.CANCELLED;
+        this.autoClosed = false;
     }
 
 }

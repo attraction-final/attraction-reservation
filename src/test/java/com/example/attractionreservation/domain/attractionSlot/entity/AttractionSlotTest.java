@@ -109,12 +109,16 @@ public class AttractionSlotTest {
     }
 
     @Test
-    @DisplayName("마감 슬롯 정원을 늘리면 CLOSED → OPEN")
+    @DisplayName("정원 소진으로 자동 마감된 슬롯은 정원을 늘리면 CLOSED → OPEN")
     void changeCapacity_reopen() {
-        AttractionSlot slot = createSlot(20, 20, SlotStatus.CLOSED);
-        slot.changeCapacity(25);
+        AttractionSlot slot = createSlot(20, 12, SlotStatus.OPEN);
+        slot.changeCapacity(12); // 잔여 0 → 자동 마감
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.CLOSED);
+
+        slot.changeCapacity(15); // 잔여 3 → 자동 재오픈
+
         assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
-        assertThat(slot.getRemainingCount()).isEqualTo(5);
+        assertThat(slot.getRemainingCount()).isEqualTo(3);
     }
 
     @Test
@@ -134,5 +138,31 @@ public class AttractionSlotTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_SLOT_STATUS);
         assertThatThrownBy(() -> SlotStatus.from("open"))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    // 수동 마감 추가
+    @Test
+    @DisplayName("잔여가 있는 수동 CLOSED 슬롯은 정원을 바꿔도 CLOSED 유지")
+    void changeCapacity_manualClosedStays() {
+        AttractionSlot slot = createSlot(20, 5, SlotStatus.OPEN);
+        slot.changeStatus(SlotStatus.CLOSED); // 관리자가 직접 마감 (잔여 15)
+
+        slot.changeCapacity(30);
+
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.CLOSED);
+        assertThat(slot.getRemainingCount()).isEqualTo(25);
+    }
+
+    @Test
+    @DisplayName("자동 마감 후 관리자가 상태를 바꿨다가 다시 CLOSED로 하면 수동 마감으로 취급")
+    void changeStatus_overridesAutoClosed() {
+        AttractionSlot slot = createSlot(20, 12, SlotStatus.OPEN);
+        slot.changeCapacity(12);              // 자동 마감
+        slot.changeStatus(SlotStatus.SUSPENDED);
+        slot.changeStatus(SlotStatus.CLOSED); // 관리자가 직접 마감
+
+        slot.changeCapacity(20);
+
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.CLOSED);
     }
 }

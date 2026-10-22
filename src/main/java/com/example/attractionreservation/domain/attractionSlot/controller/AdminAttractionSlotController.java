@@ -74,4 +74,11 @@ public class AdminAttractionSlotController {
                 attractionSlotService.updateAttractionSlotStatus(slotId, request);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 상태 변경에 성공했습니다.", response));
     }
+
+    // 슬롯 삭제(취소)
+    @DeleteMapping("/slots/{slotId}")
+    public ResponseEntity<ApiResponse<Void>> deleteAttractionSlot(@PathVariable @Min(1) Long slotId) {
+        attractionSlotService.deleteAttractionSlot(slotId);
+        return ResponseEntity.ok(ApiResponse.<Void>ok("슬롯 삭제에 성공했습니다.", null));
+    }
 }

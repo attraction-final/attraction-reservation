@@ -174,5 +174,17 @@ public class AttractionSlotService {
         return UpdateAttractionSlotStatusResponse.of(slot, previousStatus);
     }
 
+    // 슬롯 삭제
+    @Transactional
+    public void deleteAttractionSlot(Long slotId) {
+        AttractionSlot slot = findSlot(slotId);
+        validateModifiable(slot, KstTime.now());
+
+        if (slot.hasReservations()) { // BR-SLT-06
+            throw new BusinessException(ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+        slot.cancel(); // 실제로 지우지 않고 상태만 CANCELLED (소프트 삭제)
+    }
+
 
 }

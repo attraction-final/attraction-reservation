@@ -146,4 +146,10 @@ public class AttractionSlot extends BaseTimeEntity {
     public void changeStatus(SlotStatus newStatus) {
         this.status = newStatus;
     }
+
+    // AttractionSlot service의 삭제에 필요
+    public void cancel() {
+        this.status = SlotStatus.CANCELLED;
+    }
+
 }

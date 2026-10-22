@@ -2,7 +2,6 @@ package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 //추천 후보 선정
 
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
-import org.w3c.dom.Attr;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;

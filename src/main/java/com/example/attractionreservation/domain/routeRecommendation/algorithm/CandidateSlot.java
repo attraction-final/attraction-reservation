@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 
+import com.example.attractionreservation.global.util.KstTime;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 
@@ -10,6 +12,6 @@ public record CandidateSlot(
         LocalDateTime endsAt
 ) {
     public int rideMinutes() {
-        return (int) Duration.between(startsAt,endsAt).toMinutes();
+        return (int) Duration.between(startsAt.atZone(KstTime.ZONE), endsAt.atZone(KstTime.ZONE)).toMinutes();
     }
 }

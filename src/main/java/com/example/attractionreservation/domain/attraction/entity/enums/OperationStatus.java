@@ -1,4 +1,4 @@
-package com.example.attractionreservation.domain.attraction.entity;
+package com.example.attractionreservation.domain.attraction.entity.enums;
 
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;

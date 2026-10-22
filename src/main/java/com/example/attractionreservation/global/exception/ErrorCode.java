@@ -34,7 +34,7 @@ public enum ErrorCode {
     SLOT_ALREADY_CANCELLED(HttpStatus.CONFLICT, "이미 취소된 슬롯입니다."),
     SLOT_HAS_RESERVATIONS(HttpStatus.CONFLICT, "예약이 있는 슬롯입니다. 기존 예약을 먼저 처리해 주세요."),
     SLOT_CAPACITY_BELOW_RESERVED(HttpStatus.CONFLICT, "예약된 인원보다 적게 정원을 줄일 수 없습니다."),
-    SLOT_FULL(HttpStatus.CONFLICT, "잔여 정원이 없습니다."),
+    SLOT_FULL(HttpStatus.CONFLICT, "잔여 정원이 없어 OPEN으로 바꿀 수 없습니다."),
 
 
     // user

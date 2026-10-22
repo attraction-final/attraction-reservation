@@ -63,4 +63,15 @@ public class AdminAttractionSlotController {
                 attractionSlotService.updateAttractionSlotCapacity(slotId, request);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 정원 수정에 성공했습니다.", response));
     }
+
+    // 슬롯 상태 변경
+    @PatchMapping("/slots/{slotId}/status")
+    public ResponseEntity<ApiResponse<UpdateAttractionSlotStatusResponse>> updateAttractionSlotStatus(
+            @PathVariable @Min(1) Long slotId,
+            @Valid @RequestBody UpdateAttractionSlotStatusRequest request) {
+
+        UpdateAttractionSlotStatusResponse response =
+                attractionSlotService.updateAttractionSlotStatus(slotId, request);
+        return ResponseEntity.ok(ApiResponse.ok("슬롯 상태 변경에 성공했습니다.", response));
+    }
 }

@@ -124,4 +124,19 @@ public class AttractionSlot extends BaseTimeEntity {
         this.startsAt = newStartsAt;
         this.endsAt = calculateEndsAt(newStartsAt, attraction.getDurationMinutes());
     }
+
+    // AttractionSlot service의 정원 수정에 필요
+    public void changeCapacity(Integer newCapacity) {
+        this.capacity = newCapacity;
+        syncStatusWithRemainingCount(); // BR-SLT-07
+    }
+
+    // 잔여 0이면 OPEN → CLOSED, 잔여 1 이상이면 CLOSED → OPEN (SUSPENDED는 그대로)
+    private void syncStatusWithRemainingCount() {
+        if (status == SlotStatus.OPEN && isFull()) {
+            this.status = SlotStatus.CLOSED;
+        } else if (status == SlotStatus.CLOSED && !isFull()) {
+            this.status = SlotStatus.OPEN;
+        }
+    }
 }

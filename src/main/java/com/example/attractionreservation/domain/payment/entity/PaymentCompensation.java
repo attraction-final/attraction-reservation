@@ -101,6 +101,7 @@ public class PaymentCompensation extends BaseTimeEntity {
     // 재시도해도 해결되지 않아 수동 환불이 필요한 경우
     public void markAsDead(String reason, Instant now) {
         transitTo(CompensationStatus.DEAD);
+        this.processedAt = now;
         this.lastError = truncate(reason);
     }
 
@@ -108,6 +109,7 @@ public class PaymentCompensation extends BaseTimeEntity {
     public void markAsFailed(String error, Instant now) {
         if (attemptCount >= MAX_ATTEMPTS) {
             transitTo(CompensationStatus.DEAD);
+            this.processedAt = now;
         } else {
             transitTo(CompensationStatus.FAILED);
             this.nextRetryAt = now.plus(BASE_RETRY_DELAY.multipliedBy(1L << (attemptCount - 1)));

@@ -174,7 +174,7 @@ class PaymentCompensationTest {
     }
 
     @Test
-    @DisplayName("최대 시도 횟수만큼 실패하면 DEAD가 되고 더 이상 처리 대상이 아니다.")
+    @DisplayName("최대 시도 횟수만큼 실패하면 DEAD가 되고 처리 종료 시각이 기록되며 더 이상 처리 대상이 아니다.")
     void markAsFailed_maxAttempts_Dead() {
         //given
         PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.DEAD);
@@ -182,6 +182,7 @@ class PaymentCompensationTest {
         //then
         assertEquals(CompensationStatus.DEAD, compensation.getStatus());
         assertEquals(PaymentCompensation.MAX_ATTEMPTS, compensation.getAttemptCount());
+        assertEquals(NOW, compensation.getProcessedAt());
         assertFalse(compensation.isProcessable(NOW.plus(Duration.ofDays(1)), STALE_TIMEOUT));
     }
 
@@ -213,7 +214,7 @@ class PaymentCompensationTest {
     }
 
     @Test
-    @DisplayName("처리 중인 보상을 DEAD로 기록하면 사유가 남는다.")
+    @DisplayName("처리 중인 보상을 DEAD로 기록하면 사유와 처리 종료 시각이 남는다.")
     void markAsDead_processing_Dead() {
         //given
         PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
@@ -224,6 +225,7 @@ class PaymentCompensationTest {
         //then
         assertEquals(CompensationStatus.DEAD, compensation.getStatus());
         assertEquals("PG 결제 상태 확인 필요", compensation.getLastError());
+        assertEquals(NOW, compensation.getProcessedAt());
     }
 
     @Test

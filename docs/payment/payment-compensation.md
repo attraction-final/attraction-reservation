@@ -65,7 +65,7 @@ domain/payment
 | `attempt_count` | 처리 시도 횟수 |
 | `next_retry_at` | 다음 재시도 시각(NOT NULL). 생성 시 요청 시각. `REQUESTED`는 이 값과 무관하게 바로 처리 대상 |
 | `last_error` | 마지막 실패 사유(500자에서 자름) |
-| `processed_at` | DONE 시각, 처리 전엔 null |
+| `processed_at` | 처리 종료 시각(`DONE`, `DEAD`), 처리 전엔 null |
 | `created_at`, `updated_at` | `BaseTimeEntity`. 요청 시각, 처리 중 멈춘 행 판단 기준 |
 
 - 인덱스: `(status, next_retry_at)`
@@ -168,7 +168,7 @@ payment:
 
 | 테스트 | 종류 | 내용 |
 |---|---|---|
-| `PaymentCompensationTest` | 단위 | 생성 상태·금액 검증, 상태 전이, 백오프, DEAD, 실패 사유 자르기, 처리 가능 판단(요청 시각이 미래여도 REQUESTED는 대상) |
+| `PaymentCompensationTest` | 단위 | 생성 상태·금액 검증, 상태 전이, 백오프, DEAD(처리 종료 시각 기록), 실패 사유 자르기, 처리 가능 판단(요청 시각이 미래여도 REQUESTED는 대상) |
 | `PaymentCompensationRepositoryTest` | `@DataJpaTest` + H2 | 36자 pgId·int 범위 초과 금액 저장, `pg_id` UNIQUE |
 | `PaymentCompensationOutboxTest` | `@DataJpaTest` + H2, **실제 트랜잭션** | 결제 실패·주문 취소·보상 요청 함께 커밋, 보상 저장 실패 시 모두 롤백, 중복 요청 시 1건, 취소된 결제 보상 요청 커밋·중복 요청 시 1건 |
 | `PaymentCompensationServiceTest` | `@DataJpaTest` + H2 | 점유(요청 시각이 미래인 REQUESTED 포함), 중복 점유 거부, 완료 후 점유 거부, 재시도 시각 전후, DEAD, 처리 대상 조회 |

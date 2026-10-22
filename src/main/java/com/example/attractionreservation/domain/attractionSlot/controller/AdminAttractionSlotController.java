@@ -52,4 +52,15 @@ public class AdminAttractionSlotController {
         UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(slotId, request);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 시간 수정에 성공했습니다.", response));
     }
+
+    // 슬롯 정원 수정
+    @PatchMapping("/slots/{slotId}/capacity")
+    public ResponseEntity<ApiResponse<UpdateAttractionSlotCapacityResponse>> updateAttractionSlotCapacity(
+            @PathVariable @Min(1) Long slotId,
+            @Valid @RequestBody UpdateAttractionSlotCapacityRequest request) {
+
+        UpdateAttractionSlotCapacityResponse response =
+                attractionSlotService.updateAttractionSlotCapacity(slotId, request);
+        return ResponseEntity.ok(ApiResponse.ok("슬롯 정원 수정에 성공했습니다.", response));
+    }
 }

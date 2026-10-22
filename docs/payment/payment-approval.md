@@ -33,11 +33,14 @@ PaymentController
           │    └─ PG 미완료(READY 등)  → PAYMENT_NOT_PAID (409)
           ├─ 금액 불일치
           │    ├─ failPayment가 true  → PaymentGateway.cancelPayment (PG 보상 취소)
-          │    ├─ failPayment가 false → 다른 요청이 이미 처리, 보상 생략 (error 로그)
+          │    ├─ failPayment가 false, 원장 CANCELLED → PaymentGateway.cancelPayment (PG 보상 취소)
+          │    ├─ failPayment가 false, 원장 FAILED    → 다른 요청이 이미 처리, 보상 생략 (error 로그)
           │    └─ PAYMENT_INCORRECT_AMOUNT (400)
           └─ PaymentCommandService.approvePayment(pgId, paidAt)  ← @Transactional, 비관적 락
                ├─ 이미 PAID           → 현재 결제 정보 반환 (멱등)
                ├─ FAILED              → PAYMENT_ALREADY_PROCESSED (409)
+               ├─ CANCELLED           → PAYMENT_ALREADY_CANCELLED (409)
+               │                        → Facade가 PaymentGateway.cancelPayment (PG 보상 취소)
                ├─ 그 밖의 전이 불가    → PAYMENT_INVALID_STATUS_TRANSITION (409)
                └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 PAID
 
@@ -116,9 +119,11 @@ global/config/SchedulingConfig            @EnableScheduling
   - 웹훅 처리에서는 `ALREADY_DONE`으로 끝나 재시도하지 않는다.
 - `failPayment`: `PENDING`일 때만 실패 처리하고 `true`를 반환한다. 이미 처리된 결제면 상태를 바꾸지 않고 `false`를 반환한다.
   - 금액 불일치 요청이 동시에 들어와도 `true`를 받은 한 요청만 PG 보상 취소를 한다.
-- 로컬 `CANCELLED` 결제는 보상 대상이 아니다.
-  - `cancelledByUser`는 결제창을 열기 전 주문 단계에서의 취소이므로, 로컬 CANCELLED + PG PAID 조합은 발생하지 않는다고 본다.
-  - 그래도 이 조합으로 PG Paid 웹훅이 오면 `approvePayment`가 상태 전이 예외를 던지고, 웹훅은 재시도 끝에 `DEAD`가 된다. 자동 보상하지 않고 수동 확인 대상으로 남긴다.
+- 로컬 `CANCELLED` 결제가 PG에서 결제 완료되면 PG 결제를 취소한다.
+  - PG 결제창이 열려 있는 동안 사용자가 취소(`cancelledByUser`)하고, 이후 PG에서 결제를 마치면 원장 CANCELLED + PG PAID 조합이 생긴다.
+  - `approvePayment`가 락 안에서 `CANCELLED`를 확인해 `PAYMENT_ALREADY_CANCELLED`를 던지고, Facade가 PG 결제를 취소한다. Facade가 락 없이 `PENDING`을 읽은 직후 취소가 커밋된 경우도 락 안에서 걸러진다.
+  - PG는 이미 취소된 결제를 성공으로 처리하고, 취소 후 PG 조회는 `PAID`가 아니라 `PAYMENT_NOT_PAID`로 끝나므로 반복 호출돼도 안전하다.
+  - 웹훅 처리에서는 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다. 승인 API는 PG 취소 후 `PAYMENT_ALREADY_CANCELLED`(409)로 응답한다.
 
 ### 4.4 동시성 제어: 낙관적 락 → 비관적 락 (KAN-22)
 
@@ -162,16 +167,19 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
   - 남의 결제와 없는 결제 모두 `PAYMENT_NOT_FOUND`(404)로 응답해 존재 여부를 숨긴다.
 - 금액은 클라이언트에서 받지 않는다. PG 조회 결과와 원장만 비교한다.
 
-### 4.8 보상 처리 (금액 불일치)
+### 4.8 보상 처리 (금액 불일치, 원장 취소)
 
 - PG에서는 결제됐지만 금액이 원장과 다르면 원장에 반영하지 않고 PG 결제를 취소한다.
 - 순서: `failPayment`(결제 FAILED + 주문 취소, 커밋) → `true`면 `PaymentGateway.cancelPayment` → `PAYMENT_INCORRECT_AMOUNT`(400) 응답.
+  - `failPayment`가 `false`면 원장이 `FAILED`(다른 요청이 이미 보상) 또는 `CANCELLED`(보상된 적 없음)다. 결제를 다시 조회해 `CANCELLED`면 PG 결제를 취소한다. `CANCELLED`는 종료 상태라 락 없이 조회해도 된다.
+- 원장 `CANCELLED` + PG `PAID`(금액 일치)는 4.3의 `PAYMENT_ALREADY_CANCELLED` 경로로 PG 결제를 취소한다. 취소 사유는 "취소된 주문의 결제"다.
 - 취소 금액은 PG 조회 결과의 `totalAmount`다.
 - 웹훅 처리에서는 이 경우를 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다.
-- **한계**: PG 취소가 실패하면 원장은 FAILED, PG는 PAID로 남고, 이후 요청은 `PAYMENT_ALREADY_PROCESSED`로 끝나 보상이 다시 시도되지 않는다.
+- **한계**: 금액 불일치 보상에서 PG 취소가 실패하면 원장은 FAILED, PG는 PAID로 남고, 이후 요청은 `PAYMENT_ALREADY_PROCESSED`로 끝나 보상이 다시 시도되지 않는다.
   - 웹훅 경로: `COMPENSATION_FAILED`로 받아 웹훅을 즉시 `DEAD`로 기록하고 error 로그를 남긴다. 수동 환불 대상으로 드러난다.
   - 승인 API 경로: `PAYMENT_CANCELLATION_FAILED`(502) 응답과 로그만 남는다.
   - 자동 재시도는 8장(Outbox)에서 해결 예정.
+  - 원장 `CANCELLED`의 PG 취소가 실패한 경우는 다음 요청에서 다시 취소를 시도한다(`CANCELLED`는 `reconcile`에서 걸러지지 않음). 다만 웹훅 경로는 같은 `COMPENSATION_FAILED`로 받아 즉시 `DEAD`로 기록한다.
 
 ### 4.9 PortOne 연동 (`PortOneClient`)
 
@@ -184,7 +192,7 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
   - 오류 응답을 `PortOneErrorResponse`로 파싱해 `type`이 `PAYMENT_ALREADY_CANCELLED`면 성공 처리한다 (보상 목적이 이미 달성됨).
   - 통신 실패(`ResourceAccessException`)는 같은 멱등 키로 최대 3회 재시도한다. 모두 실패하면 `PAYMENT_CANCELLATION_FAILED`(502).
   - 멱등 키는 `cancelPayment` 호출마다 새로 만든다(`UUID.randomUUID()`). 한 호출 안의 재시도에서만 중복 취소를 막는다.
-- 타임아웃: 연결 5초, 읽기 60초.
+- 타임아웃: 연결 5초, 읽기 10초. 조회와 취소가 같은 `RestClient`를 쓰므로 취소에도 10초가 적용된다. 취소가 읽기 타임아웃되면 같은 멱등 키로 재시도하므로 중복 취소되지 않는다.
 - 설정: `application.yaml`의 `portone.*`는 환경변수로 주입하고, `PortOneProperties`의 `@Validated` + `@NotBlank`로 누락 시 시작 시점에 실패한다.
   - 필요한 환경변수: `PORTONE_API_SECRET`, `PORTONE_STORE_ID`, `PORTONE_CHANNEL_KEY`, `PORTONE_WEBHOOK_SECRET` (`PORTONE_BASE_URL`은 기본값 있음)
   - 테스트: `src/test/resources/config/application.yaml`에 가짜 값 (프로필과 무관하게 적용)
@@ -213,6 +221,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PAYMENT_PG_PAYMENT_NOT_FOUND` | 404 | PG에 결제 없음 |
 | `PAYMENT_NOT_PAID` | 409 | PG에서 결제 완료 상태가 아님 (READY, PENDING, UNKNOWN 등) |
 | `PAYMENT_ALREADY_PROCESSED` | 409 | 이미 실패 처리된 결제 |
+| `PAYMENT_ALREADY_CANCELLED` | 409 | 사용자가 취소한 결제가 PG에서 결제 완료됨 (PG 보상 취소 수행) |
 | `PAYMENT_INCORRECT_AMOUNT` | 400 | PG 금액과 원장 금액 불일치 (PG 보상 취소 수행) |
 | `PAYMENT_INVALID_STATUS_TRANSITION` | 409 | 결제 상태 전이 불가 |
 | `ORDER_INVALID_STATUS_TRANSITION` | 409 | 주문 상태 전이 불가 |
@@ -230,10 +239,10 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 | 테스트 | 종류 | 내용 |
 |---|---|---|
-| `PaymentFacadeTest` | Mockito | 정상 승인, 남의 결제·orderId 불일치·이미 PAID·이미 FAILED면 PG 미호출, PG 결제 없음, PG 실패 시 실패 처리, PG 미완료 상태별 `PAYMENT_NOT_PAID`, 금액 불일치 시 보상 취소·이미 처리돼 보상 생략, `syncPayment` 결과별·재시도 필요 오류 전파 |
-| `PaymentCommandServiceTest` | Mockito | 승인 성공·멱등·FAILED 거절·결제 없음, 실패 처리 성공·PENDING 아니면 건너뜀·결제 없음 |
+| `PaymentFacadeTest` | Mockito | 정상 승인, 남의 결제·orderId 불일치·이미 PAID·이미 FAILED면 PG 미호출, PG 결제 없음, PG 실패 시 실패 처리, PG 미완료 상태별 `PAYMENT_NOT_PAID`, 금액 불일치 시 보상 취소·이미 처리돼 보상 생략·원장 CANCELLED면 보상 취소, 원장 CANCELLED + PG PAID면 보상 취소, `syncPayment` 결과별(원장 CANCELLED 보상·보상 실패 포함)·상태 충돌 시 PG 취소 안 함·재시도 필요 오류 전파 |
+| `PaymentCommandServiceTest` | Mockito | 승인 성공·멱등·FAILED 거절·CANCELLED면 `PAYMENT_ALREADY_CANCELLED`·결제 없음, 실패 처리 성공·PENDING 아니면 건너뜀·결제 없음 |
 | `PaymentServiceTest` | Mockito | 결제 생성, 사용자 취소, 소유자 결제 조회 |
-| `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건 |
+| `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 `PAYMENT_ALREADY_CANCELLED` |
 | `PaymentControllerTest` | `@WebMvcTest` | 200(응답 데이터) / 404 / 502 / userId 누락 400 / orderId 누락 400, `ApiResponse` 형식 |
 | `PaymentRepositoryTest` | `@DataJpaTest` + H2 | `findByPgIdAndUserId` 쿼리 동작 (본인·다른 사용자·없는 pgId) |
 | `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 멱등 키 헤더, 이미 취소됨 처리, 통신 실패 재시도 |
@@ -254,6 +263,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 1. **인증 연동**: 지금은 `userId`를 `@RequestParam`으로 받아 소유자 확인을 우회할 수 있다. `@AuthenticationPrincipal` 등으로 교체 전까지 운영 노출 금지.
 2. **보상 실패 복구**: 금액 불일치 보상에서 PG 취소가 실패하면 원장 FAILED·PG PAID로 남고 재시도 수단이 없다 → 8장의 Outbox 방식으로 해결 예정.
+   - 원장 CANCELLED의 PG 취소 실패도 웹훅에서는 `DEAD`로 남아 수동 환불 대상이 된다(4.8). Outbox 적용 시 함께 처리한다.
 3. **웹훅 배포 준비**: `webhook_events` 테이블 생성, PortOne 콘솔에 웹훅 URL 등록, 인증 적용 시 웹훅 경로 `permitAll`. 상세는 [payment-webhook-plan.md 7장](payment-webhook-plan.md#7-남은-작업).
 4. **재고 복구**: `cancelledByUser`, `failPayment`에 TODO로 남아 있다.
 
@@ -263,7 +273,6 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 - 조회 404 응답의 `type`이 `PAYMENT_NOT_FOUND`인지 확인. 지금은 경로 오류 등 다른 404도 "결제 없음"으로 처리한다.
 - 부분 취소 시 `currentCancellableAmount`를 함께 보내 초과 환불 방지.
 - `PortOneConfig`: `RestClient`를 타입으로만 주입하고 정적 `RestClient.builder()`로 생성 → Boot의 `RestClient.Builder` 주입으로 변경 권장.
-- `readTimeout` 60초 → 조회는 10초 안팎으로 단축 검토.
 - `io.portone:server-sdk` 의존성은 웹훅 서명 검증(`WebhookVerifier`)에만 사용한다. 결제 조회·취소는 `RestClient`로 직접 호출한다.
 - PG 연동 컨트롤러(`PortOneConfigController`, `PortOneWebhookController`)는 infra에 둔다. `architecture.md`에 이 기준을 추가할지 팀과 정한다.
 - `PAYMENT_INVALID_STATUS_TRANSITION`과 `ORDER_INVALID_STATUS_TRANSITION` 메시지가 같아 구분 불가.

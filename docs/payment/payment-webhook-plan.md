@@ -99,7 +99,7 @@ global/config/SchedulingConfig          @EnableScheduling
 | `attempt_count` | 처리 시도 횟수 |
 | `next_retry_at` | 다음 재시도 시각 |
 | `last_error` | 마지막 실패 사유(500자에서 자름) |
-| `processed_at` | 처리 완료 시각 |
+| `processed_at` | 처리 종료 시각 (`PROCESSED`, `IGNORED`, `DEAD`) |
 | `created_at`, `updated_at` | `BaseTimeEntity`. 수신 시각, 처리 중 멈춘 행 판단 기준 |
 
 - 인덱스: `pg_id`, `(status, next_retry_at)`
@@ -145,14 +145,17 @@ global/config/SchedulingConfig          @EnableScheduling
 | PG 미완료(`PAYMENT_NOT_PAID`) | `NOT_PAID` | `PROCESSED` |
 | PG 실패(`PAYMENT_PG_FAILED`) → 결제 실패 처리 | `PG_FAILED` | `PROCESSED` |
 | 금액 불일치(`PAYMENT_INCORRECT_AMOUNT`) → 실패 처리 + PG 보상 취소 | `COMPENSATED` | `PROCESSED` |
-| 금액 불일치 보상 중 PG 취소 실패(`PAYMENT_CANCELLATION_FAILED`) | `COMPENSATION_FAILED` | **즉시 `DEAD`** + error 로그 (수동 환불) |
+| 원장 `CANCELLED` + PG 결제 완료(`PAYMENT_ALREADY_CANCELLED`) → PG 보상 취소 | `COMPENSATED` | `PROCESSED` |
+| 보상 중 PG 취소 실패(`PAYMENT_CANCELLATION_FAILED`) | `COMPENSATION_FAILED` | **즉시 `DEAD`** + error 로그 (수동 환불) |
 | 원장 상태 때문에 승인 불가(`PAYMENT_INVALID_STATUS_TRANSITION`, `ORDER_INVALID_STATUS_TRANSITION`) | `STATE_CONFLICT` | **즉시 `DEAD`** + error 로그 (수동 확인) |
 | 그 밖의 예외 (PG 조회 실패, PG에 결제 없음, 락 충돌, DB 오류) | 예외 전파 | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
 
 - `NOT_PAID`를 `PROCESSED`로 두는 이유: READY 등의 웹훅은 할 일이 없고, 이후 결제 완료 시 Paid 웹훅이 따로 온다.
 - **재시도하지 않고 바로 `DEAD`로 보내는 경우**
   - `COMPENSATION_FAILED`: 결제 FAILED가 커밋된 뒤라, 재시도하면 `ALREADY_DONE` → `PROCESSED`로 끝나 **PG에 결제가 남은 상황이 가려진다.** 이슈 C(보상 Outbox) 전까지는 `DEAD`로 드러내고 수동 환불한다.
-  - `STATE_CONFLICT`: `approvePayment`가 락 안에서 PAID·FAILED를 걸러낸 뒤의 전이 실패라 원장이 이미 끝난 상태(CANCELLED 등)다. 재시도해도 결과가 같다. 로컬 `CANCELLED` 결제에 PG Paid 웹훅이 오는 경우가 여기에 해당하며, 정상 흐름에서는 생기지 않는 조합(payment-approval.md 4.3)이다.
+    - 원장 `CANCELLED`의 PG 취소 실패도 같은 결과로 받는다. 이 경우는 재시도하면 PG 취소를 다시 시도할 수 있지만, 지금은 금액 불일치와 똑같이 `DEAD`로 드러낸다.
+  - `STATE_CONFLICT`: `approvePayment`가 락 안에서 PAID·FAILED·CANCELLED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다. 정상 흐름에서는 생기지 않는다.
+    - 원장 `CANCELLED` + PG Paid는 여기에 해당하지 않는다. `COMPENSATED`로 PG 결제를 취소한다(payment-approval.md 4.3).
 - **Processor의 예외 처리**
   - 결과 기록 중 `PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION`: 멈춘 행을 다시 점유한 사이 다른 처리가 먼저 기록한 경우다. 실패로 기록하지 않고 건너뛴다.
   - 그 밖의 예외는 `recordFailure`로 재시도를 예약한다.
@@ -175,12 +178,12 @@ payment:
 |---|---|---|
 | `PortOneWebhookVerifierTest` | 단위 | 정상 서명(거래·빌링키·알 수 없는 타입), 잘못된 서명, 오래된 타임스탬프, 헤더 누락. 서명은 테스트에서 HMAC으로 직접 생성 |
 | `PortOneWebhookControllerTest` | `@WebMvcTest` | 200(원문 저장), 중복 수신 200, 401이면 저장 안 함 |
-| `WebhookEventTest` | 단위 | 생성 상태, 상태 전이, 백오프, DEAD, `markAsDead`, 실패 사유 자르기, `isProcessable` |
+| `WebhookEventTest` | 단위 | 생성 상태, 상태 전이, 백오프, DEAD(처리 종료 시각 기록), `markAsDead`, 실패 사유 자르기, `isProcessable` |
 | `WebhookEventRepositoryTest` | `@DataJpaTest` + H2 | 36자 pgId·null pgId 저장, `webhook_id` UNIQUE |
 | `WebhookEventCommandServiceTest` | `@DataJpaTest` + H2 | 저장·중복, 점유(대기·처리 중·IGNORED·재시도 시각 전후), 결과 기록(수동 처리 필요 결과는 DEAD), 처리 대상 조회 |
 | `WebhookEventProcessorTest` | Mockito | 처리, 점유 실패·락 충돌 시 건너뜀, 실패 기록, 다른 처리가 먼저 기록하면 건너뜀, 수동 처리 필요 결과 기록, 배치 내 예외 격리 |
 | `WebhookEventSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, `enabled` 설정에 따른 빈 등록 |
-| `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(보상 취소 실패·상태 충돌 포함), 재시도 필요 오류 전파 |
+| `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(원장 CANCELLED 보상·보상 취소 실패·상태 충돌 포함), 재시도 필요 오류 전파 |
 
 - DB는 `Instant`를 마이크로초로 반올림해 저장한다. 시각 경계를 비교하는 테스트는 `now`를 밀리초로 잘라 쓴다.
 

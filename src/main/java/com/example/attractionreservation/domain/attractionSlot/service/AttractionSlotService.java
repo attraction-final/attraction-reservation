@@ -134,4 +134,19 @@ public class AttractionSlotService {
             throw new BusinessException(ErrorCode.SLOT_ALREADY_ENDED);
         }
     }
+
+    // 슬롯 정원 수정
+    @Transactional
+    public UpdateAttractionSlotCapacityResponse updateAttractionSlotCapacity(Long slotId,
+                                                                             UpdateAttractionSlotCapacityRequest request) {
+        AttractionSlot slot = findSlot(slotId);
+        validateModifiable(slot, KstTime.now());
+
+        if (request.capacity() < slot.getReservedCount()) { // BR-SLT-05
+            throw new BusinessException(ErrorCode.SLOT_CAPACITY_BELOW_RESERVED);
+        }
+
+        slot.changeCapacity(request.capacity()); // 잔여 정원에 맞춰 OPEN/CLOSED 자동 조정
+        return UpdateAttractionSlotCapacityResponse.from(slot);
+    }
 }

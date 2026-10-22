@@ -18,6 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
 
 @Service
 @RequiredArgsConstructor
@@ -43,11 +48,24 @@ public class OrderService {
         List<OrderLine> orderLines = new ArrayList<>();
         int totalAmount = 0;
 
+        // 중복 상품 ID를 제거하고 필요한 상품을 일괄 조회한다.
+        Set<Long> productIds = request.items().stream()
+                .map(CreateOrderRequest.Item::ticketProductId)
+                .collect(Collectors.toSet());
+
+        Map<Long, TicketProduct> productsById = ticketProductRepository
+                .findAllById(productIds).stream()
+                .collect(Collectors.toMap(
+                        TicketProduct::getId,
+                        Function.identity()
+                ));
+
         for (CreateOrderRequest.Item item : request.items()) {
-            TicketProduct ticketProduct = ticketProductRepository
-                    .findById(item.ticketProductId())
-                    .orElseThrow(() ->
-                            new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+            TicketProduct ticketProduct = productsById.get(item.ticketProductId());
+
+            if (ticketProduct == null) {
+                throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
+            }
 
             if (ticketProduct.getStatus() != TicketProductStatus.ON_SALE) {
                 throw new BusinessException(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE);

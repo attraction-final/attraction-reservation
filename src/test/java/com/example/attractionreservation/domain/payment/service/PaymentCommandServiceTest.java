@@ -26,7 +26,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -91,6 +94,20 @@ class PaymentCommandServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_ALREADY_PROCESSED.getMessage());
         assertEquals(PaymentStatus.FAILED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("사용자가 취소한 결제는 승인하지 않고 취소된 결제 예외를 던진다.")
+    void approvePayment_cancelled_Fail() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when & then
+        assertThatThrownBy(() -> paymentCommandService.approvePayment(PG_ID, APPROVED_AT))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
     }
 
     @Test
@@ -171,7 +188,7 @@ class PaymentCommandServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "PENDING")
+    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PENDING", "CANCELLED"})
     @DisplayName("이미 처리된 결제는 실패 처리하지 않고 보상 요청도 저장하지 않는다.")
     void failPaymentWithCompensation_notPending_Skip(PaymentStatus status) {
         //given
@@ -184,6 +201,88 @@ class PaymentCommandServiceTest {
         //then
         assertFalse(failed);
         assertEquals(status, payment.getStatus());
+        verifyNoInteractions(paymentCompensationService);
+    }
+
+    @Test
+    @DisplayName("사용자가 취소한 결제가 금액 불일치면 실패 처리 없이 보상 요청만 저장한다.")
+    void failPaymentWithCompensation_cancelled_SaveCompensation() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+        given(paymentCompensationService.findIdByPgId(payment.getPgId())).willReturn(Optional.empty());
+
+        //when
+        boolean requested = paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        assertTrue(requested);
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+        verify(paymentCompensationService).saveCompensatingEvent(PG_ID, 9999L, "결제 금액 불일치");
+    }
+
+    @Test
+    @DisplayName("사용자가 취소한 결제에 보상 요청이 이미 있으면 금액 불일치여도 보상 요청을 저장하지 않는다.")
+    void failPaymentWithCompensation_cancelledAlreadyRequested_Skip() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+        given(paymentCompensationService.findIdByPgId(payment.getPgId())).willReturn(Optional.of(1L));
+
+        //when
+        boolean requested = paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        assertFalse(requested);
+        verify(paymentCompensationService, never()).saveCompensatingEvent(anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("사용자가 취소한 결제가 PG에서 결제 완료됐으면 PG 결제 금액으로 보상 요청을 저장한다.")
+    void requestCompensationForCancelled_cancelled_SaveCompensation() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+        given(paymentCompensationService.findIdByPgId(payment.getPgId())).willReturn(Optional.empty());
+
+        //when
+        boolean requested = paymentCommandService.requestCompensationForCancelled(PG_ID, 10000L, "취소된 주문의 결제");
+
+        //then
+        assertTrue(requested);
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+        verify(paymentCompensationService).saveCompensatingEvent(PG_ID, 10000L, "취소된 주문의 결제");
+    }
+
+    @Test
+    @DisplayName("취소된 결제에 보상 요청이 이미 있으면 다시 저장하지 않는다.")
+    void requestCompensationForCancelled_alreadyRequested_Skip() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+        given(paymentCompensationService.findIdByPgId(payment.getPgId())).willReturn(Optional.of(1L));
+
+        //when
+        boolean requested = paymentCommandService.requestCompensationForCancelled(PG_ID, 10000L, "취소된 주문의 결제");
+
+        //then
+        assertFalse(requested);
+        verify(paymentCompensationService, never()).saveCompensatingEvent(anyString(), any(), anyString());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "CANCELLED")
+    @DisplayName("취소된 결제가 아니면 보상 요청을 저장하지 않는다.")
+    void requestCompensationForCancelled_notCancelled_Skip(PaymentStatus status) {
+        //given
+        Payment payment = createPaymentWithStatus(status);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        boolean requested = paymentCommandService.requestCompensationForCancelled(PG_ID, 10000L, "취소된 주문의 결제");
+
+        //then
+        assertFalse(requested);
         verifyNoInteractions(paymentCompensationService);
     }
 

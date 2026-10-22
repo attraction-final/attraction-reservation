@@ -32,6 +32,7 @@ public class PaymentCommandService {
      * @param paidAt PG 조회로 확인한 결제 완료 시각
      * @throws BusinessException 결제가 없으면 {@code PAYMENT_NOT_FOUND},
      *                           실패 처리된 결제면 {@code PAYMENT_ALREADY_PROCESSED},
+     *                           사용자가 취소한 결제면 {@code PAYMENT_ALREADY_CANCELLED},
      *                           그 밖에 결제 완료로 전이할 수 없으면 {@code PAYMENT_INVALID_STATUS_TRANSITION}
      */
     @Transactional
@@ -45,6 +46,11 @@ public class PaymentCommandService {
 
         if (payment.getStatus() == PaymentStatus.FAILED) {
             throw new BusinessException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
+        }
+
+        // PG 결제 대기 중 사용자가 취소한 경우. 호출하는 쪽에서 requestCompensationForCancelled로 보상을 요청한다.
+        if (payment.getStatus() == PaymentStatus.CANCELLED) {
+            throw new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED);
         }
 
         payment.markAsPaid(paidAt);
@@ -73,14 +79,36 @@ public class PaymentCommandService {
      *
      * <p>실패 처리와 보상 요청이 함께 커밋되므로, 커밋 후 PG 취소 전에 서버가 종료돼도 보상 요청이 남는다.
      * 보상 요청 저장에 실패하면 실패 처리도 함께 롤백된다.
+     * 사용자가 이미 취소한 결제는 실패 처리 없이 보상 요청만 저장한다.
      *
      * @param pgAmount PG가 실제 결제한 금액(취소할 금액)
-     * @return 이번 호출에서 실패 처리하고 보상을 요청했으면 true, 이미 처리된 결제여서 건너뛰었으면 false
+     * @return 이번 호출에서 보상을 요청했으면 true, 이미 처리된 결제여서 건너뛰었으면 false
      * @throws BusinessException 결제가 없으면 {@code PAYMENT_NOT_FOUND}
      */
     @Transactional
     public boolean failPaymentWithCompensation(String pgId, Long pgAmount, String reason) {
-        if (!markAsFailedIfPending(getPaymentByPgIdForUpdate(pgId))) {
+        Payment payment = getPaymentByPgIdForUpdate(pgId);
+        if (!markAsFailedIfPending(payment) && !isCancelledWithoutCompensation(payment)) {
+            return false;
+        }
+
+        paymentCompensationService.saveCompensatingEvent(pgId, pgAmount, reason);
+        return true;
+    }
+
+    /**
+     * 사용자가 취소한 결제가 PG에서 결제 완료된 경우 PG 보상 취소 요청을 저장한다(Outbox).
+     * {@link #approvePayment}가 {@code PAYMENT_ALREADY_CANCELLED}로 끝난 뒤 호출한다.
+     *
+     * <p>결제를 비관적 락으로 조회하므로 동시에 호출돼도 보상 요청은 한 번만 저장된다.
+     *
+     * @param pgAmount PG가 실제 결제한 금액(취소할 금액)
+     * @return 이번 호출에서 보상을 요청했으면 true, 취소된 결제가 아니거나 이미 보상 요청이 있으면 false
+     * @throws BusinessException 결제가 없으면 {@code PAYMENT_NOT_FOUND}
+     */
+    @Transactional
+    public boolean requestCompensationForCancelled(String pgId, Long pgAmount, String reason) {
+        if (!isCancelledWithoutCompensation(getPaymentByPgIdForUpdate(pgId))) {
             return false;
         }
 
@@ -98,6 +126,12 @@ public class PaymentCommandService {
 
         // TODO: 재고 복구 필요
         return true;
+    }
+
+    // 사용자가 취소한 결제는 PG 결제가 남아 있을 수 있다. 보상 요청은 결제당 하나(pg_id UNIQUE)라 이미 있으면 만들지 않는다.
+    private boolean isCancelledWithoutCompensation(Payment payment) {
+        return payment.getStatus() == PaymentStatus.CANCELLED
+                && paymentCompensationService.findIdByPgId(payment.getPgId()).isEmpty();
     }
 
     private Payment getPaymentByPgIdForUpdate(String pgId) {

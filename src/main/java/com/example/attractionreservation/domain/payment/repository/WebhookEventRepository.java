@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
@@ -27,6 +28,12 @@ public interface WebhookEventRepository extends JpaRepository<WebhookEvent, Long
        OR (w.status = :processing AND w.updatedAt <= :staleBefore)
     ORDER BY w.id
     """)
-    List<Long> findProcessableIds(WebhookStatus received, WebhookStatus failed, WebhookStatus processing,
-                                  Instant now, Instant staleBefore, Pageable pageable);
+    List<Long> findProcessableIds(
+            @Param("received") WebhookStatus received,
+            @Param("failed") WebhookStatus failed,
+            @Param("processing") WebhookStatus processing,
+            @Param("now") Instant now,
+            @Param("staleBefore") Instant staleBefore,
+            Pageable pageable
+    );
 }

@@ -222,6 +222,60 @@ class PaymentFacadeTest {
     }
 
     @Test
+    @DisplayName("PG 결제 대기 중 원장이 취소됐는데 PG에서 결제 완료됐으면 보상 요청 후 보상 취소를 즉시 한 번 시도한다.")
+    void confirmPayment_cancelledButPgPaid_RequestCompensation() {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+        given(paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제")).willReturn(true);
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        verify(paymentCompensationProcessor).processByPgId(pgId);
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("취소된 결제의 보상 요청이 이미 있으면 보상 취소를 시도하지 않는다.")
+    void confirmPayment_cancelledButPgPaidAlreadyRequested_SkipCompensation() {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+        given(paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제")).willReturn(false);
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        verifyNoInteractions(paymentCompensationProcessor);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 이미 취소된 결제가 PG에서 결제 완료됐으면 보상 요청 후 COMPENSATED를 반환한다.")
+    void syncPayment_cancelledButPgPaid_Compensated() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+        given(paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제")).willReturn(true);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATED, result);
+        verify(paymentCompensationProcessor).processByPgId(pgId);
+    }
+
+    @Test
     @DisplayName("웹훅 동기화: 원장에 없는 결제면 PG를 호출하지 않고 NOT_OUR_PAYMENT를 반환한다.")
     void syncPayment_unknownPgId_NotOurPayment() {
         //given
@@ -339,6 +393,8 @@ class PaymentFacadeTest {
 
         //then
         assertEquals(PaymentSyncResult.STATE_CONFLICT, result);
+        verify(paymentCommandService, never()).requestCompensationForCancelled(anyString(), any(), anyString());
+        verifyNoInteractions(paymentCompensationProcessor);
     }
 
     @Test

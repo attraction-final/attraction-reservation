@@ -22,6 +22,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class PaymentFacade {
     private static final String AMOUNT_MISMATCH_REASON = "결제 금액 불일치";
+    private static final String CANCELLED_PAYMENT_REASON = "취소된 주문의 결제";
 
     private final PaymentService paymentService;
     private final PaymentCommandService paymentCommandService;
@@ -44,7 +45,7 @@ public class PaymentFacade {
      * <p>웹훅 본문은 신뢰하지 않으므로 이벤트 종류와 무관하게 PG를 다시 조회해 판단한다.
      * 업무상 예상되는 결과는 {@link PaymentSyncResult}로 반환하고,
      * 재시도가 필요한 오류(PG 조회 실패, 락 충돌 등)만 예외로 던진다.
-     * 금액 불일치 보상 취소는 보상 Outbox가 따로 재시도하므로 결과에 영향을 주지 않는다(COMPENSATED).
+     * 금액 불일치·원장 취소 결제의 보상 취소는 보상 Outbox가 따로 재시도하므로 결과에 영향을 주지 않는다(COMPENSATED).
      */
     public PaymentSyncResult syncPayment(String pgId) {
         Optional<Payment> found = paymentService.findByPgId(pgId);
@@ -65,8 +66,8 @@ public class PaymentFacade {
                 case PAYMENT_ALREADY_PROCESSED -> PaymentSyncResult.ALREADY_DONE;
                 case PAYMENT_NOT_PAID -> PaymentSyncResult.NOT_PAID;
                 case PAYMENT_PG_FAILED -> PaymentSyncResult.PG_FAILED;
-                case PAYMENT_INCORRECT_AMOUNT -> PaymentSyncResult.COMPENSATED;
-                // approvePayment가 PAID·FAILED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다.
+                case PAYMENT_INCORRECT_AMOUNT, PAYMENT_ALREADY_CANCELLED -> PaymentSyncResult.COMPENSATED;
+                // approvePayment가 PAID·FAILED·CANCELLED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다.
                 case PAYMENT_INVALID_STATUS_TRANSITION, ORDER_INVALID_STATUS_TRANSITION -> PaymentSyncResult.STATE_CONFLICT;
                 default -> throw e;
             };
@@ -97,7 +98,7 @@ public class PaymentFacade {
         }
 
         if (!amountMatches(payment, pgPayment)) {
-            // 결제 실패 처리와 보상 요청을 함께 커밋한 뒤 PG 취소를 즉시 한 번 시도한다.
+            // 결제 실패 처리(원장 CANCELLED면 생략)와 보상 요청을 함께 커밋한 뒤 PG 취소를 즉시 한 번 시도한다.
             // 즉시 시도가 실패해도 보상 요청이 남아 재시도되므로 여기서는 예외를 던지지 않는다.
             if (paymentCommandService.failPaymentWithCompensation(
                     payment.getPgId(), pgPayment.totalAmount(), AMOUNT_MISMATCH_REASON)) {
@@ -110,7 +111,25 @@ public class PaymentFacade {
             throw new BusinessException(ErrorCode.PAYMENT_INCORRECT_AMOUNT);
         }
 
-        return paymentCommandService.approvePayment(payment.getPgId(), pgPayment.paidAt());
+        try {
+            return paymentCommandService.approvePayment(payment.getPgId(), pgPayment.paidAt());
+        } catch (BusinessException e) {
+            if (e.getErrorCode() == ErrorCode.PAYMENT_ALREADY_CANCELLED) {
+                requestCancelledPaymentCompensation(payment.getPgId(), pgPayment.totalAmount());
+            }
+            throw e;
+        }
+    }
+
+    // 원장은 사용자가 취소했는데 PG에서는 결제가 완료된 경우.
+    // approvePayment는 예외로 롤백되므로 보상 요청은 별도 트랜잭션에서 저장한다. CANCELLED는 종료 상태라 그 사이에 바뀌지 않는다.
+    private void requestCancelledPaymentCompensation(String pgId, Long pgAmount) {
+        if (paymentCommandService.requestCompensationForCancelled(pgId, pgAmount, CANCELLED_PAYMENT_REASON)) {
+            paymentCompensationProcessor.processByPgId(pgId);
+        } else {
+            // 다른 요청이 먼저 보상 요청을 저장한 경우
+            log.info("취소된 결제의 보상 요청이 이미 있음, 보상 요청 생략: pgId={}", pgId);
+        }
     }
 
     private boolean amountMatches(Payment payment, PaymentGatewayResponse pgPayment) {

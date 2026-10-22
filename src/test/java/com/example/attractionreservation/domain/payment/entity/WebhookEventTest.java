@@ -181,7 +181,7 @@ class WebhookEventTest {
     }
 
     @Test
-    @DisplayName("최대 시도 횟수만큼 실패하면 DEAD가 되고 더 이상 재시도하지 않는다.")
+    @DisplayName("최대 시도 횟수만큼 실패하면 DEAD가 되고 더 이상 재시도하지 않으며 처리 종료 시각이 기록된다.")
     void markAsFailed_maxAttempts_Dead() {
         //given
         WebhookEvent event = createEventWithStatus(WebhookStatus.DEAD);
@@ -190,6 +190,7 @@ class WebhookEventTest {
         assertEquals(WebhookStatus.DEAD, event.getStatus());
         assertEquals(WebhookEvent.MAX_ATTEMPTS, event.getAttemptCount());
         assertNull(event.getNextRetryAt());
+        assertEquals(NOW, event.getProcessedAt());
     }
 
     @Test
@@ -207,7 +208,7 @@ class WebhookEventTest {
     }
 
     @Test
-    @DisplayName("처리 중인 웹훅을 DEAD로 기록하면 재시도하지 않고 사유가 남는다.")
+    @DisplayName("처리 중인 웹훅을 DEAD로 기록하면 재시도하지 않고 사유와 처리 종료 시각이 남는다.")
     void markAsDead_processing_Dead() {
         //given
         WebhookEvent event = createEvent();
@@ -220,6 +221,7 @@ class WebhookEventTest {
         assertEquals(WebhookStatus.DEAD, event.getStatus());
         assertEquals("PG 보상 취소 실패: 수동 환불 필요", event.getLastError());
         assertNull(event.getNextRetryAt());
+        assertEquals(NOW, event.getProcessedAt());
         assertFalse(event.isProcessable(NOW.plus(Duration.ofDays(1)), Duration.ofMinutes(5)));
     }
 

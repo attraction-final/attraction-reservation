@@ -130,6 +130,32 @@ class PaymentCompensationOutboxTest {
         assertThat(paymentCompensationRepository.count()).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("취소된 결제의 보상 요청은 커밋되고, 다시 요청해도 추가로 만들지 않는다.")
+    void requestCompensationForCancelled_cancelled_CommitOnce() {
+        //given
+        transactionTemplate.executeWithoutResult(status -> entityManager
+                .createQuery("update Payment p set p.status = :cancelled where p.pgId = :pgId")
+                .setParameter("cancelled", PaymentStatus.CANCELLED)
+                .setParameter("pgId", pgId)
+                .executeUpdate());
+
+        //when
+        boolean first = paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제");
+        boolean second = paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제");
+
+        //then
+        assertThat(first).isTrue();
+        assertThat(second).isFalse();
+        assertThat(paymentCompensationRepository.count()).isEqualTo(1);
+        assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
+
+        PaymentCompensation compensation = paymentCompensationRepository.findByPgId(pgId).orElseThrow();
+        assertThat(compensation.getStatus()).isEqualTo(CompensationStatus.REQUESTED);
+        assertThat(compensation.getAmount()).isEqualTo(10000L);
+        assertThat(compensation.getReason()).isEqualTo("취소된 주문의 결제");
+    }
+
     private PaymentStatus findPaymentStatus() {
         return transactionTemplate.execute(status -> entityManager
                 .createQuery("select p.status from Payment p where p.pgId = :pgId", PaymentStatus.class)

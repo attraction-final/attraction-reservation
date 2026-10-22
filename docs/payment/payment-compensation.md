@@ -1,6 +1,6 @@
 # 결제 보상 취소 Outbox (KAN-39)
 
-결제 승인 중 PG 결제 금액이 원장과 다를 때 PG 결제를 취소(보상)하는 기능을 Outbox 패턴으로 구현한 구조와 남은 작업을 정리한 문서다.
+결제 승인 중 PG 결제 금액이 원장과 다르거나, 사용자가 취소한 결제가 PG에서 결제 완료됐을 때 PG 결제를 취소(보상)하는 기능을 Outbox 패턴으로 구현한 구조와 남은 작업을 정리한 문서다.
 결제 승인 구조는 [payment-approval.md](payment-approval.md), 웹훅 처리 구조는 [payment-webhook-plan.md](payment-webhook-plan.md)를 참고한다.
 
 ## 1. 문제와 방향
@@ -42,10 +42,11 @@ domain/payment
 ├── entity/enums/CompensationStatus         REQUESTED, PROCESSING, FAILED, DONE, DEAD
 ├── repository/PaymentCompensationRepository    findByPgId, findWithLockById, findProcessableIds
 ├── service/PaymentCommandService           failPaymentWithCompensation: 결제 실패 + 보상 요청 저장 (같은 트랜잭션)
+│                                           requestCompensationForCancelled: 취소된 결제의 보상 요청 저장
 ├── service/PaymentCompensationService      저장, 처리 대상 조회, 행 잠금 후 점유, 완료·실패 기록
 ├── dto/ClaimedCompensation                 점유한 요청에서 트랜잭션 밖 PG 취소·로그에 쓰는 값
 ├── facade/PaymentCompensationProcessor     점유 → PG 전체 취소 → 결과 기록 (트랜잭션 없음)
-├── facade/PaymentFacade                    금액 불일치 시 보상 요청 후 즉시 1회 시도
+├── facade/PaymentFacade                    금액 불일치·취소된 결제의 PG 결제 완료 시 보상 요청 후 즉시 1회 시도
 └── scheduler/PaymentCompensationScheduler  payment.compensation.scheduler.enabled로 켜고 끔
 ```
 
@@ -90,12 +91,24 @@ domain/payment
 - 재시도 백오프: 1분, 2분, 4분, 8분. 5번째 실패에서 `DEAD` + error 로그("수동 환불 필요").
 - 생성 시 금액이 null이거나 0 이하면 `PAYMENT_INVALID_AMOUNT`.
 
-## 4. 보상 요청 생성 (`failPaymentWithCompensation`)
+## 4. 보상 요청 생성
+
+### 금액 불일치 (`failPaymentWithCompensation`)
 
 - 결제를 비관적 락으로 조회해 `PENDING`일 때만 결제 FAILED·주문 취소를 하고, 이어서 보상 요청을 저장한다.
   - 보상 저장(`PaymentCompensationService.saveCompensatingEvent`)은 기본 전파(`REQUIRED`)라 같은 트랜잭션에 참여한다.
-- 이미 처리된 결제면 `false`를 반환하고 보상 요청을 만들지 않는다. 승인 API와 웹훅이 동시에 금액 불일치를 처리해도 결제 락 때문에 보상 요청은 1건이다(`pg_id` UNIQUE가 최종 방어).
+- 원장이 `CANCELLED`(사용자 취소)이고 보상 요청이 없으면 실패 처리 없이 보상 요청만 저장한다. 사용자 취소는 PG 결제를 취소하지 않으므로 PG에 결제가 남아 있다.
+- 그 밖에 이미 처리된 결제면 `false`를 반환하고 보상 요청을 만들지 않는다. 승인 API와 웹훅이 동시에 금액 불일치를 처리해도 결제 락 때문에 보상 요청은 1건이다(`pg_id` UNIQUE가 최종 방어).
 - PG 결제 실패(`failPayment`)는 돈이 움직이지 않았으므로 보상 요청을 만들지 않는다.
+
+### 취소된 결제의 PG 결제 완료 (`requestCompensationForCancelled`)
+
+- PG 결제창이 열려 있는 동안 사용자가 취소하고 이후 PG 결제가 완료되면, `approvePayment`가 락 안에서 `CANCELLED`를 확인해 `PAYMENT_ALREADY_CANCELLED`를 던진다.
+- 예외로 `approvePayment` 트랜잭션은 롤백되므로, Facade가 `requestCompensationForCancelled`로 **별도 트랜잭션**에서 보상 요청을 저장한다.
+  - 결제를 비관적 락으로 다시 조회해 `CANCELLED`이고 보상 요청이 없을 때만 저장한다. 동시에 들어와도 1건이다.
+  - `CANCELLED`는 종료 상태라 두 트랜잭션 사이에 바뀌지 않는다.
+  - 두 트랜잭션 사이에 서버가 종료되면 보상 요청이 없다. 웹훅은 `PROCESSING`으로 멈췄다가 다시 처리되고, 승인 API는 재호출 시 다시 판단해 보상 요청을 만든다.
+- 사유는 "취소된 주문의 결제", 금액은 PG 조회 결과의 `totalAmount`다.
 
 ## 5. 처리 (`PaymentCompensationProcessor`)
 
@@ -103,11 +116,11 @@ domain/payment
 
 | 경로 | 호출 | 시점 |
 |---|---|---|
-| 즉시 시도 | `PaymentFacade.reconcile` → `processByPgId(pgId)` | `failPaymentWithCompensation` 커밋 직후, 요청 스레드 |
+| 즉시 시도 | `PaymentFacade.reconcile` → `processByPgId(pgId)` | `failPaymentWithCompensation`·`requestCompensationForCancelled` 커밋 직후, 요청 스레드 |
 | 재시도 | `PaymentCompensationScheduler` → `processPending(20)` | 30초 간격 |
 
 - 둘 다 `process(id)`를 쓴다: 점유(행 잠금 후 `isProcessable` 재확인) → PG 전체 취소 → `recordDone` / `recordFailure`.
-- **Processor는 예외를 밖으로 던지지 않는다.** 즉시 시도가 실패해도 보상 요청이 남아 재시도되므로, 승인 API는 `PAYMENT_INCORRECT_AMOUNT`(400), 웹훅은 `COMPENSATED`로 끝난다.
+- **Processor는 예외를 밖으로 던지지 않는다.** 즉시 시도가 실패해도 보상 요청이 남아 재시도되므로, 승인 API는 `PAYMENT_INCORRECT_AMOUNT`(400)·`PAYMENT_ALREADY_CANCELLED`(409), 웹훅은 `COMPENSATED`로 끝난다.
 - 즉시 시도와 스케줄러, 여러 인스턴스가 같은 요청을 고르면 두 번째는 락을 기다린 뒤 `PROCESSING`을 보고 건너뛴다. 락 대기 타임아웃(3초)이면 `PessimisticLockingFailureException`을 받아 건너뛴다.
 - 결과 기록 중 `PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION`: 멈춘 행을 다시 점유한 사이 다른 처리가 먼저 기록한 경우라 실패로 기록하지 않고 건너뛴다.
 - `processPending`은 요청마다 예외를 격리한다.
@@ -136,7 +149,7 @@ payment:
       batch-size: 20     # 요청 하나가 PG 취소 호출 하나라 웹훅보다 작게 둔다
 ```
 
-- 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × 연결 5초 + 읽기 60초)보다 길어야 한다.
+- 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) = 45초)보다 길어야 한다.
 
 ## 6. 장애 시나리오
 
@@ -148,6 +161,7 @@ payment:
 | PG 취소 성공 후 `DONE` 기록 전 종료 | 5분 뒤 재점유 → 재취소는 "이미 취소됨"으로 성공 → `DONE` |
 | 즉시 시도와 스케줄러 동시 점유 | 행 잠금 후 재확인으로 한쪽만 처리 |
 | 승인 API·웹훅 동시 금액 불일치 | 결제 락으로 순차 실행, 두 번째는 `false`로 보상 요청 생략 |
+| `PAYMENT_ALREADY_CANCELLED` 후 보상 요청 저장 전 종료 | 보상 요청 없음. 웹훅은 멈춘 행 재처리, 승인 API는 재호출 시 다시 판단해 저장 |
 | 최대 시도 횟수 초과 | `DEAD` + error 로그 → 수동 환불 |
 
 ## 7. 테스트
@@ -156,11 +170,11 @@ payment:
 |---|---|---|
 | `PaymentCompensationTest` | 단위 | 생성 상태·금액 검증, 상태 전이, 백오프, DEAD, 실패 사유 자르기, 처리 가능 판단(요청 시각이 미래여도 REQUESTED는 대상) |
 | `PaymentCompensationRepositoryTest` | `@DataJpaTest` + H2 | 36자 pgId·int 범위 초과 금액 저장, `pg_id` UNIQUE |
-| `PaymentCompensationOutboxTest` | `@DataJpaTest` + H2, **실제 트랜잭션** | 결제 실패·주문 취소·보상 요청 함께 커밋, 보상 저장 실패 시 모두 롤백, 중복 요청 시 1건 |
+| `PaymentCompensationOutboxTest` | `@DataJpaTest` + H2, **실제 트랜잭션** | 결제 실패·주문 취소·보상 요청 함께 커밋, 보상 저장 실패 시 모두 롤백, 중복 요청 시 1건, 취소된 결제 보상 요청 커밋·중복 요청 시 1건 |
 | `PaymentCompensationServiceTest` | `@DataJpaTest` + H2 | 점유(요청 시각이 미래인 REQUESTED 포함), 중복 점유 거부, 완료 후 점유 거부, 재시도 시각 전후, DEAD, 처리 대상 조회 |
 | `PaymentCompensationProcessorTest` | Mockito | 전체 취소 후 DONE, 점유 실패·락 충돌 건너뜀, 취소 실패 기록, 다른 처리가 먼저 기록, 즉시 시도·예외 삼킴, 배치 예외 격리 |
 | `PaymentCompensationSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, 설정에 따른 빈 등록 |
-| `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장, 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음 |
+| `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장(원장 CANCELLED면 실패 처리 없이 저장), 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음, 취소된 결제 보상 저장·이미 요청됨·취소 아님 |
 | `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 이미 취소됨 성공 처리 |
 
 - `PaymentCompensationOutboxTest`는 테스트 메서드 트랜잭션에 묶이지 않도록 `NOT_SUPPORTED`로 실행하고 데이터를 직접 정리한다.
@@ -180,5 +194,5 @@ payment:
 ### 운영
 
 - [ ] `DEAD` 보상 요청 확인 수단(알림, 조회 쿼리 또는 API)과 수동 환불 절차
-- [ ] 즉시 시도가 요청 스레드에서 PG 취소를 기다린다(최악 3분 이상). 필요하면 커밋 후 `@Async`로 전환한다. 보상 요청이 이미 저장돼 있어 안전성은 같다.
+- [ ] 즉시 시도가 요청 스레드에서 PG 취소를 기다린다(최악 약 45초). 필요하면 커밋 후 `@Async`로 전환한다. 보상 요청이 이미 저장돼 있어 안전성은 같다.
 - [ ] 금액 불일치 응답 메시지에 "환불은 자동으로 진행됩니다" 포함 검토

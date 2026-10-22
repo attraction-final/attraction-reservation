@@ -48,6 +48,11 @@ class AttractionSlotServiceTest {
     // 테스트가 언제 돌아도 "미래"가 되도록 내일 날짜 사용
     private static final LocalDate TOMORROW = KstTime.now().toLocalDate().plusDays(1);
 
+    // 시간 수정, 정원 수정에 사용
+    private void givenSlot(AttractionSlot slot) {
+        given(attractionSlotRepository.findById(slot.getId())).willReturn(Optional.of(slot));
+    }
+
     // ===== helper =====
     private Attraction createAttraction(OperationStatus status) {
         Attraction attraction = Attraction.create("롤러코스터", "빠른 코스터", "A구역", 10, 8);
@@ -331,9 +336,42 @@ class AttractionSlotServiceTest {
                     31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_TIME_OVERLAP);
             assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0)); // 바뀌지 않음
         }
+    }
 
-        private void givenSlot(AttractionSlot slot) {
-            given(attractionSlotRepository.findById(slot.getId())).willReturn(Optional.of(slot));
+    // 정원 수정
+    @Nested
+    @DisplayName("슬롯 정원 수정")
+    class UpdateCapacity {
+
+        @Test
+        @DisplayName("성공: 정원 증가")
+        void success() {
+            givenSlot(createTomorrowSlot(12, SlotStatus.OPEN));
+
+            UpdateAttractionSlotCapacityResponse response =
+                    attractionSlotService.updateAttractionSlotCapacity(31L, new UpdateAttractionSlotCapacityRequest(25));
+
+            assertThat(response.capacity()).isEqualTo(25);
+            assertThat(response.remainingCount()).isEqualTo(13);
+            assertThat(response.status()).isEqualTo(SlotStatus.OPEN);
+        }
+
+        @Test
+        @DisplayName("실패: 예약 인원보다 작게")
+        void belowReserved() {
+            givenSlot(createTomorrowSlot(12, SlotStatus.OPEN));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
+                    31L, new UpdateAttractionSlotCapacityRequest(11)), ErrorCode.SLOT_CAPACITY_BELOW_RESERVED);
+        }
+
+        @Test
+        @DisplayName("실패: 취소된 슬롯")
+        void cancelled() {
+            givenSlot(createTomorrowSlot(0, SlotStatus.CANCELLED));
+
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
+                    31L, new UpdateAttractionSlotCapacityRequest(30)), ErrorCode.SLOT_ALREADY_CANCELLED);
         }
     }
 }

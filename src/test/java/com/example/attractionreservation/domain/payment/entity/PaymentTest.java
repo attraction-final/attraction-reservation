@@ -8,10 +8,14 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PaymentTest {
+
+    private static final Instant PAID_AT = Instant.parse("2026-10-20T01:00:00Z");
 
     @Test
     @DisplayName("결제 금액이 0보다 크면 결제 원장을 생성할 수 있다.")
@@ -60,10 +64,24 @@ class PaymentTest {
         Payment payment = createPayment();
 
         //when
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
 
         //then
         assertEquals(PaymentStatus.PAID, payment.getStatus());
+        assertEquals(PAID_AT, payment.getPaidAt());
+    }
+
+    @Test
+    @DisplayName("결제 완료 시각 없이는 결제 완료로 변경할 수 없다.")
+    void markAsPaid_nullPaidAt_Fail() {
+        //given
+        Payment payment = createPayment();
+
+        //when & then
+        assertThatThrownBy(() -> payment.markAsPaid(null))
+                .isInstanceOf(NullPointerException.class);
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+        assertNull(payment.getPaidAt());
     }
 
     @Test
@@ -71,10 +89,10 @@ class PaymentTest {
     void markAsPaid_alreadyPaid_Fail() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
 
         //when & then
-        assertThatThrownBy(payment::markAsPaid)
+        assertThatThrownBy(() -> payment.markAsPaid(PAID_AT))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
         assertEquals(PaymentStatus.PAID, payment.getStatus());
@@ -88,7 +106,7 @@ class PaymentTest {
         payment.markAsCancelled();
 
         //when & then
-        assertThatThrownBy(payment::markAsPaid)
+        assertThatThrownBy(() -> payment.markAsPaid(PAID_AT))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
         assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
@@ -112,7 +130,7 @@ class PaymentTest {
     void markAsCancelled_paid_Fail() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
 
         //when & then
         assertThatThrownBy(payment::markAsCancelled)
@@ -126,7 +144,7 @@ class PaymentTest {
     void markAsPartiallyRefunded_paid_Success() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
 
         //when
         payment.markAsPartiallyRefunded();
@@ -153,7 +171,7 @@ class PaymentTest {
     void markAsPartiallyRefunded_alreadyPartiallyRefunded_Fail() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
         payment.markAsPartiallyRefunded();
 
         //when
@@ -168,7 +186,7 @@ class PaymentTest {
     void markAsRefunded_paid_Success() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
 
         //when
         payment.markAsRefunded();
@@ -182,7 +200,7 @@ class PaymentTest {
     void markAsRefunded_partiallyRefunded_Success() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
         payment.markAsPartiallyRefunded();
 
         //when
@@ -210,7 +228,7 @@ class PaymentTest {
     void markAsRefunded_alreadyRefunded_Fail() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
         payment.markAsRefunded();
 
         //when & then
@@ -238,7 +256,7 @@ class PaymentTest {
     void markAsFailed_paid_Fail() {
         //given
         Payment payment = createPayment();
-        payment.markAsPaid();
+        payment.markAsPaid(PAID_AT);
 
         //when & then
         assertThatThrownBy(payment::markAsFailed)
@@ -269,7 +287,7 @@ class PaymentTest {
         payment.markAsFailed();
 
         //when & then
-        assertThatThrownBy(payment::markAsPaid)
+        assertThatThrownBy(() -> payment.markAsPaid(PAID_AT))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION.getMessage());
         assertEquals(PaymentStatus.FAILED, payment.getStatus());

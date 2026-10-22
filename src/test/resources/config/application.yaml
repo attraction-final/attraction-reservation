@@ -1,0 +1,17 @@
+# 테스트 전용 PortOne 설정 (프로필과 무관하게 모든 테스트에 적용)
+# classpath:/config/application.yaml은 main의 application.yaml보다 우선 적용된다.
+portone:
+  base-url: https://api.portone.test
+  api-secret: test-api-secret
+  store-id: test-store-id
+  channel-key: test-channel-key
+  webhook-secret: whsec_dGVzdC13ZWJob29rLXNlY3JldA==  # SDK가 Base64로 디코드하므로 Base64 값이어야 한다
+
+# 테스트 중 스케줄러가 웹훅·보상 테이블을 처리하지 않도록 끈다.
+payment:
+  webhook:
+    scheduler:
+      enabled: false
+  compensation:
+    scheduler:
+      enabled: false

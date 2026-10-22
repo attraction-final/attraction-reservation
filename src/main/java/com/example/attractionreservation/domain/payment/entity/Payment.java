@@ -9,7 +9,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -36,7 +37,7 @@ public class Payment {
     @Column(nullable = false, length = 20)
     private PaymentStatus status;
 
-    private LocalDateTime paidAt;
+    private Instant paidAt;
 
     private Payment(Order order) {
         this.order = order;
@@ -53,11 +54,13 @@ public class Payment {
         return new Payment(order);
     }
 
-    public void markAsPaid() {
+    // PG 결제 시각으로 기록
+    public void markAsPaid(Instant paidAt) {
         if (!this.status.canTransitTo(PaymentStatus.PAID)) {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
         }
 
+        this.paidAt = Objects.requireNonNull(paidAt, "결제 완료 시각은 필수입니다.");
         this.status = PaymentStatus.PAID;
     }
 

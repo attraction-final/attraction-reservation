@@ -98,13 +98,6 @@ public class PaymentCompensation extends BaseTimeEntity {
         this.processedAt = now;
     }
 
-    // 재시도해도 해결되지 않아 수동 환불이 필요한 경우
-    public void markAsDead(String reason, Instant now) {
-        transitTo(CompensationStatus.DEAD);
-        this.processedAt = now;
-        this.lastError = truncate(reason);
-    }
-
     // 지수 백오프: 1분, 2분, 4분, 8분 후 재시도하고 MAX_ATTEMPTS번 실패하면 DEAD
     public void markAsFailed(String error, Instant now) {
         if (attemptCount >= MAX_ATTEMPTS) {

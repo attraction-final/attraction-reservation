@@ -150,6 +150,7 @@ class PaymentCompensationTest {
         assertEquals(CompensationStatus.FAILED, compensation.getStatus());
         assertEquals(NOW.plus(Duration.ofMinutes(1)), compensation.getNextRetryAt());
         assertEquals("결제 취소에 실패했습니다.", compensation.getLastError());
+        assertNull(compensation.getProcessedAt());
         assertFalse(compensation.isProcessable(NOW.plusSeconds(30), STALE_TIMEOUT));
         assertTrue(compensation.isProcessable(NOW.plus(Duration.ofMinutes(1)), STALE_TIMEOUT));
     }
@@ -211,21 +212,6 @@ class PaymentCompensationTest {
                 .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
         assertEquals(CompensationStatus.REQUESTED, compensation.getStatus());
         assertNull(compensation.getLastError());
-    }
-
-    @Test
-    @DisplayName("처리 중인 보상을 DEAD로 기록하면 사유와 처리 종료 시각이 남는다.")
-    void markAsDead_processing_Dead() {
-        //given
-        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
-
-        //when
-        compensation.markAsDead("PG 결제 상태 확인 필요", NOW);
-
-        //then
-        assertEquals(CompensationStatus.DEAD, compensation.getStatus());
-        assertEquals("PG 결제 상태 확인 필요", compensation.getLastError());
-        assertEquals(NOW, compensation.getProcessedAt());
     }
 
     @Test

@@ -4,6 +4,7 @@ package com.example.attractionreservation.domain.auth.controller;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
+import com.example.attractionreservation.domain.auth.dto.CreateAuthRefreshResponse;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.service.AuthService;
 import com.example.attractionreservation.global.response.ApiResponse;
@@ -49,6 +50,18 @@ public class AuthController {
                 .body(ApiResponse.ok("로그인에 성공했습니다.", result.response()));
     }
 
+
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<CreateAuthRefreshResponse>> refresh(
+            @CookieValue(value = "refreshToken", required = false)
+            String refreshToken
+    ) {
+        CreateAuthRefreshResponse response = authService.refresh(refreshToken);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("토큰 재발급에 성공했습니다.", response)
+        );
+    }
 
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(

@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -45,6 +46,16 @@ public class AuthService {
 
         return CreateAuthLoginServiceResponse.of(response, refreshToken);
     }
+
+
+
+    public void logout(Long userId, String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()
+                || !refreshTokenRepository.deleteIfMatches(userId, refreshToken)) {
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
+        }
+    }
+
 
     private User authenticateUser(CreateAuthLoginRequest request) {
 

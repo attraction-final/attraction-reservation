@@ -25,7 +25,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import jakarta.servlet.http.Cookie;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import java.util.List;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.Mockito.*;
@@ -85,7 +90,7 @@ class AuthControllerTest {
         // when & then
         mockMvc.perform(post("/api/auth/login")
                         .servletPath("/api/auth/login")
-                        .with(csrf().asHeader())
+                        .with(issuedCsrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -136,7 +141,7 @@ class AuthControllerTest {
         // when & then
         mockMvc.perform(post("/api/auth/login")
                         .servletPath("/api/auth/login")
-                        .with(csrf().asHeader())
+                        .with(issuedCsrf())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -302,6 +307,39 @@ class AuthControllerTest {
         verifyNoInteractions(authService, jwtProvider, userRepository);
     }
 
+    private RequestPostProcessor issuedCsrf() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/auth/csrf")
+                        .servletPath("/api/auth/csrf")
+                        .secure(true))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie cookie = result.getResponse().getCookie("XSRF-TOKEN");
+        assertThat(cookie).isNotNull();
+
+        var data = objectMapper.readTree(
+                result.getResponse().getContentAsString()
+        ).get("data");
+
+        String headerName = data.get("headerName").asText();
+        String token = data.get("token").asText();
+
+        return request -> {
+            Cookie[] existingCookies = request.getCookies();
+
+            List<Cookie> cookies = new java.util.ArrayList<>();
+            if (existingCookies != null) {
+                cookies.addAll(java.util.Arrays.asList(existingCookies));
+            }
+            cookies.add(cookie);
+
+            request.setCookies(cookies.toArray(Cookie[]::new));
+            request.addHeader(headerName, token);
+            request.setSecure(true);
+            return request;
+        };
+    }
+
     private String loginRequestBody() {
         return """
             {
@@ -309,5 +347,110 @@ class AuthControllerTest {
               "password": "Password!123"
             }
             """;
+    }
+
+    @Test
+    @DisplayName("인증과 CSRF 검증을 통과하면 로그아웃하고 Refresh Token 쿠키를 삭제한다.")
+    void logout_authenticatedUserWithCsrf_returnsOkAndClearsCookie() throws Exception {
+        // given
+        Long userId = 1L;
+        String refreshToken = "valid-refresh-token";
+
+        // when & then
+        mockMvc.perform(post("/api/auth/logout")
+                        .servletPath("/api/auth/logout")
+                        .with(authenticatedUser(userId))
+                        .with(issuedCsrf())
+                        .cookie(new Cookie("refreshToken", refreshToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("로그아웃에 성공했습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        allOf(
+                                containsString("refreshToken="),
+                                containsString("Max-Age=0"),
+                                containsString("HttpOnly"),
+                                containsString("Secure"),
+                                containsString("SameSite=Lax"),
+                                containsString("Path=/api/auth")
+                        )
+                ));
+
+        verify(authService).logout(userId, refreshToken);
+    }
+
+    @Test
+    @DisplayName("CSRF가 유효해도 Access Token 인증이 없으면 로그아웃을 거부한다.")
+    void logout_withoutAccessToken_returnsUnauthorized() throws Exception {
+        // given: CSRF 토큰은 유효하지만 사용자 인증이 없다.
+
+        // when & then
+        mockMvc.perform(post("/api/auth/logout")
+                        .servletPath("/api/auth/logout")
+                        .with(issuedCsrf())
+                        .cookie(new Cookie("refreshToken", "valid-refresh-token")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.UNAUTHORIZED.getMessage()));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    @DisplayName("Refresh Token이 일치하지 않으면 로그아웃은 HTTP 401을 반환한다.")
+    void logout_invalidRefreshToken_returnsUnauthorized() throws Exception {
+        // given
+        Long userId = 1L;
+        String refreshToken = "invalid-refresh-token";
+
+        doThrow(new com.example.attractionreservation.global.exception.BusinessException(
+                ErrorCode.INVALID_REFRESH_TOKEN
+        )).when(authService).logout(userId, refreshToken);
+
+        // when & then
+        mockMvc.perform(post("/api/auth/logout")
+                        .servletPath("/api/auth/logout")
+                        .with(authenticatedUser(userId))
+                        .with(issuedCsrf())
+                        .cookie(new Cookie("refreshToken", refreshToken)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.INVALID_REFRESH_TOKEN.getMessage()));
+
+        verify(authService).logout(userId, refreshToken);
+    }
+
+    @Test
+    @DisplayName("사용자 인증이 있어도 CSRF 토큰이 없으면 로그아웃을 거부한다.")
+    void logout_missingCsrfToken_returnsForbidden() throws Exception {
+        // given
+        Long userId = 1L;
+
+        // when & then
+        mockMvc.perform(post("/api/auth/logout")
+                        .servletPath("/api/auth/logout")
+                        .with(authenticatedUser(userId))
+                        .cookie(new Cookie("refreshToken", "valid-refresh-token")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.ACCESS_DENIED.getMessage()));
+
+        verifyNoInteractions(authService);
+    }
+
+    private RequestPostProcessor authenticatedUser(Long userId) {
+        // 컨트롤러가 받는 회원 ID 타입에 맞춰 테스트 인증 정보를 구성한다.
+        return authentication(
+                new UsernamePasswordAuthenticationToken(
+                        userId,
+                        null,
+                        List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                )
+        );
     }
 }

@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.attraction.repository;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;

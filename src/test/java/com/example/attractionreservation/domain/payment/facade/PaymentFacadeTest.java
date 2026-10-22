@@ -209,12 +209,100 @@ class PaymentFacadeTest {
         given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
         given(paymentCommandService.failPayment(pgId)).willReturn(false);
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(paymentWithStatus(PaymentStatus.FAILED)));
 
         //when & then
         assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("금액 불일치 결제가 이미 취소된 결제면 PG 결제를 취소한다.")
+    void confirmPayment_amountMismatchCancelled_CancelPgPayment() {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPayment(pgId)).willReturn(false);
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(paymentWithStatus(PaymentStatus.CANCELLED)));
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
+        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+    }
+
+    @Test
+    @DisplayName("PG 결제 대기 중 원장이 취소됐는데 PG에서 결제 완료됐으면 PG 결제를 취소한다.")
+    void confirmPayment_cancelledButPgPaid_CancelPgPayment() {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        verify(paymentGateway).cancelPayment(pgId, "취소된 주문의 결제", 10000L);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 이미 취소된 결제가 PG에서 결제 완료됐으면 PG 취소하고 COMPENSATED를 반환한다.")
+    void syncPayment_cancelledButPgPaid_Compensated() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATED, result);
+        verify(paymentGateway).cancelPayment(pgId, "취소된 주문의 결제", 10000L);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 금액 불일치 결제가 이미 취소된 결제면 PG 취소하고 COMPENSATED를 반환한다.")
+    void syncPayment_amountMismatchCancelled_Compensated() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPayment(pgId)).willReturn(false);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATED, result);
+        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+        verify(paymentCommandService, never()).approvePayment(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 취소된 결제의 PG 취소가 실패하면 COMPENSATION_FAILED를 반환한다.")
+    void syncPayment_cancelledButPgCancelFailed_CompensationFailed() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(pgId, "취소된 주문의 결제", 10000L);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATION_FAILED, result);
     }
 
     @Test
@@ -352,6 +440,7 @@ class PaymentFacadeTest {
 
         //then
         assertEquals(PaymentSyncResult.STATE_CONFLICT, result);
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 
     @Test
@@ -369,6 +458,12 @@ class PaymentFacadeTest {
 
     private PaymentGatewayResponse pgResponse(GatewayPaymentStatus status, Long amount) {
         return new PaymentGatewayResponse(pgId, status, amount, status == GatewayPaymentStatus.PAID ? PAID_AT : null);
+    }
+
+    private Payment paymentWithStatus(PaymentStatus status) {
+        Payment found = createPayment();
+        ReflectionTestUtils.setField(found, "status", status);
+        return found;
     }
 
     private Payment createPayment() {

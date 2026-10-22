@@ -10,7 +10,7 @@ public enum PaymentSyncResult {
     NOT_PAID,
     // PG 결제 실패를 반영
     PG_FAILED,
-    // 금액 불일치로 실패 처리하고 PG 보상 취소
+    // 금액 불일치 또는 원장 취소된 결제라 PG 보상 취소
     COMPENSATED,
     // 우리 원장에 없는 결제
     NOT_OUR_PAYMENT,

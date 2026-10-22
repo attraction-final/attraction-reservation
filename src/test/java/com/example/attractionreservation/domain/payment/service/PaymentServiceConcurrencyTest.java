@@ -243,6 +243,47 @@ class PaymentServiceConcurrencyTest {
     }
 
     @Test
+    @DisplayName("사용자 취소 트랜잭션이 락을 잡고 있으면 승인은 대기하고, 취소 커밋 후 취소된 결제로 보고 승인하지 않는다.")
+    void approvePayment_waitForUserCancel_AlreadyCancelled() throws Exception {
+        //given
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Instant paidAt = Instant.parse("2026-10-20T01:00:00Z");
+        List<Future<?>> approveFutures = new ArrayList<>();
+
+        //when
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                // 사용자 취소가 결제에 비관적 락을 먼저 잡는다.
+                Payment payment = paymentRepository.findWithLockByOrderId(orderId).orElseThrow();
+
+                // 그 사이 PG 결제 완료로 승인(승인 API·웹훅)이 들어오면 락 해제까지 대기한다.
+                Future<?> approveFuture = executor.submit(() ->
+                        paymentCommandService.approvePayment(pgId, paidAt));
+                approveFutures.add(approveFuture);
+                assertThatThrownBy(() -> approveFuture.get(1, TimeUnit.SECONDS))
+                        .isInstanceOf(TimeoutException.class);
+
+                payment.markAsCancelled();
+                payment.getOrder().markAsCancelled();
+            });
+
+            //then
+            assertThatThrownBy(() -> approveFutures.get(0).get(10, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .cause()
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        Payment result = paymentRepository.findById(paymentId).orElseThrow();
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(result.getPaidAt()).isNull();
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
     @DisplayName("같은 결제에 승인 요청이 동시에 들어와도 모두 예외 없이 끝나고 결제와 주문은 결제 완료 상태가 된다.")
     void approvePayment_concurrentRequests_AllSuccess() throws Exception {
         //given

@@ -89,6 +89,20 @@ class PaymentCommandServiceTest {
     }
 
     @Test
+    @DisplayName("사용자가 취소한 결제는 승인하지 않고 취소된 결제 예외를 던진다.")
+    void approvePayment_cancelled_Fail() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when & then
+        assertThatThrownBy(() -> paymentCommandService.approvePayment(PG_ID, APPROVED_AT))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+    }
+
+    @Test
     @DisplayName("존재하지 않는 결제는 승인할 수 없다.")
     void approvePayment_notFound_Fail() {
         //given

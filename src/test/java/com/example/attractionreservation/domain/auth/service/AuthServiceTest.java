@@ -166,6 +166,56 @@ class AuthServiceTest {
                 .save(1L, "refresh-token");
     }
 
+    @Test
+    @DisplayName("유효한 Refresh Token이면 로그아웃에 성공하고 Redis에서 토큰을 삭제한다.")
+    void logout_validRefreshToken_deletesToken() {
+        // given
+        Long userId = 1L;
+        String refreshToken = "valid-refresh-token";
+
+        when(refreshTokenRepository.deleteIfMatches(userId, refreshToken))
+                .thenReturn(true);
+
+        // when
+        authService.logout(userId, refreshToken);
+
+        // then
+        verify(refreshTokenRepository).deleteIfMatches(userId, refreshToken);
+    }
+
+    @Test
+    @DisplayName("Refresh Token이 일치하지 않으면 로그아웃에 실패하고 토큰을 삭제하지 않는다.")
+    void logout_invalidRefreshToken_throwsBusinessException() {
+        // given
+        Long userId = 1L;
+        String refreshToken = "invalid-refresh-token";
+
+        when(refreshTokenRepository.deleteIfMatches(userId, refreshToken))
+                .thenReturn(false);
+
+        // when & then
+        assertThatThrownBy(() -> authService.logout(userId, refreshToken))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.INVALID_REFRESH_TOKEN.getMessage());
+
+        verify(refreshTokenRepository).deleteIfMatches(userId, refreshToken);
+    }
+
+    @Test
+    @DisplayName("Refresh Token이 없으면 로그아웃에 실패하고 Redis에 접근하지 않는다.")
+    void logout_missingRefreshToken_throwsBusinessException() {
+        // given
+        Long userId = 1L;
+        String refreshToken = null;
+
+        // when & then
+        assertThatThrownBy(() -> authService.logout(userId, refreshToken))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.INVALID_REFRESH_TOKEN.getMessage());
+
+        verifyNoInteractions(refreshTokenRepository);
+    }
+
 
     private User createUser(UserStatus status) {
         // DB를 사용하지 않고 테스트용 회원 객체를 생성한다.

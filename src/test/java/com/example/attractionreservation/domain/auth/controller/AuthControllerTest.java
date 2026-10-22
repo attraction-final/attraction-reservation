@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.auth.controller;
 
+import com.example.attractionreservation.domain.auth.dto.CreateAuthRefreshResponse;
+import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
@@ -299,6 +301,172 @@ class AuthControllerTest {
                         .header("X-XSRF-TOKEN", "invalid-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(loginRequestBody()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.ACCESS_DENIED.getMessage()));
+
+        verifyNoInteractions(authService, jwtProvider, userRepository);
+    }
+
+    @Test
+    @DisplayName("유효한 CSRF와 Refresh Token으로 Access Token 없이 재발급할 수 있다.")
+    void refresh_withoutAccessToken_returnsOkWithoutSettingCookie() throws Exception {
+        // given
+        String refreshToken = "valid-refresh-token";
+
+        when(authService.refresh(refreshToken))
+                .thenReturn(CreateAuthRefreshResponse.of("new-access-token", 600L));
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .cookie(new Cookie("refreshToken", refreshToken))
+                        .with(issuedCsrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("토큰 재발급에 성공했습니다."))
+                .andExpect(jsonPath("$.data.accessToken").value("new-access-token"))
+                .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.data.expiresIn").value(600))
+                .andExpect(jsonPath("$.data.refreshToken").doesNotExist())
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+
+        verify(authService).refresh(refreshToken);
+        verifyNoInteractions(jwtProvider, userRepository);
+    }
+
+    @Test
+    @DisplayName("유効한 CSRF가 있으면 잘못된 Authorization 헤더는 재발급을 차단하지 않는다.")
+    void refresh_invalidAuthorizationHeader_returnsOk() throws Exception {
+        // given
+        String refreshToken = "valid-refresh-token";
+
+        when(authService.refresh(refreshToken))
+                .thenReturn(CreateAuthRefreshResponse.of("new-access-token", 600L));
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer invalid-access-token")
+                        .cookie(new Cookie("refreshToken", refreshToken))
+                        .with(issuedCsrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").value("new-access-token"))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+
+        verify(authService).refresh(refreshToken);
+        verifyNoInteractions(jwtProvider, userRepository);
+    }
+
+    @Test
+    @DisplayName("CSRF가 유효해도 Refresh Token 쿠키가 없으면 HTTP 401을 반환한다.")
+    void refresh_missingRefreshTokenCookie_returnsUnauthorized() throws Exception {
+        // given
+        when(authService.refresh(null))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .with(issuedCsrf()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.INVALID_REFRESH_TOKEN.getMessage()))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+
+        verify(authService).refresh(null);
+    }
+
+    @Test
+    @DisplayName("CSRF가 유효해도 Refresh Token 검증에 실패하면 HTTP 401을 반환한다.")
+    void refresh_invalidRefreshToken_returnsUnauthorized() throws Exception {
+        // given
+        String refreshToken = "invalid-refresh-token";
+
+        when(authService.refresh(refreshToken))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .cookie(new Cookie("refreshToken", refreshToken))
+                        .with(issuedCsrf()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.INVALID_REFRESH_TOKEN.getMessage()))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+
+        verify(authService).refresh(refreshToken);
+    }
+
+    @Test
+    @DisplayName("CSRF가 유효해도 이용할 수 없는 회원 상태이면 HTTP 403을 반환한다.")
+    void refresh_nonActiveUser_returnsForbidden() throws Exception {
+        // given
+        String refreshToken = "valid-refresh-token";
+
+        when(authService.refresh(refreshToken))
+                .thenThrow(new BusinessException(ErrorCode.USER_NOT_ACTIVE));
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .cookie(new Cookie("refreshToken", refreshToken))
+                        .with(issuedCsrf()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.USER_NOT_ACTIVE.getMessage()))
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+
+        verify(authService).refresh(refreshToken);
+    }
+
+    @Test
+    @DisplayName("Refresh Token 쿠키가 있어도 CSRF 토큰이 없으면 재발급을 거부한다.")
+    void refresh_missingCsrfToken_returnsForbidden() throws Exception {
+        // given: Refresh Token 쿠키만 전달한다.
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .secure(true)
+                        .cookie(new Cookie("refreshToken", "valid-refresh-token")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.ACCESS_DENIED.getMessage()));
+
+        verifyNoInteractions(authService, jwtProvider, userRepository);
+    }
+
+    @Test
+    @DisplayName("발급된 CSRF 쿠키가 있어도 헤더 토큰이 틀리면 재발급을 거부한다.")
+    void refresh_invalidCsrfToken_returnsForbidden() throws Exception {
+        // given
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .servletPath("/api/auth/csrf")
+                        .secure(true))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertThat(csrfCookie).isNotNull();
+
+        // when & then
+        mockMvc.perform(post("/api/auth/refresh")
+                        .servletPath("/api/auth/refresh")
+                        .secure(true)
+                        .cookie(
+                                csrfCookie,
+                                new Cookie("refreshToken", "valid-refresh-token")
+                        )
+                        .header("X-XSRF-TOKEN", "invalid-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message")

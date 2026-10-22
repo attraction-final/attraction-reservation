@@ -55,6 +55,7 @@ public class WebhookEventProcessor {
             if (e.getErrorCode() == ErrorCode.PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION) {
                 // 멈춘 행으로 보고 다시 점유한 사이 다른 처리가 먼저 결과를 기록한 경우
                 log.info("[Webhook] 다른 처리가 먼저 기록해 건너뜀: eventId={}", eventId);
+
                 return;
             }
             recordFailure(eventId, pgId.get(), e);

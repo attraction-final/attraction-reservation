@@ -15,7 +15,7 @@ public class PortOneConfig {
     public RestClient portoneRestClient() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(5000);
-        requestFactory.setReadTimeout(60000);
+        requestFactory.setReadTimeout(10000);
 
         return RestClient.builder()
                 .requestFactory(requestFactory)

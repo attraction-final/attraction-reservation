@@ -108,6 +108,7 @@ public class WebhookEvent extends BaseTimeEntity {
     public void markAsDead(String reason, Instant now) {
         transitTo(WebhookStatus.DEAD);
         this.nextRetryAt = null;
+        this.processedAt = now;
         this.lastError = truncate(reason);
     }
 
@@ -115,10 +116,11 @@ public class WebhookEvent extends BaseTimeEntity {
     public void markAsFailed(String error, Instant now) {
         if (attemptCount >= MAX_ATTEMPTS) {
             transitTo(WebhookStatus.DEAD);
+            this.processedAt = now;
             this.nextRetryAt = null;
         } else {
             transitTo(WebhookStatus.FAILED);
-            this.nextRetryAt = now.plus(BASE_RETRY_DELAY.multipliedBy(1L << (attemptCount - 1)));
+            this.nextRetryAt = now.plus(BASE_RETRY_DELAY.multipliedBy(1L << Math.max(0, attemptCount - 1)));
         }
         this.lastError = truncate(error);
     }

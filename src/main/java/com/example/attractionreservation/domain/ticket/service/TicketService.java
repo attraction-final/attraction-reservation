@@ -1,9 +1,12 @@
 package com.example.attractionreservation.domain.ticket.service;
 
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition;
+import com.example.attractionreservation.domain.ticket.dto.SearchTicketDetailResponse;
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -28,5 +31,13 @@ public class TicketService {
         );
 
         return tickets.map(SearchTicketResponse::from);
+    }
+
+    // 내 티켓 상세 조회
+    public SearchTicketDetailResponse findTicketById(Long ticketId) {
+        Ticket ticket = ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
+
+        return SearchTicketDetailResponse.from(ticket);
     }
 }

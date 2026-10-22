@@ -303,6 +303,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 ```
 failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 보상 요청(payment_compensations) INSERT → 커밋
+requestCompensationForCancelled (트랜잭션 1개): 원장 CANCELLED + PG PAID면 보상 요청만 INSERT → 커밋 (4.3)
   → PaymentCompensationProcessor가 즉시 1회 PG 전체 취소
   → 실패하거나 시도 전 서버 종료 시 PaymentCompensationScheduler(30초)가 재시도 (1·2·4·8분 백오프, 5회 실패 시 DEAD)
 ```

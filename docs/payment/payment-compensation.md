@@ -19,6 +19,7 @@ failPayment (트랜잭션: 결제 FAILED + 주문 취소) → 커밋 → PG 취�
 
 ```
 failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 보상 요청 INSERT → 커밋
+requestCompensationForCancelled (트랜잭션 1개): 취소된 결제 확인 + 보상 요청 INSERT → 커밋 (결제 상태는 그대로)
   → 즉시 PG 취소 1회 시도 (대부분 여기서 완료)
   → 실패하거나 시도 전 서버 종료 시 스케줄러가 이어받아 재시도
 ```
@@ -28,7 +29,7 @@ failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 +
 
 | Outbox 패턴 | 이번 구조 |
 |---|---|
-| 업무 변경과 보낼 메시지를 같은 트랜잭션에 저장 | 결제 FAILED·주문 취소와 보상 요청을 같은 트랜잭션에 저장 |
+| 업무 변경과 보낼 메시지를 같은 트랜잭션에 저장 | 결제 FAILED·주문 취소와 보상 요청을 같은 트랜잭션에 저장 (취소된 결제는 보상 요청만) |
 | relay가 메시지를 외부로 전달 | Processor(즉시 시도)·스케줄러(재시도)가 PortOne 취소 API 호출 |
 | at-least-once, 받는 쪽 멱등 | 같은 결제를 여러 번 취소해도 두 번째부터 "이미 취소됨"으로 성공 처리 |
 
@@ -69,7 +70,7 @@ domain/payment
 | `created_at`, `updated_at` | `BaseTimeEntity`. 요청 시각, 처리 중 멈춘 행 판단 기준 |
 
 - 인덱스: `(status, next_retry_at)`
-- `ddl-auto: validate`이므로 **테이블은 직접 만들어야 한다**(7장).
+- `ddl-auto: validate`이므로 **테이블은 직접 만들어야 한다**(8장).
 - `pg_id`를 PK로 쓰지 않는다. 직접 정한 ID는 Spring Data `save()`가 merge(SELECT 후 INSERT)로 처리하고, 결제당 1건 규칙은 UNIQUE로 충분하다.
 
 ### 상태 전이 (`CompensationStatus.canTransitTo`)
@@ -174,6 +175,7 @@ payment:
 | `PaymentCompensationServiceTest` | `@DataJpaTest` + H2 | 점유(요청 시각이 미래인 REQUESTED 포함), 중복 점유 거부, 완료 후 점유 거부, 재시도 시각 전후, DEAD, 처리 대상 조회 |
 | `PaymentCompensationProcessorTest` | Mockito | 전체 취소 후 DONE, 점유 실패·락 충돌 건너뜀, 취소 실패 기록, 다른 처리가 먼저 기록, 즉시 시도·예외 삼킴, 배치 예외 격리 |
 | `PaymentCompensationSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, 설정에 따른 빈 등록 |
+| `PaymentFacadeTest` | Mockito | 금액 불일치·취소된 결제의 PG 결제 완료 시 보상 요청 후 `processByPgId` 즉시 시도, 이미 처리·요청됐으면 생략, 웹훅 `COMPENSATED` |
 | `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장(원장 CANCELLED면 실패 처리 없이 저장), 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음, 취소된 결제 보상 저장·이미 요청됨·취소 아님 |
 | `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 이미 취소됨 성공 처리 |
 
@@ -190,6 +192,7 @@ payment:
 - [ ] Testcontainers MySQL
   - 즉시 시도와 스케줄러가 같은 보상 요청을 동시에 점유해도 PG 취소는 한쪽만 한다
   - 승인 API와 웹훅이 동시에 금액 불일치를 처리해도 보상 요청은 1건이다
+  - 승인 API와 웹훅이 동시에 취소된 결제의 PG 결제 완료를 처리해도 보상 요청은 1건이다
 
 ### 운영
 

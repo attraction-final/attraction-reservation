@@ -1,8 +1,6 @@
 package com.example.attractionreservation.domain.attractionSlot.controller;
 
-import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
-import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
-import com.example.attractionreservation.domain.attractionSlot.dto.SearchAdminAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.*;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -43,5 +41,15 @@ public class AdminAttractionSlotController {
         SearchAdminAttractionSlotResponse response =
                 attractionSlotService.findAdminAttractionSlotsByDate(attractionId, date, includeCancelled);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 조회에 성공했습니다.", response));
+    }
+
+    // 슬롯 시간 수정
+    @PatchMapping("/slots/{slotId}/time")
+    public ResponseEntity<ApiResponse<UpdateAttractionSlotTimeResponse>> updateAttractionSlotTime(
+            @PathVariable @Min(1) Long slotId,
+            @Valid @RequestBody UpdateAttractionSlotTimeRequest request) {
+
+        UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(slotId, request);
+        return ResponseEntity.ok(ApiResponse.ok("슬롯 시간 수정에 성공했습니다.", response));
     }
 }

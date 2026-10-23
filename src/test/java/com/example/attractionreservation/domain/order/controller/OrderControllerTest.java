@@ -1,0 +1,193 @@
+package com.example.attractionreservation.domain.order.controller;
+
+import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
+import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
+import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
+import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
+import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
+import com.example.attractionreservation.domain.order.service.OrderService;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
+import com.example.attractionreservation.global.config.SecurityConfig;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@WebMvcTest(OrderController.class)
+@Import({
+        SecurityConfig.class,
+        JwtAuthenticationEntryPoint.class,
+        JwtAccessDeniedHandler.class
+})
+@EnableWebSecurity
+class OrderControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private OrderService orderService;
+
+    @MockitoBean
+    private JwtProvider jwtProvider;
+
+    @MockitoBean
+    private UserRepository userRepository;
+
+    @Test
+    @DisplayName("인증된 회원의 주문 생성 결과를 HTTP 201로 반환한다")
+    void createOrder_validRequest_returnsCreated() throws Exception {
+        // given
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(1L, 2)
+        ));
+        CreateOrderResponse response = new CreateOrderResponse(
+                101L,
+                120000,
+                "PENDING",
+                List.of(new CreateOrderResponse.Item(201L, 1L, 60000, 2))
+        );
+
+        when(orderService.createOrder(1L, request)).thenReturn(response);
+
+        // when & then: 요청에 다른 회원 ID가 있어도 인증된 ID를 사용한다.
+        mockMvc.perform(post("/api/orders")
+                        .with(authenticatedMember())
+                        .param("userId", "999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("주문 생성에 성공했습니다."))
+                .andExpect(jsonPath("$.data.orderId").value(101))
+                .andExpect(jsonPath("$.data.totalAmount").value(120000))
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(201))
+                .andExpect(jsonPath("$.data.items[0].ticketProductId").value(1))
+                .andExpect(jsonPath("$.data.items[0].price").value(60000))
+                .andExpect(jsonPath("$.data.items[0].quantity").value(2));
+
+        verify(orderService).createOrder(1L, request);
+        verifyNoMoreInteractions(orderService);
+    }
+
+    @Test
+    @DisplayName("인증 없이 주문하면 HTTP 401을 반환한다")
+    void createOrder_unauthenticated_returnsUnauthorized() throws Exception {
+        // given: 인증 정보 없이 유효한 본문을 전달한다.
+
+        // when & then
+        mockMvc.perform(post("/api/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(orderService);
+    }
+
+    @ParameterizedTest
+    @DisplayName("주문 항목이나 상품 ID 또는 수량이 유효하지 않으면 HTTP 400을 반환한다")
+    @ValueSource(strings = {
+            "{}",
+            "{\"items\":[]}",
+            "{\"items\":[null]}",
+            "{\"items\":[{\"quantity\":1}]}",
+            "{\"items\":[{\"ticketProductId\":0,\"quantity\":1}]}",
+            "{\"items\":[{\"ticketProductId\":1}]}",
+            "{\"items\":[{\"ticketProductId\":1,\"quantity\":0}]}",
+            "{\"items\":[{\"ticketProductId\":1,\"quantity\":-1}]}"
+    })
+    void createOrder_invalidInput_returnsBadRequest(String body)
+            throws Exception {
+        // given: 잘못된 입력값을 전달한다.
+
+        // when & then
+        mockMvc.perform(post("/api/orders")
+                        .with(authenticatedMember())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(orderService);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 상품의 주문은 HTTP 404를 반환한다")
+    void createOrder_missingProduct_returnsNotFound() throws Exception {
+        // given
+        when(orderService.createOrder(eq(1L), any(CreateOrderRequest.class)))
+                .thenThrow(new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        // when & then
+        mockMvc.perform(post("/api/orders")
+                        .with(authenticatedMember())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.TICKET_PRODUCT_NOT_FOUND.getMessage()));
+    }
+
+    @Test
+    @DisplayName("판매 불가 상품의 주문은 HTTP 409를 반환한다")
+    void createOrder_unavailableProduct_returnsConflict() throws Exception {
+        // given
+        when(orderService.createOrder(eq(1L), any(CreateOrderRequest.class)))
+                .thenThrow(new BusinessException(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE));
+
+        // when & then
+        mockMvc.perform(post("/api/orders")
+                        .with(authenticatedMember())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE.getMessage()));
+    }
+
+    private RequestPostProcessor authenticatedMember() {
+        return authentication(new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        ));
+    }
+
+    private String validRequestBody() {
+        return """
+                {
+                    "items": [
+                        {
+                            "ticketProductId": 1,
+                            "quantity": 2
+                        }
+                    ]
+                }
+                """;
+    }
+}

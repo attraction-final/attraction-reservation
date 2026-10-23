@@ -29,4 +29,24 @@ public class OrderItem {
 
     @Column(nullable = false)
     private int quantity;
+
+    private OrderItem(
+            Order order,
+            TicketProduct ticketProduct,
+            int quantity
+    ) {
+        this.order = order;
+        this.ticketProduct = ticketProduct;
+        // 주문 시점의 단가를 저장해 이후 상품 가격 변경과 분리한다.
+        this.price = ticketProduct.getPrice();
+        this.quantity = quantity;
+    }
+
+    public static OrderItem create(
+            Order order,
+            TicketProduct ticketProduct,
+            int quantity
+    ) {
+        return new OrderItem(order, ticketProduct, quantity);
+    }
 }

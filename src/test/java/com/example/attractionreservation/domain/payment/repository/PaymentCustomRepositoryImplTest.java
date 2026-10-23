@@ -70,7 +70,7 @@ class PaymentCustomRepositoryImplTest {
     void searchAllByUserId_statusCondition_ReturnsMatchingOnly() {
         //given
         Payment paid = savePayment(user);
-        paid.markAsPaid();
+        paid.markAsPaid(Instant.parse("2026-01-01T00:00:00Z"));
         savePayment(user);
         em.flush();
 
@@ -89,7 +89,7 @@ class PaymentCustomRepositoryImplTest {
     void searchAllByUserId_nullStatus_ReturnsAll() {
         //given
         Payment paid = savePayment(user);
-        paid.markAsPaid();
+        paid.markAsPaid(Instant.parse("2026-01-01T00:00:00Z"));
         savePayment(user);
         em.flush();
 

@@ -21,7 +21,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2   # 웹훅·보상 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
+        size: 3   # 웹훅·보상·환불 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
 
 # secret 값은 환경변수로만 주입한다.
 portone:
@@ -42,3 +42,8 @@ payment:
       enabled: true
       fixed-delay: 30s   # 재시도 백오프가 1분부터라 웹훅보다 길게 둔다
       batch-size: 20     # 한 번에 처리할 최대 보상 요청 수
+  refund:
+    scheduler:
+      enabled: true
+      fixed-delay: 30s   # 재시도 백오프가 1분부터라 웹훅보다 길게 둔다
+      batch-size: 20     # 한 번에 처리할 최대 환불 수

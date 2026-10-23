@@ -1,15 +1,19 @@
 package com.example.attractionreservation.domain.reservation.repository;
 
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
+import com.example.attractionreservation.domain.reservation.dto.SearchReservationCondition;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
@@ -44,4 +48,20 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             @Param("status") ReservationStatus status
     );
 
+    // 내 예약 목록 조회
+    @Query("""
+    SELECT r
+    FROM Reservation r
+    WHERE r.user.id = :userId
+      AND (:status IS NULL OR r.status = :status)
+      AND ((:startDay IS NULL OR r.attractionSlot.startsAt >= :startDay)
+        AND (:nextDay IS NULL OR r.attractionSlot.startsAt < :nextDay))
+    """)
+    Page<Reservation> findReservationAllByCondition(
+            @Param("userId") Long userId,
+            @Param("status") ReservationStatus status,
+            @Param("startDay") LocalDateTime startDay,
+            @Param("nextDay") LocalDateTime nextDay,
+            Pageable stablePageable
+    );
 }

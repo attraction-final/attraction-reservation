@@ -32,7 +32,7 @@
   - 재시도 구조(점유 → PG 호출 → 결과 기록, 백오프, 멈춘 처리 회수, 스케줄러)는 기존 보상 취소와 같은 방식을 따른다.
 - **기존 기능의 유지 조건:** 기존 테스트가 모두 통과해야 한다. 결제 승인·웹훅·보상 취소 동작은 바뀌지 않는다.
 - **추가 구현이 필요한 부분:** 환불 상태 관리, 환불 가능 수량 계산, 환불 전용 처리기와 스케줄러, 결제·주문의 환불 상태 변경
-- **사전 확인 사항 (확인됨):** PortOne이 "PG 취소 가능 금액"이 맞지 않을 때 돌려주는 오류의 형식. PortOne server-sdk 0.23.0의 `CancellableAmountConsistencyBrokenError` 기준 `type`은 `CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN`이다.
+- **사전 확인 사항 (확인됨):** PortOne이 "PG 취소 가능 금액"이 맞지 않을 때 돌려주는 오류의 형식. PortOne server-sdk 0.24.0의 `CancellableAmountConsistencyBrokenError` 기준 `type`은 `CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN`이다.
 
 ## 4. 상세 요구사항
 

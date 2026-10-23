@@ -1,5 +1,14 @@
-# 테스트 전용 PortOne 설정 (프로필과 무관하게 모든 테스트에 적용)
+# 테스트 전용 설정 (프로필과 무관하게 모든 테스트에 적용)
 # classpath:/config/application.yaml은 main의 application.yaml보다 우선 적용된다.
+# 프로필 없이 MySQL 기본 설정(락 타임아웃 등)으로 띄우는 테스트도 앱이 뜨도록 필수 값을 채운다.
+
+# application-test.yml의 jwt와 같은 값을 유지한다.
+jwt:
+  # 32바이트 테스트 전용 키를 Base64로 인코딩한 값
+  secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  access-token-expiration: 600000
+  refresh-token-expiration: 604800000
+
 portone:
   base-url: https://api.portone.test
   api-secret: test-api-secret

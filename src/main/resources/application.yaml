@@ -18,6 +18,16 @@ spring:
     show-sql: false
     open-in-view: false
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiration: 600000
+  refresh-token-expiration: 604800000
+
 # secret 값은 환경변수로만 주입한다.
 portone:
   base-url: ${PORTONE_BASE_URL:https://api.portone.io}

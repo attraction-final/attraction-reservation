@@ -14,6 +14,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import java.util.Map;
 
@@ -56,7 +57,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -98,7 +99,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -125,7 +126,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -152,7 +153,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -177,7 +178,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -201,7 +202,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -226,7 +227,7 @@ class TicketProductControllerIntegrationTest {
         );
 
         // when & then
-        mockMvc.perform(post("/api/ticket-products")
+        mockMvc.perform(post("/api/admin/ticket-products")
                         .with(user("test-admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -236,5 +237,59 @@ class TicketProductControllerIntegrationTest {
                         .value("요청 본문 형식이 올바르지 않습니다."));
 
         assertThat(ticketProductRepository.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("관리자가 티켓 상품을 수정하면 응답과 DB에 반영된다")
+    void updateTicketProduct_success() throws Exception {
+        // given
+        TicketProduct product = ticketProductRepository.save(
+                new TicketProduct(
+                        "종일이용권",
+                        50000,
+                        "기존 설명",
+                        TicketType.ALL_DAY,
+                        100,
+                        TicketProductStatus.ON_SALE
+                )
+        );
+
+        Map<String, Object> request = Map.of(
+                "name", "수정된 종일이용권",
+                "price", 55000,
+                "description", "수정된 설명",
+                "saleStatus", "ON_SALE",
+                "stock", 80
+        );
+
+        // when & then
+        mockMvc.perform(put(
+                        "/api/admin/ticket-products/{ticketProductId}",
+                        product.getId()
+                )
+                        .with(user("test-admin").roles("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.name").value("수정된 종일이용권"))
+                .andExpect(jsonPath("$.data.price").value(55000))
+                .andExpect(jsonPath("$.data.description").value("수정된 설명"))
+                .andExpect(jsonPath("$.data.stock").value(80))
+                .andExpect(jsonPath("$.data.saleStatus").value("ON_SALE"));
+
+        // DB 반영 검증
+        TicketProduct updatedProduct = ticketProductRepository
+                .findById(product.getId())
+                .orElseThrow();
+
+        assertThat(updatedProduct.getName()).isEqualTo("수정된 종일이용권");
+        assertThat(updatedProduct.getPrice()).isEqualTo(55000);
+        assertThat(updatedProduct.getDescription()).isEqualTo("수정된 설명");
+        assertThat(updatedProduct.getStock()).isEqualTo(80);
+        assertThat(updatedProduct.getStatus())
+                .isEqualTo(TicketProductStatus.ON_SALE);
+        assertThat(updatedProduct.getType()).isEqualTo(TicketType.ALL_DAY);
+        assertThat(ticketProductRepository.count()).isEqualTo(1);
     }
 }

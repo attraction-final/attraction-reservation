@@ -187,6 +187,20 @@ class AttractionServiceTest {
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
     }
 
+    @Test
+    @DisplayName("존재하는 어트랙션을 조회하면 상세 정보를 반환한다")
+    void findAttractionById_Exists_ReturnsAttraction() {
+        // given: 1번 어트랙션이 있다고 약속
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+
+        // when: 상세 조회 실행
+        var response = attractionService.findAttractionById(1L);
+
+        // then: 이름이 맞게 나왔는지 확인
+        assertThat(response.name()).isEqualTo("롤러코스터");
+    }
+
     // 수정
     @Test
     @DisplayName("보낸 값만 수정되고, 보내지 않은(null) 값은 그대로 유지된다")

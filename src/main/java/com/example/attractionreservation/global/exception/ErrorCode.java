@@ -62,6 +62,9 @@ public enum ErrorCode {
     // order
     ORDER_PRODUCT_NOT_ON_SALE(HttpStatus.CONFLICT, "판매 중인 티켓 상품만 주문할 수 있습니다."),
     ORDER_AMOUNT_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "주문 금액이 허용 범위를 초과했습니다."),
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
+    ORDER_CANCEL_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인의 주문만 취소할 수 있습니다."),
+    ORDER_NOT_CANCELLABLE(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 취소할 수 있습니다."),
 
     // ticket
     INVALID_TICKET_VALID_DATE(HttpStatus.BAD_REQUEST, "입장권 방문일은 필수입니다."),

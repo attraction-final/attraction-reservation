@@ -20,3 +20,9 @@ jwt:
   secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   access-token-expiration: 600000
   refresh-token-expiration: 604800000
+
+# 테스트에서는 자동 실행을 끄고 테스트 코드가 취소 서비스를 직접 호출한다.
+order:
+  cancel:
+    scheduler:
+      enabled: false

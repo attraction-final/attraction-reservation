@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.attraction.entity.enums.Operatio
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.jpa.JPAExpressions;
+import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -37,19 +38,25 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                                               LocalDateTime reservableFrom,
                                               LocalDateTime todayEnd,
                                               Pageable pageable) {
-        // 1. 목록(내용) 조회
-        List<Attraction> content = queryFactory
+        // 1. 목록(내용) 조회 - 일단 offset/limit 없이 쿼리를 "조립"만 해 둔다
+        JPAQuery<Attraction> contentQuery = queryFactory
                 .selectFrom(attraction)
                 .where(
-                        attraction.deletedAt.isNull(),       // 삭제되지 않은 것만
-                        nameContains(keyword),               // null 이면 조건 무시
-                        operatingOnly(operatingOnly),        // null 이면 조건 무시
+                        attraction.deletedAt.isNull(),
+                        nameContains(keyword),
+                        operatingOnly(operatingOnly),
                         reservableOnly(reservableOnly, reservableFrom, todayEnd)
                 )
-                .orderBy(createOrderSpecifiers(sort))
-                .offset(pageable.getOffset())
-                .limit(pageable.getPageSize())
-                .fetch();
+                .orderBy(createOrderSpecifiers(sort));
+
+        // 페이지를 나누는 요청일 때만 offset/limit 적용
+        if (pageable.isPaged()) {
+            contentQuery
+                    .offset(pageable.getOffset())
+                    .limit(pageable.getPageSize());
+        }
+
+        List<Attraction> content = contentQuery.fetch(); // 여기서 실제 DB 조회 실행
 
         // 2. 전체 개수 조회 (where 조건은 위와 똑같이 재사용)
         Long total = queryFactory

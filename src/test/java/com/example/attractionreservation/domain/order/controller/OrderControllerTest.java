@@ -294,7 +294,7 @@ class OrderControllerTest {
                 .thenReturn(response);
 
         // when & then: 요청한 회원 ID가 아닌 인증된 회원 ID를 사용한다.
-        mockMvc.perform(get("/api/orders")
+        mockMvc.perform(get("/api/orders/me")
                         .with(authenticatedMember())
                         .param("userId", "999"))
                 .andExpect(status().isOk())
@@ -328,7 +328,7 @@ class OrderControllerTest {
                 ));
 
         // when & then
-        mockMvc.perform(get("/api/orders")
+        mockMvc.perform(get("/api/orders/me")
                         .with(authenticatedMember())
                         .param("page", "2")
                         .param("size", "5"))
@@ -358,7 +358,7 @@ class OrderControllerTest {
         String[] parameter = query.split("=");
 
         // when & then
-        mockMvc.perform(get("/api/orders")
+        mockMvc.perform(get("/api/orders/me")
                         .with(authenticatedMember())
                         .param(parameter[0], parameter[1]))
                 .andExpect(status().isBadRequest());
@@ -372,7 +372,7 @@ class OrderControllerTest {
         // given: 인증 정보를 전달하지 않는다.
 
         // when & then
-        mockMvc.perform(get("/api/orders"))
+        mockMvc.perform(get("/api/orders/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 

@@ -53,7 +53,7 @@ public class OrderController {
         );
     }
 
-    @GetMapping
+    @GetMapping("/me")
     public ResponseEntity<ApiResponse<SearchOrderListResponse>> getOrderAll(
             @AuthenticationPrincipal Long userId,
             @Valid @ModelAttribute SearchOrderCondition condition

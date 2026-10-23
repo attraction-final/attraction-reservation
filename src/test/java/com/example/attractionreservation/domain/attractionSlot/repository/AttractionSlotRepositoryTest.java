@@ -1,9 +1,8 @@
-package com.example.attractionreservation.domain.attraction.repository;
+package com.example.attractionreservation.domain.attractionSlot.repository;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
-import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
-import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
 import org.junit.jupiter.api.BeforeEach;

@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.dto.GetUserResponse;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
@@ -56,6 +58,20 @@ public class UserService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public GetUserResponse getMe(Long userId) {
+        // 인증된 회원 ID로 본인의 정보를 조회한다.
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        // 인증 이후 회원 상태가 변경된 경우에도 조회를 차단한다.
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        return GetUserResponse.from(user);
+    }
 
     private boolean isDuplicateEmailViolation(DataIntegrityViolationException exception) {
         Throwable cause = exception;

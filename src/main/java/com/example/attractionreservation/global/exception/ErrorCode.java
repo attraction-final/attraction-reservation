@@ -80,7 +80,7 @@ public enum ErrorCode {
     PAYMENT_CANCELLATION_FAILED(HttpStatus.BAD_GATEWAY, "결제 취소에 실패했습니다."),
     PAYMENT_PG_PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PG 결제를 찾을 수 없습니다."),
     PAYMENT_ALREADY_PROCESSED(HttpStatus.CONFLICT, "이미 처리된 결제입니다."),
-    PAYMENT_PG_FAILED(HttpStatus.BAD_GATEWAY, "PG 결제에 실패했습니다.");
+    PAYMENT_PG_FAILED(HttpStatus.CONFLICT, "결제가 실패했습니다. 결제 수단을 확인한 뒤 다시 결제해 주세요.");
 
     private final HttpStatus status;
     private final String message;

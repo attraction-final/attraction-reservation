@@ -103,6 +103,20 @@ class PaymentControllerTest {
     }
 
     @Test
+    @DisplayName("PG에서 결제가 실패했으면 결제사 장애(502)가 아닌 409를 반환한다.")
+    void confirmPayment_pgFailed_Conflict() throws Exception {
+        //given
+        given(paymentFacade.confirmPayment(any(), any(), any()))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_PG_FAILED));
+
+        //when & then
+        mockMvc.perform(confirmRequest(REQUEST_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(ErrorCode.PAYMENT_PG_FAILED.getMessage()));
+    }
+
+    @Test
     @DisplayName("userId가 없으면 400을 반환한다.")
     void confirmPayment_missingUserId_BadRequest() throws Exception {
         //when & then

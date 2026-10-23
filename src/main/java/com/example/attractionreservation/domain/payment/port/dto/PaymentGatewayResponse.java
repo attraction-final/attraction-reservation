@@ -8,6 +8,7 @@ public record PaymentGatewayResponse(
         String pgId,
         GatewayPaymentStatus status,
         Long totalAmount,
+        Long cancelledAmount,   // PG에서 취소된 누적 금액. 없으면 null
         Instant paidAt
 ) {
     public boolean isPaid() {

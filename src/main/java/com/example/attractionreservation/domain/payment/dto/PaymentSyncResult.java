@@ -15,5 +15,11 @@ public enum PaymentSyncResult {
     // 우리 원장에 없는 결제
     NOT_OUR_PAYMENT,
     // 원장 상태가 이미 끝나(CANCELLED 등) 반영할 수 없다. 수동 확인이 필요하다.
-    STATE_CONFLICT
+    STATE_CONFLICT,
+    // 결제 완료·환불된 결제라 PG 취소 금액으로 환불 상태를 맞춰야 한다. 웹훅 처리기가 환불 동기화로 이어서 처리하며, 기록되는 결과가 아니다.
+    REFUND_SYNC_REQUIRED,
+    // PG에 반영된 취소로 미완료 환불을 완료 처리
+    REFUND_SYNCED,
+    // PG 취소 금액과 환불 기록을 맞출 수 없다. 수동 확인이 필요하다.
+    REFUND_MISMATCH
 }

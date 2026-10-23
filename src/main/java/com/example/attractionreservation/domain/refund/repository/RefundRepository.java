@@ -43,6 +43,16 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
                                   @Param("staleBefore") Instant staleBefore,
                                   Pageable pageable);
 
+    // PG 취소 금액과 맞출 미완료 환불 후보. 잠그기 전에 엔티티를 올리지 않도록 ID만 조회한다(findPaymentIdById 참고).
+    @Query("""
+    SELECT r.id
+    FROM Refund r
+    WHERE r.payment.id = :paymentId AND r.status IN :statuses AND r.refundAmount = :refundAmount
+    """)
+    List<Long> findIdsByPaymentIdAndStatusInAndRefundAmount(@Param("paymentId") Long paymentId,
+                                                            @Param("statuses") List<RefundStatus> statuses,
+                                                            @Param("refundAmount") int refundAmount);
+
     // 결제의 상태별 환불 금액 합계. COMPLETED로 조회하면 PG에 반영된 환불 금액이다.
     @Query("""
     SELECT COALESCE(SUM(r.refundAmount), 0)

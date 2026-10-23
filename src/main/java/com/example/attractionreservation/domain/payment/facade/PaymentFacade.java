@@ -54,8 +54,9 @@ public class PaymentFacade {
         }
 
         Payment payment = found.get();
-        if (payment.getStatus() == PaymentStatus.PAID) {
-            return PaymentSyncResult.ALREADY_DONE;
+        // 결제 완료 후의 웹훅은 취소 웹훅일 수 있으므로 PG 취소 금액으로 환불 상태를 맞춘다.
+        if (isPaidOrRefunded(payment)) {
+            return PaymentSyncResult.REFUND_SYNC_REQUIRED;
         }
 
         try {
@@ -130,6 +131,13 @@ public class PaymentFacade {
             // 다른 요청이 먼저 보상 요청을 저장한 경우
             log.info("취소된 결제의 보상 요청이 이미 있음, 보상 요청 생략: pgId={}", pgId);
         }
+    }
+
+    private boolean isPaidOrRefunded(Payment payment) {
+        PaymentStatus status = payment.getStatus();
+        return status == PaymentStatus.PAID
+                || status == PaymentStatus.PARTIALLY_REFUNDED
+                || status == PaymentStatus.REFUNDED;
     }
 
     private boolean amountMatches(Payment payment, PaymentGatewayResponse pgPayment) {

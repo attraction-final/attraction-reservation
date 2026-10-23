@@ -289,18 +289,19 @@ class PaymentFacadeTest {
         verifyNoInteractions(paymentGateway, paymentCommandService);
     }
 
-    @Test
-    @DisplayName("웹훅 동기화: 이미 결제 완료된 결제면 PG를 호출하지 않고 ALREADY_DONE을 반환한다.")
-    void syncPayment_alreadyPaid_AlreadyDone() {
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, names = {"PAID", "PARTIALLY_REFUNDED", "REFUNDED"})
+    @DisplayName("웹훅 동기화: 결제 완료·환불된 결제면 PG를 호출하지 않고 환불 동기화가 필요하다고 반환한다.")
+    void syncPayment_paidOrRefunded_RefundSyncRequired(PaymentStatus status) {
         //given
-        payment.markAsPaid(PAID_AT);
+        ReflectionTestUtils.setField(payment, "status", status);
         given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
 
         //when
         PaymentSyncResult result = paymentFacade.syncPayment(pgId);
 
         //then
-        assertEquals(PaymentSyncResult.ALREADY_DONE, result);
+        assertEquals(PaymentSyncResult.REFUND_SYNC_REQUIRED, result);
         verifyNoInteractions(paymentGateway, paymentCommandService);
     }
 
@@ -411,7 +412,7 @@ class PaymentFacadeTest {
     }
 
     private PaymentGatewayResponse pgResponse(GatewayPaymentStatus status, Long amount) {
-        return new PaymentGatewayResponse(pgId, status, amount, status == GatewayPaymentStatus.PAID ? PAID_AT : null);
+        return new PaymentGatewayResponse(pgId, status, amount, null, status == GatewayPaymentStatus.PAID ? PAID_AT : null);
     }
 
     private Payment createPayment() {

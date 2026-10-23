@@ -80,6 +80,32 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("부분 취소된 결제 응답이면 상태와 취소된 누적 금액을 변환해 반환한다.")
+    void getPayment_partialCancelled_CancelledAmount() {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {
+                          "id": "pg-id",
+                          "status": "PARTIAL_CANCELLED",
+                          "amount": { "total": 10000, "paid": 7000, "cancelled": 3000 },
+                          "paidAt": "2026-10-20T01:00:00Z"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        Optional<PaymentGatewayResponse> response = portOneClient.getPayment(PG_ID);
+
+        //then
+        assertThat(response).isPresent();
+        assertThat(response.get().status()).isEqualTo(GatewayPaymentStatus.PARTIAL_CANCELLED);
+        assertThat(response.get().totalAmount()).isEqualTo(10000L);
+        assertThat(response.get().cancelledAmount()).isEqualTo(3000L);
+        server.verify();
+    }
+
+    @Test
     @DisplayName("결제 완료가 아닌 응답은 결제 완료 시각이 없어도 그대로 반환한다.")
     void getPayment_notPaidWithoutPaidAt_Success() {
         //given

@@ -62,4 +62,20 @@ public class Order extends BaseTimeEntity {
 
         this.status = OrderStatus.CANCELLED;
     }
+
+    public void markAsPartiallyRefunded() {
+        if (!this.status.canTransitTo(OrderStatus.PARTIALLY_REFUNDED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.PARTIALLY_REFUNDED;
+    }
+
+    public void markAsRefunded() {
+        if (!this.status.canTransitTo(OrderStatus.REFUNDED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.REFUNDED;
+    }
 }

@@ -8,6 +8,8 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -64,6 +66,21 @@ class PaymentTest {
 
         //then
         assertEquals(PaymentStatus.PAID, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("결제 완료로 변경하면 결제 완료 시각이 기록된다.")
+    void markAsPaid_pending_PaidAtRecorded() {
+        //given
+        Payment payment = createPayment();
+        Instant before = Instant.now();
+
+        //when
+        payment.markAsPaid();
+
+        //then
+        assertNotNull(payment.getPaidAt());
+        assertFalse(payment.getPaidAt().isBefore(before));
     }
 
     @Test

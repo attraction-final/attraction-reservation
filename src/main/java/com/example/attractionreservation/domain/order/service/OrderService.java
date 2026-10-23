@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
+import com.example.attractionreservation.domain.order.entity.OrderStatus;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
@@ -22,7 +24,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -94,6 +97,57 @@ public class OrderService {
         Order savedOrder = orderRepository.saveAndFlush(order);
 
         return CreateOrderResponse.from(savedOrder);
+    }
+
+    @Transactional
+    public UpdateOrderResponse updateOrderByCancel(
+            Long userId,
+            Long orderId
+    ) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_CANCEL_ACCESS_DENIED);
+        }
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 조회 후 상태가 바뀔 수 있으므로 실제 수정 시에도 PENDING 조건을 확인한다.
+        int updatedCount = orderRepository.cancelPendingOrder(
+                orderId,
+                userId,
+                OrderStatus.PENDING,
+                OrderStatus.CANCELLED,
+                Instant.now()
+        );
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 응답에 재사용하지 않는다.
+        return UpdateOrderResponse.of(
+                orderId,
+                OrderStatus.CANCELLED
+        );
+    }
+
+    @Transactional
+    public int updateExpiredOrdersByCancel() {
+        // 기준 시각과 수정 시각이 일관되도록 현재 시각을 한 번만 구한다.
+        Instant now = Instant.now();
+        Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
+
+        return orderRepository.cancelExpiredPendingOrders(
+                OrderStatus.PENDING,
+                OrderStatus.CANCELLED,
+                cutoff,
+                now
+        );
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

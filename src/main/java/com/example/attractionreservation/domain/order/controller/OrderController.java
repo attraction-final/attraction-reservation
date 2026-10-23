@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
 @RestController
@@ -37,7 +36,7 @@ public class OrderController {
                 .body(ApiResponse.ok("주문 생성에 성공했습니다.", response));
     }
 
-    @PatchMapping("/{orderId}/cancel")
+    @PostMapping("/{orderId}/cancel")
     public ResponseEntity<ApiResponse<UpdateOrderResponse>> updateOrderByCancel(
             @AuthenticationPrincipal Long userId,
             @PathVariable Long orderId

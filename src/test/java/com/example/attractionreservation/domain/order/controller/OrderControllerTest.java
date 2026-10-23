@@ -36,7 +36,6 @@ import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 
 @WebMvcTest(OrderController.class)
 @Import({
@@ -185,7 +184,7 @@ class OrderControllerTest {
                 ));
 
         // when & then: 별도 회원 ID가 전달돼도 인증된 회원 ID를 사용한다.
-        mockMvc.perform(patch("/api/orders/{orderId}/cancel", 101L)
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", 101L)
                         .with(authenticatedMember())
                         .param("userId", "999"))
                 .andExpect(status().isOk())
@@ -206,7 +205,7 @@ class OrderControllerTest {
         // given: 인증 정보를 전달하지 않는다.
 
         // when & then
-        mockMvc.perform(patch("/api/orders/{orderId}/cancel", 101L))
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", 101L))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -231,7 +230,7 @@ class OrderControllerTest {
                 .thenThrow(new BusinessException(errorCode));
 
         // when & then
-        mockMvc.perform(patch("/api/orders/{orderId}/cancel", 101L)
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", 101L)
                         .with(authenticatedMember()))
                 .andExpect(status().is(errorCode.getStatus().value()))
                 .andExpect(jsonPath("$.success").value(false))

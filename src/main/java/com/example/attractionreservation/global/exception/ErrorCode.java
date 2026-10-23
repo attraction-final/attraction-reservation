@@ -10,6 +10,7 @@ public enum ErrorCode {
     INVALID_INPUT_VALUE(HttpStatus.BAD_REQUEST, "입력값을 확인해주세요"),
     INVALID_REQUEST_BODY(HttpStatus.BAD_REQUEST,  "요청 본문 형식이 올바르지 않습니다."),
     MISSING_REQUEST_VALUE(HttpStatus.BAD_REQUEST,  "필수 요청값이 누락되었습니다."),
+    INVALID_SORT_PROPERTY(HttpStatus.BAD_REQUEST, "지원하지 않는 정렬 조건입니다."),
     URL_NOT_FOUND(HttpStatus.NOT_FOUND,  "요청한 주소를 찾을 수 없습니다."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 콘텐츠 형식입니다."),
@@ -21,9 +22,32 @@ public enum ErrorCode {
     INVALID_ATTRACTION_STATUS(HttpStatus.BAD_REQUEST, "허용되지 않은 운영 상태입니다."),
     ATTRACTION_STATUS_SAME(HttpStatus.BAD_REQUEST, "현재 상태와 같습니다."),
     ATTRACTION_HAS_UPCOMING_RESERVATIONS(HttpStatus.CONFLICT, "이용 예정 예약이 있어 처리할 수 없습니다. 예약을 먼저 처리해 주세요."),
-  
+
+    // attractionSlot
+    SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "슬롯을 찾을 수 없습니다."),
+    SLOT_OUT_OF_OPERATING_HOURS(HttpStatus.BAD_REQUEST, "공원 운영 시간(10:00~22:00) 밖의 슬롯입니다."),
+    SLOT_START_IN_PAST(HttpStatus.BAD_REQUEST, "지난 시각에는 슬롯을 만들 수 없습니다."),
+    INVALID_SLOT_STATUS(HttpStatus.BAD_REQUEST, "허용되지 않은 슬롯 상태입니다."),
+    SLOT_STATUS_SAME(HttpStatus.BAD_REQUEST, "현재 상태와 같습니다."),
+    SLOT_TIME_OVERLAP(HttpStatus.CONFLICT, "같은 날 다른 슬롯과 시간이 겹칩니다."),
+    SLOT_ALREADY_ENDED(HttpStatus.CONFLICT, "이미 종료된 슬롯은 수정·삭제할 수 없습니다."),
+    SLOT_ALREADY_CANCELLED(HttpStatus.CONFLICT, "이미 취소된 슬롯입니다."),
+    SLOT_HAS_RESERVATIONS(HttpStatus.CONFLICT, "예약이 있는 슬롯입니다. 기존 예약을 먼저 처리해 주세요."),
+    SLOT_CAPACITY_BELOW_RESERVED(HttpStatus.CONFLICT, "예약된 인원보다 적게 정원을 줄일 수 없습니다."),
+    SLOT_FULL(HttpStatus.CONFLICT, "잔여 정원이 없어 OPEN으로 바꿀 수 없습니다."),
+
     // user
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
+
+    // auth
+    INVALID_LOGIN_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
+    USER_NOT_ACTIVE(HttpStatus.FORBIDDEN, "이용할 수 없는 회원 상태입니다."),
+
+    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
+    INVALID_ACCESS_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 Access Token입니다."),
+    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 Refresh Token입니다."),
+    ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
+
 
     // ticketProduct
     INVALID_TICKET_PRODUCT_PRICE(HttpStatus.BAD_REQUEST, "티켓 상품 가격은 0원 이상이어야 합니다."),
@@ -34,6 +58,10 @@ public enum ErrorCode {
     INVALID_TICKET_PRODUCT_STATUS(HttpStatus.BAD_REQUEST, "티켓 상품의 상태값이 올바르지 않습니다."),
     TICKET_PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "티켓 상품을 찾을 수 없습니다."),
     TICKET_PRODUCT_ALREADY_DELETED(HttpStatus.CONFLICT, "삭제된 티켓 상품은 수정할 수 없습니다."),
+
+    // order
+    ORDER_PRODUCT_NOT_ON_SALE(HttpStatus.CONFLICT, "판매 중인 티켓 상품만 주문할 수 있습니다."),
+    ORDER_AMOUNT_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "주문 금액이 허용 범위를 초과했습니다."),
 
     // ticket
     INVALID_TICKET_VALID_DATE(HttpStatus.BAD_REQUEST, "입장권 방문일은 필수입니다."),

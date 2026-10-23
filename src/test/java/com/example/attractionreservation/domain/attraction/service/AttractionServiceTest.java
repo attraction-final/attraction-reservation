@@ -2,9 +2,9 @@ package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
-import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
-import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
+import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;

@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.GetUserResponse;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import com.example.attractionreservation.global.response.ApiResponse;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
 import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
@@ -29,5 +32,16 @@ public class UserController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.ok("회원가입이 완료되었습니다.", response));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<GetUserResponse>> getMe(
+            @AuthenticationPrincipal Long userId
+    ) {
+        GetUserResponse response = userService.getMe(userId);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("회원 정보 조회에 성공했습니다.", response)
+        );
     }
 }

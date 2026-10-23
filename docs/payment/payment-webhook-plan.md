@@ -140,7 +140,11 @@ global/config/SchedulingConfig          @EnableScheduling
 | 상황 | `PaymentSyncResult` | 웹훅 상태 |
 |---|---|---|
 | 원장에 없는 `pgId` | `NOT_OUR_PAYMENT` | `IGNORED` |
-| 이미 `PAID` / 이미 `FAILED`(`PAYMENT_ALREADY_PROCESSED`) | `ALREADY_DONE` | `PROCESSED` |
+| 이미 `FAILED`(`PAYMENT_ALREADY_PROCESSED`) | `ALREADY_DONE` | `PROCESSED` |
+| 원장 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED` → 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리 | `REFUND_SYNC_REQUIRED` (기록되지 않음) | 아래 세 줄 중 하나 |
+| ↳ PG 취소 금액 = 완료 환불 합계 | `ALREADY_DONE` | `PROCESSED` |
+| ↳ 차이와 같은 미완료 환불 1건을 PG 기준 완료 | `REFUND_SYNCED` | `PROCESSED` |
+| ↳ 그 밖(외부 취소 등) | `REFUND_MISMATCH` | **즉시 `DEAD`** + error 로그 (수동 확인) |
 | PG 결제 완료, 금액 일치 → 승인 | `APPROVED` | `PROCESSED` |
 | PG 미완료(`PAYMENT_NOT_PAID`) | `NOT_PAID` | `PROCESSED` |
 | PG 실패(`PAYMENT_PG_FAILED`) → 결제 실패 처리 | `PG_FAILED` | `PROCESSED` |
@@ -152,6 +156,7 @@ global/config/SchedulingConfig          @EnableScheduling
 - `NOT_PAID`를 `PROCESSED`로 두는 이유: READY 등의 웹훅은 할 일이 없고, 이후 결제 완료 시 Paid 웹훅이 따로 온다.
 - `COMPENSATED`는 PG 취소 결과와 무관하다. 보상 요청이 결제 실패와 함께 커밋되고, 즉시 시도가 실패해도 보상 Outbox가 재시도한다([payment-compensation.md](payment-compensation.md)). 웹훅 쪽에서 보상 실패를 추적하지 않는다.
 - **재시도하지 않고 바로 `DEAD`로 보내는 경우**
+  - `REFUND_MISMATCH`: PG 취소 금액과 환불 기록을 자동으로 맞출 수 없다. 재시도해도 결과가 같다(refund-requirements.md 5-3).
   - `STATE_CONFLICT`: `approvePayment`가 락 안에서 PAID·FAILED·CANCELLED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다. 정상 흐름에서는 생기지 않는다.
     - 원장 `CANCELLED` + PG Paid는 여기에 해당하지 않는다. `COMPENSATED`로 보상 요청을 저장한다(payment-approval.md 4.3).
 - **Processor의 예외 처리**
@@ -178,10 +183,13 @@ payment:
 | `PortOneWebhookControllerTest` | `@WebMvcTest` | 200(원문 저장), 중복 수신 200, 401이면 저장 안 함 |
 | `WebhookEventTest` | 단위 | 생성 상태, 상태 전이, 백오프, DEAD(처리 종료 시각 기록), `markAsDead`, 실패 사유 자르기, `isProcessable` |
 | `WebhookEventRepositoryTest` | `@DataJpaTest` + H2 | 36자 pgId·null pgId 저장, `webhook_id` UNIQUE |
-| `WebhookEventCommandServiceTest` | `@DataJpaTest` + H2 | 저장·중복, 점유(대기·처리 중·IGNORED·재시도 시각 전후), 결과 기록(수동 처리 필요 결과는 DEAD), 처리 대상 조회 |
-| `WebhookEventProcessorTest` | Mockito | 처리, 점유 실패·락 충돌 시 건너뜀, 실패 기록, 다른 처리가 먼저 기록하면 건너뜀, 수동 처리 필요 결과 기록, 배치 내 예외 격리 |
+| `WebhookEventCommandServiceTest` | `@DataJpaTest` + H2 | 저장·중복, 점유(대기·처리 중·IGNORED·재시도 시각 전후), 결과 기록(수동 처리 필요 결과는 DEAD, `REFUND_SYNCED`는 PROCESSED, `REFUND_SYNC_REQUIRED`는 기록 거부), 처리 대상 조회 |
+| `WebhookEventProcessorTest` | Mockito | 처리, 점유 실패·락 충돌 시 건너뜀, 실패 기록, 다른 처리가 먼저 기록하면 건너뜀, 수동 처리 필요 결과 기록, 배치 내 예외 격리, 환불 동기화 결과 기록·불필요 시 미호출·동기화 오류 시 실패 기록 |
 | `WebhookEventSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, `enabled` 설정에 따른 빈 등록 |
-| `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(금액 불일치·원장 CANCELLED 시 보상 즉시 시도, 상태 충돌 포함), 재시도 필요 오류 전파 |
+| `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(금액 불일치·원장 CANCELLED 시 보상 즉시 시도, 상태 충돌, 결제 완료·환불된 결제의 `REFUND_SYNC_REQUIRED` 포함), 재시도 필요 오류 전파 |
+| `RefundProcessorTest` | Mockito | `syncWithPg`: PG 취소 금액 전달, 취소 금액 없음은 0, PG에 결제 없으면 예외 |
+| `RefundCommandServiceTest` | `@DataJpaTest` | 환불 동기화 결과별(차이 0, 미완료 환불 1건 일치·마지막 환불, `REQUESTED`만·2건 이상·일치 없음·음수는 `REFUND_MISMATCH`) |
+| `RefundProcessorConcurrencyTest` | `@SpringBootTest` + MySQL | 취소 웹훅 처리로 실패 기록된 환불 완료(웹훅 → DB), PG 취소 응답 대기 중 웹훅이 먼저 완료해도 1번만 완료 |
 
 - DB는 `Instant`를 마이크로초로 반올림해 저장한다. 시각 경계를 비교하는 테스트는 `now`를 밀리초로 잘라 쓴다.
 

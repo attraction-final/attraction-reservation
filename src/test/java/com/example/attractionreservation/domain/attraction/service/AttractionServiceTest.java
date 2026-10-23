@@ -82,15 +82,6 @@ class AttractionServiceTest {
                 .willReturn(count);
     }
 
-    // ReservableSlotView는 인터페이스라서 테스트용 구현체를 만듦
-    private record TestSlotView(Long slotId, Long attractionId, LocalDateTime startsAt, Integer remainingCount)
-            implements ReservableSlotView {
-        @Override public Long getSlotId() { return slotId; }
-        @Override public Long getAttractionId() { return attractionId; }
-        @Override public LocalDateTime getStartsAt() { return startsAt; }
-        @Override public Integer getRemainingCount() { return remainingCount; }
-    }
-
     // 등록
     @Test
     @DisplayName("이름이 중복되지 않으면 운영중 상태로 등록된다")

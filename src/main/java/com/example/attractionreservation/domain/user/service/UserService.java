@@ -78,4 +78,10 @@ public class UserService {
         return false;
     }
 
+    // 예약 - 회원 찾기
+    public User findByUserId(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+    }
+
 }

@@ -55,7 +55,7 @@ class AttractionSlotRepositoryTest {
         AttractionSlot cancelledSlot = AttractionSlot.create(rollerCoaster, DAY.withHour(13), 10); // 13:00~13:10
         cancelledSlot.cancel();
 
-        AttractionSlot nextDaySlot = AttractionSlot.create(rollerCoaster, DAY.plusDays(1).withHour(11), 10);
+        AttractionSlot nextDaySlot = AttractionSlot.create(rollerCoaster, DAY.plusDays(1), 10);
 
         attractionSlotRepository.saveAll(List.of(morningSlot, cancelledSlot, nextDaySlot));
         attractionSlotRepository.flush();

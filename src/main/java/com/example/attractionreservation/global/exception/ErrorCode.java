@@ -41,12 +41,21 @@ public enum ErrorCode {
     PAYMENT_PG_PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PG 결제를 찾을 수 없습니다."),
     PAYMENT_ALREADY_PROCESSED(HttpStatus.CONFLICT, "이미 처리된 결제입니다."),
     PAYMENT_ALREADY_CANCELLED(HttpStatus.CONFLICT, "이미 취소된 결제입니다."),
+    PAYMENT_CANCELLABLE_AMOUNT_MISMATCH(HttpStatus.CONFLICT, "결제의 취소 가능 금액이 일치하지 않습니다."),
     PAYMENT_PG_FAILED(HttpStatus.BAD_GATEWAY, "PG 결제에 실패했습니다."),
     PAYMENT_WEBHOOK_INVALID_SIGNATURE(HttpStatus.UNAUTHORIZED, "웹훅 서명이 유효하지 않습니다."),
     PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 웹훅 처리 상태 전이입니다."),
     PAYMENT_WEBHOOK_NOT_FOUND(HttpStatus.NOT_FOUND, "웹훅 수신 기록을 찾을 수 없습니다."),
     PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 보상 처리 상태 전이입니다."),
-    PAYMENT_COMPENSATION_NOT_FOUND(HttpStatus.NOT_FOUND, "보상 요청을 찾을 수 없습니다.");
+    PAYMENT_COMPENSATION_NOT_FOUND(HttpStatus.NOT_FOUND, "보상 요청을 찾을 수 없습니다."),
+
+    // refund
+    REFUND_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 환불 상태 전이입니다."),
+    REFUND_INVALID_QUANTITY(HttpStatus.BAD_REQUEST, "환불 수량이 올바르지 않습니다."),
+    REFUND_NOT_REFUNDABLE_PAYMENT(HttpStatus.CONFLICT, "환불할 수 없는 결제 상태입니다."),
+    REFUND_INVALID_ORDER_ITEM(HttpStatus.BAD_REQUEST, "해당 주문의 주문 상품이 아닙니다."),
+    REFUND_DUPLICATE_ORDER_ITEM(HttpStatus.BAD_REQUEST, "같은 주문 상품을 중복해서 환불할 수 없습니다."),
+    REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다.");
 
     private final HttpStatus status;
     private final String message;

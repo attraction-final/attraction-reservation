@@ -32,5 +32,24 @@ public interface PaymentGateway {
      * @throws com.example.attractionreservation.global.exception.BusinessException
      *         취소 여부를 확인할 수 없으면 {@code PAYMENT_CANCELLATION_FAILED}
      */
-    void cancelPayment(String pgId, String reason, Long amount);
+    default void cancelPayment(String pgId, String reason, Long amount) {
+        cancelPayment(pgId, reason, amount, null);
+    }
+
+    /**
+     * PG 결제를 취소한다. 부분 취소의 중복 처리를 막기 위해 PG 취소 가능 금액을 함께 보낼 수 있다.
+     *
+     * <p>"이미 취소됨"을 성공으로 간주하는 것은 전체 취소일 때만이다. 부분 취소에서 이미 취소된 결제는
+     * 이번 취소가 반영됐다고 볼 수 없으므로 실패로 알린다.
+     *
+     * @param amount                   취소 금액. null이면 전체 취소
+     * @param currentCancellableAmount 이번 취소 전에 PG에 남아 있어야 할 취소 가능 금액. 다르면 PG가 거절한다.
+     *                                 null이면 보내지 않는다
+     * @throws com.example.attractionreservation.global.exception.BusinessException
+     *         부분 취소 대상 결제가 이미 취소됐으면 {@code PAYMENT_ALREADY_CANCELLED},
+     *         PG 취소 가능 금액이 {@code currentCancellableAmount}와 다르면 {@code PAYMENT_CANCELLABLE_AMOUNT_MISMATCH}.
+     *         둘 다 앞선 취소가 PG에 반영됐을 수 있어 재시도하면 안 된다.
+     *         그 밖에 취소 여부를 확인할 수 없으면 {@code PAYMENT_CANCELLATION_FAILED}
+     */
+    void cancelPayment(String pgId, String reason, Long amount, Long currentCancellableAmount);
 }

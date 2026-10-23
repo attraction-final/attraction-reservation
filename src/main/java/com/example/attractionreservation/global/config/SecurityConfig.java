@@ -71,7 +71,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
                         // 회원가입과 로그인은 인증 없이 접근할 수 있다.
                         .requestMatchers(HttpMethod.POST, "/api/users/signup").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/auth/login",
+                                "/api/auth/refresh"
+                        ).permitAll()
 
                         // 관리자 전용 API는 ADMIN 권한이 있는 회원만 접근할 수 있다.
                         .requestMatchers("/api/admin/**").hasRole(ADMIN_ROLE)

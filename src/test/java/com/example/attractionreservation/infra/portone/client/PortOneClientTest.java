@@ -343,8 +343,6 @@ class PortOneClientTest {
         server.verify();
     }
 
-    // ---- 아래는 리뷰 2·4·5번(머지 전 항목)을 고치면 활성화할 테스트 ----
-
     @Test
     @DisplayName("결제 완료 응답에 결제 완료 시각이 없으면 결제사 오류로 처리한다.")
     void getPayment_paidWithoutPaidAt_Fail() {

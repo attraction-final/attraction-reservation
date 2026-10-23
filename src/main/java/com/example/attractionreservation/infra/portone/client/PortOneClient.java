@@ -52,7 +52,7 @@ public class PortOneClient implements PaymentGateway {
             throw new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR);
         } catch (RestClientException e) {
             log.warn("PortOne 결제 조회 통신 실패: pgId={}, errorType={}",
-                    pgId, e.getClass().getSimpleName());
+                    pgId, e.getClass().getSimpleName(), e);
 
             throw new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR);
         }

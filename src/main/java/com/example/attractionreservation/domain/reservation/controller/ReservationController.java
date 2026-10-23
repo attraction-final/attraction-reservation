@@ -1,13 +1,18 @@
 package com.example.attractionreservation.domain.reservation.controller;
 
-import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
-import com.example.attractionreservation.domain.reservation.dto.CreateReservationResponse;
+import com.example.attractionreservation.domain.reservation.dto.*;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -18,13 +23,33 @@ public class ReservationController {
     private final ReservationService reservationService;
 
     // 예약 생성
-    // TODO : 인증 완료 후 사용자 검증
     @PostMapping
     public ResponseEntity<ApiResponse<CreateReservationResponse>> createReservation(
+            @AuthenticationPrincipal Long userId,
             @Valid @RequestBody CreateReservationRequest request
     ) {
-        Long userId = 1L; // 임시 유저 id
         CreateReservationResponse response = reservationService.createReservation(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("어트랙션 예약에 성공했습니다.", response));
+    }
+
+    // 내 예약 목록 조회
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<SearchReservationListResponse>> getReservationAll(
+            @AuthenticationPrincipal Long userId,
+            @ModelAttribute SearchReservationCondition condition,
+            @PageableDefault(page = 0, size = 10, sort = "status", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        Sort sort = pageable.getSort();
+
+        if (sort.getOrderFor("id") == null) {
+            sort = sort.and(Sort.by(Sort.Direction.DESC, "id"));
+        }
+        Pageable stablePageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
+
+        Page<SearchReservationResponse> result = reservationService.findReservationAll(userId, stablePageable, condition);
+
+        SearchReservationListResponse response = SearchReservationListResponse.from(result);
+
+        return ResponseEntity.ok(ApiResponse.ok("내 예약 목록 조회에 성공했습니다.", response));
     }
 }

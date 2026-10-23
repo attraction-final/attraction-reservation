@@ -171,6 +171,39 @@ class TicketProductTest {
                 .isEqualTo(TicketProductStatus.DELETED);
     }
 
+    @Test
+    @DisplayName("수정 요청 상태가 DELETED이면 거절하고 기존 값을 유지한다")
+    void updateTicketProduct_deletedStatus_rejected() {
+        TicketProduct product = new TicketProduct(
+                "종일이용권",
+                50000,
+                "기존 설명",
+                TicketType.ALL_DAY,
+                100,
+                TicketProductStatus.ON_SALE
+        );
+
+        assertThatThrownBy(() -> product.updateTicketProduct(
+                "변경된 이름",
+                60000,
+                "변경된 설명",
+                50,
+                TicketProductStatus.DELETED
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_TICKET_PRODUCT_STATUS)
+                );
+
+        assertThat(product.getName()).isEqualTo("종일이용권");
+        assertThat(product.getPrice()).isEqualTo(50000);
+        assertThat(product.getDescription()).isEqualTo("기존 설명");
+        assertThat(product.getStock()).isEqualTo(100);
+        assertThat(product.getStatus())
+                .isEqualTo(TicketProductStatus.ON_SALE);
+    }
+
     private TicketProduct createTicketProduct(
             String name,
             int price,

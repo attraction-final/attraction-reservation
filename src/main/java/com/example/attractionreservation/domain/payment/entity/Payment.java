@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.payment.entity;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
+import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.*;
@@ -9,14 +10,14 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
 @Table(name = "payments")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Payment {
+public class Payment extends BaseTimeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -36,7 +37,7 @@ public class Payment {
     @Column(nullable = false, length = 20)
     private PaymentStatus status;
 
-    private LocalDateTime paidAt;
+    private Instant paidAt;
 
     private Payment(Order order) {
         this.order = order;
@@ -58,6 +59,7 @@ public class Payment {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_STATUS_TRANSITION);
         }
 
+        this.paidAt = Instant.now();
         this.status = PaymentStatus.PAID;
     }
 

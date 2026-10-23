@@ -1,4 +1,4 @@
-package com.example.attractionreservation.user.controller;
+package com.example.attractionreservation.domain.user.controller;
 
 import com.example.attractionreservation.domain.user.controller.UserController;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -11,14 +11,30 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
+import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
+import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
+import com.example.attractionreservation.global.config.SecurityConfig;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
 @WebMvcTest(UserController.class)
+@Import({
+        SecurityConfig.class,
+        JwtAuthenticationEntryPoint.class,
+        JwtAccessDeniedHandler.class
+})
+@EnableWebSecurity
+@AutoConfigureMockMvc(addFilters = true)
 class UserControllerTest {
 
     @Autowired
@@ -26,6 +42,12 @@ class UserControllerTest {
 
     @MockitoBean
     private UserService userService;
+    @MockitoBean
+    private JwtProvider jwtProvider;
+
+    @MockitoBean
+    private UserRepository userRepository;
+
 
     @Test
     void signup_success() throws Exception {
@@ -43,6 +65,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -64,6 +87,7 @@ class UserControllerTest {
     void signup_invalidEmail_returnsBadRequest() throws Exception {
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                             {
@@ -83,6 +107,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                             {
@@ -109,6 +134,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isBadRequest());
@@ -142,6 +168,7 @@ class UserControllerTest {
 
         // when & then
         mockMvc.perform(post("/api/users/signup")
+                        .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())

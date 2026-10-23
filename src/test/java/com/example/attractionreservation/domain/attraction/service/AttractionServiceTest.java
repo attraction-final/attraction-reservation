@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -34,6 +35,9 @@ class AttractionServiceTest {
 
     @Mock
     private AttractionRepository attractionRepository;
+
+    @Mock
+    private AttractionSlotRepository attractionSlotRepository; // nextSlot 조회용
 
     @Mock
     private UpcomingReservationReader upcomingReservationReader; // 위로 옮김 (다른 @Mock과 같이)
@@ -131,7 +135,7 @@ class AttractionServiceTest {
         SearchAttractionListResponse response = attractionService.findAttractionAll(createCondition());
 
         // then
-        verify(attractionRepository, never()).findReservableSlots(anyList(), any(), any());
+        verify(attractionSlotRepository, never()).findReservableSlots(anyList(), any(), any());
         assertThat(response.content().get(0).nextSlot()).isNull();
     }
 
@@ -145,11 +149,11 @@ class AttractionServiceTest {
         LocalDateTime today = LocalDateTime.now().toLocalDate().atStartOfDay();
         // 일부러 순서를 섞어서 넣음 (14시 → 11시 → 16시)
         List<ReservableSlotView> slots = List.of(
-                new TestSlotView(10L, 1L, today.withHour(14), 5),
-                new TestSlotView(11L, 1L, today.withHour(11), 3),
-                new TestSlotView(12L, 1L, today.withHour(16), 8)
+                new ReservableSlotView(10L, 1L, today.withHour(14), 5),   // TestSlotView → ReservableSlotView
+                new ReservableSlotView(11L, 1L, today.withHour(11), 3),
+                new ReservableSlotView(12L, 1L, today.withHour(16), 8)
         );
-        given(attractionRepository.findReservableSlots(eq(List.of(1L)), any(), any())).willReturn(slots);
+        given(attractionSlotRepository.findReservableSlots(eq(List.of(1L)), any(), any())).willReturn(slots); // ← 변경
 
         // when
         SearchAttractionListResponse response = attractionService.findAttractionAll(createCondition());
@@ -167,8 +171,8 @@ class AttractionServiceTest {
         givenSearchResult(List.of(operating, suspended));
 
         LocalDateTime today = LocalDateTime.now().toLocalDate().atStartOfDay();
-        given(attractionRepository.findReservableSlots(eq(List.of(1L)), any(), any()))
-                .willReturn(List.of(new TestSlotView(10L, 1L, today.withHour(14), 5)));
+        given(attractionSlotRepository.findReservableSlots(eq(List.of(1L)), any(), any()))
+                .willReturn(List.of(new ReservableSlotView(10L, 1L, today.withHour(14), 5)));
 
         // when
         SearchAttractionListResponse response = attractionService.findAttractionAll(createCondition());

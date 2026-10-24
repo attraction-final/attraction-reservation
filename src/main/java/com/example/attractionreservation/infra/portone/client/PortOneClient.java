@@ -20,6 +20,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.UnknownContentTypeException;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -96,8 +97,9 @@ public class PortOneClient implements PaymentGateway {
                 log.warn("PortOne 결제 취소 통신 실패 (시도 {}/{}): pgId={}",
                         attempt, MAX_CANCEL_ATTEMPTS, pgId);
             } catch (RestClientException e) {
-                // 성공 응답을 받았지만 본문을 읽지 못한 경우. 취소가 반영됐을 수 있으므로 실패로 알리지 않는다.
-                if (e.getCause() instanceof HttpMessageNotReadableException) {
+                // 성공 응답을 받았지만 본문을 읽지 못한 경우(형식 오류, 처리할 수 없는 content-type).
+                // 취소가 반영됐을 수 있으므로 실패로 알리지 않는다.
+                if (isUnreadableSuccessResponse(e)) {
                     log.warn("PortOne 결제 취소 응답을 해석하지 못함, 조회로 확인 필요: pgId={}", pgId);
                     return new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN);
                 }
@@ -148,6 +150,15 @@ public class PortOneClient implements PaymentGateway {
         }
 
         return gatewayResponse;
+    }
+
+    private boolean isUnreadableSuccessResponse(RestClientException exception) {
+        if (exception.getCause() instanceof HttpMessageNotReadableException) {
+            return true;
+        }
+
+        return exception instanceof UnknownContentTypeException unknownContentType
+                && unknownContentType.getStatusCode().is2xxSuccessful();
     }
 
     private boolean isAlreadyCancelled(RestClientResponseException exception) {

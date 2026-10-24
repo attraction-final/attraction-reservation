@@ -370,6 +370,21 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("성공 응답이 처리할 수 없는 content-type이면 취소됐을 수 있으므로 재시도 없이 UNKNOWN을 반환한다.")
+    void cancelPayment_unsupportedContentType_Unknown() {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withSuccess("<html>ok</html>", MediaType.TEXT_HTML));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
+    }
+
+    @Test
     @DisplayName("결제 조회 응답의 취소 내역을 취소 내역 ID와 상태로 변환한다.")
     void getPayment_withCancellations_Mapped() {
         //given

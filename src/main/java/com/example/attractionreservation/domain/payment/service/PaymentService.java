@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.payment.dto.PaymentDetailRespons
 import com.example.attractionreservation.domain.payment.dto.PaymentResponse;
 import com.example.attractionreservation.domain.payment.dto.SearchPaymentCondition;
 import com.example.attractionreservation.domain.payment.entity.Payment;
+import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -42,5 +43,22 @@ public class PaymentService {
         return paymentRepository.findByIdAndOrderUserId(paymentId, userId)
                 .map(PaymentDetailResponse::from)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+    }
+
+    @Transactional
+    public void cancelPayment(Long userId, Long orderId) {
+        Payment found = paymentRepository.findWithLockByOrderId(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+
+        if (!found.getOrder().getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
+        }
+
+        if (found.getStatus() != PaymentStatus.PENDING) {
+            throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
+        }
+
+        found.markAsCancelled();
+        paymentRepository.save(found);
     }
 }

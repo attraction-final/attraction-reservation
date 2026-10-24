@@ -83,9 +83,10 @@ public class PaymentCompensationProcessor {
 
         ClaimedCompensation compensation = claimed.get();
         try {
+            // 재시도면 이전 취소가 이미 반영됐는지 먼저 확인하고, 반영되지 않았을 때만 취소를 보낸다.
             // PG 결제 전액을 돌려주는 전체 취소(amount = null). 다른 처리와 겹쳐 두 번 취소되면 두 번째는 "이미 취소됨"으로 성공 처리된다.
-            PaymentCancellationResponse result =
-                    paymentGateway.cancelPayment(compensation.pgId(), compensation.reason(), null);
+            PaymentCancellationResponse result = findAppliedCancellation(compensation)
+                    .orElseGet(() -> paymentGateway.cancelPayment(compensation.pgId(), compensation.reason(), null));
 
             if (result.isSucceeded()) {
                 paymentCompensationService.recordDone(compensationId, compensation.attemptCount(), Instant.now());
@@ -151,6 +152,38 @@ public class PaymentCompensationProcessor {
             // 다른 처리가 먼저 확인 결과를 기록한 경우
             log.info("[Compensation] 다른 처리가 먼저 PG 취소 확인을 기록해 건너뜀: compensationId={}", compensationId);
         }
+    }
+
+    /**
+     * 재시도 전에 이전 시도의 취소가 PG에 이미 반영됐는지 확인한다. 첫 시도는 보낸 취소가 없으므로 조회하지 않는다.
+     *
+     * <p>이전 시도가 취소를 보낸 뒤 결과를 기록하지 못했을 수 있다(서버 종료, 결과 기록 실패, 통신 실패, 처리 중인 멱등 키 충돌).
+     * PG 결제가 이미 전체 취소됐으면 완료로, 접수만 된 취소가 있으면 그 내역으로 확인 대기로 기록하고 취소를 다시 보내지 않는다.
+     * 조회에 실패하면 결과를 모른 채 취소를 다시 보내지 않도록 예외를 그대로 던져 실패로 기록되게 한다.
+     *
+     * @return 이미 반영된 취소. 없으면 빈 값(취소를 보낸다)
+     */
+    private Optional<PaymentCancellationResponse> findAppliedCancellation(ClaimedCompensation compensation) {
+        if (compensation.attemptCount() <= 1) {
+            return Optional.empty();
+        }
+
+        Optional<PaymentGatewayResponse> pgPayment = paymentGateway.getPayment(compensation.pgId());
+        if (pgPayment.isEmpty()) {
+            return Optional.empty();
+        }
+
+        if (pgPayment.get().isCancelled()) {
+            log.info("[Compensation] 재시도 전 확인: PG 결제가 이미 취소됨: compensationId={}, pgId={}",
+                    compensation.id(), compensation.pgId());
+            return Optional.of(new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED));
+        }
+
+        Optional<PaymentCancellationResponse> requested = pgPayment.get().findRequestedCancellation();
+        requested.ifPresent(cancellation ->
+                log.info("[Compensation] 재시도 전 확인: 접수된 PG 취소가 있어 다시 보내지 않음: compensationId={}, pgId={}, cancellationId={}",
+                        compensation.id(), compensation.pgId(), cancellation.cancellationId()));
+        return requested;
     }
 
     /**

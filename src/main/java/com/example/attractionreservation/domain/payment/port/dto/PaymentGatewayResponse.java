@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.payment.port.dto;
 
+import com.example.attractionreservation.domain.payment.port.enums.GatewayCancellationStatus;
 import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymentStatus;
 
 import java.time.Instant;
@@ -33,8 +34,19 @@ public record PaymentGatewayResponse(
     }
 
     public Optional<PaymentCancellationResponse> findCancellation(String cancellationId) {
+        if (cancellationId == null) {
+            return Optional.empty();
+        }
+
         return cancellations.stream()
                 .filter(cancellation -> cancellationId.equals(cancellation.cancellationId()))
+                .findFirst();
+    }
+
+    // PG가 접수했지만 아직 끝나지 않은 취소 내역
+    public Optional<PaymentCancellationResponse> findRequestedCancellation() {
+        return cancellations.stream()
+                .filter(cancellation -> cancellation.status() == GatewayCancellationStatus.REQUESTED)
                 .findFirst();
     }
 }

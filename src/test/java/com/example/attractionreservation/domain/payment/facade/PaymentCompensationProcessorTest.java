@@ -41,6 +41,9 @@ class PaymentCompensationProcessorTest {
     private static final String PG_ID = "pg-id";
     private static final ClaimedCompensation CLAIMED =
             new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, null);
+    // 이전 시도가 있었던 재시도 (점유 시 시도 횟수 2)
+    private static final ClaimedCompensation CLAIMED_RETRY =
+            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 2, null);
     private static final ClaimedCompensation PENDING =
             new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, "cancel-1");
     private static final ClaimedCompensation PENDING_WITHOUT_ID =
@@ -407,6 +410,103 @@ class PaymentCompensationProcessorTest {
 
         //then
         verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), any());
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("첫 시도는 보낸 취소가 없으므로 PG를 조회하지 않고 바로 취소한다.")
+    void process_firstAttempt_CancelWithoutLookup() {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED));
+        given(paymentGateway.cancelPayment(PG_ID, "결제 금액 불일치", null)).willReturn(SUCCEEDED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        verify(paymentGateway, never()).getPayment(anyString());
+        verify(paymentCompensationService).recordDone(eq(COMPENSATION_ID), eq(1), any());
+    }
+
+    @Test
+    @DisplayName("재시도 전 조회에서 PG 결제가 이미 취소됐으면 취소를 다시 보내지 않고 완료로 기록한다.")
+    void process_retryAndPgCancelled_RecordDoneWithoutCancel() {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED_RETRY));
+        given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.CANCELLED,
+                new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED))));
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        verify(paymentCompensationService).recordDone(eq(COMPENSATION_ID), eq(2), any());
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("재시도 전 조회에서 접수된 취소가 있으면 취소를 다시 보내지 않고 그 내역으로 PG 확인 대기로 기록한다.")
+    void process_retryAndRequestedCancellationExists_RecordPgPendingWithoutCancel() {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED_RETRY));
+        given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.PAID,
+                new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED))));
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        verify(paymentCompensationService).recordPgPending(eq(COMPENSATION_ID), eq(2), eq("cancel-1"), any());
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("재시도 전 조회에서 이전 취소가 반영되지 않았으면 취소를 다시 보낸다.")
+    void process_retryAndNotCancelled_Cancel() {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED_RETRY));
+        given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.PAID,
+                new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.FAILED))));
+        given(paymentGateway.cancelPayment(PG_ID, "결제 금액 불일치", null)).willReturn(SUCCEEDED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        verify(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        verify(paymentCompensationService).recordDone(eq(COMPENSATION_ID), eq(2), any());
+    }
+
+    @Test
+    @DisplayName("재시도 전 조회에서 PG에 결제가 없으면 기존처럼 취소를 보낸다.")
+    void process_retryAndPgPaymentNotFound_Cancel() {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED_RETRY));
+        given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.empty());
+        given(paymentGateway.cancelPayment(PG_ID, "결제 금액 불일치", null)).willReturn(SUCCEEDED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        verify(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+    }
+
+    @Test
+    @DisplayName("재시도 전 조회에 실패하면 결과를 모른 채 취소를 다시 보내지 않고 실패로 기록한다.")
+    void process_retryAndLookupFailed_RecordFailureWithoutCancel() {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED_RETRY));
+        given(paymentGateway.getPayment(PG_ID)).willThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(2), any(), any()))
+                .willReturn(CompensationStatus.FAILED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        verify(paymentCompensationService).recordFailure(
+                eq(COMPENSATION_ID), eq(2), eq(ErrorCode.PAYMENT_GATEWAY_ERROR.getMessage()), any());
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 

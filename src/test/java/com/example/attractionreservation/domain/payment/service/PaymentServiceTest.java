@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.payment.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.payment.dto.PaymentDetailResponse;
 import com.example.attractionreservation.domain.payment.dto.PaymentResponse;
 import com.example.attractionreservation.domain.payment.dto.SearchPaymentCondition;
 import com.example.attractionreservation.domain.payment.entity.Payment;
@@ -23,6 +25,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -124,5 +127,52 @@ class PaymentServiceTest {
         verify(paymentRepository).searchAllByUserId(userId, pageable, condition);
         assertEquals(content, result.content());
         assertEquals(1, result.totalElements());
+    }
+
+    @Test
+    @DisplayName("본인의 결제를 단건 조회하면 결제 정보를 반환한다.")
+    void findPaymentById_ownPayment_ReturnsPaymentDetailResponse() {
+        //given
+        Long userId = 1L;
+        Long paymentId = 10L;
+        Payment payment = createPayment();
+        payment.markAsPaid();
+        given(paymentRepository.findByIdAndOrderUserId(paymentId, userId)).willReturn(Optional.of(payment));
+
+        //when
+        PaymentDetailResponse result = paymentService.findPaymentById(userId, paymentId);
+
+        //then
+        assertEquals(10000, result.amount());
+        assertEquals(PaymentStatus.PAID, result.status());
+        assertEquals(payment.getPaidAt(), result.paidAt());
+        assertEquals(10000, result.order().totalAmount());
+        assertEquals(OrderStatus.PENDING, result.order().status());
+    }
+
+    @Test
+    @DisplayName("결제가 없거나 다른 사용자의 결제면 예외가 발생한다.")
+    void findPaymentById_notFoundOrNotOwned_ThrowsException() {
+        //given
+        Long userId = 1L;
+        Long paymentId = 10L;
+        given(paymentRepository.findByIdAndOrderUserId(paymentId, userId)).willReturn(Optional.empty());
+
+        //when & then
+        assertThatThrownBy(() -> paymentService.findPaymentById(userId, paymentId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
+    }
+
+    private Payment createPayment() {
+        Order order = Order.create(
+                User.builder()
+                        .email("test@email.com")
+                        .password("password")
+                        .nickname("name")
+                        .build(),
+                10000
+        );
+        return Payment.create(order);
     }
 }

@@ -119,7 +119,7 @@ class RouteSearcherTest {
 
         //then
         assertEquals(List.of(1L), visitedIds(result));
-        assertEquals(List.of(2l), result.unreachableAttractionIds());
+        assertEquals(List.of(2L), result.unreachableAttractionIds());
 
     }
 

@@ -3,10 +3,7 @@ package com.example.attractionreservation.domain.reservation.service;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
-import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
-import com.example.attractionreservation.domain.reservation.dto.CreateReservationResponse;
-import com.example.attractionreservation.domain.reservation.dto.SearchReservationCondition;
-import com.example.attractionreservation.domain.reservation.dto.SearchReservationResponse;
+import com.example.attractionreservation.domain.reservation.dto.*;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
@@ -159,5 +156,13 @@ public class ReservationService {
         );
 
         return reservations.map(SearchReservationResponse::from);
+    }
+
+    // 내 예약 상세 조회
+    public SearchReservationDetailResponse findReservationById(Long userId, Long reservationId) {
+        Reservation reservation = reservationRepository.findReservationByIdAndUser_Id(reservationId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
+
+        return SearchReservationDetailResponse.from(reservation);
     }
 }

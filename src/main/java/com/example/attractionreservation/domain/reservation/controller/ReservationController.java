@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.reservation.dto.*;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -51,5 +52,15 @@ public class ReservationController {
         SearchReservationListResponse response = SearchReservationListResponse.from(result);
 
         return ResponseEntity.ok(ApiResponse.ok("내 예약 목록 조회에 성공했습니다.", response));
+    }
+
+    // 내 예약 상세 조회
+    @GetMapping("/{reservationId}")
+    public ResponseEntity<ApiResponse<SearchReservationDetailResponse>> getReservationById(
+            @AuthenticationPrincipal Long userId,
+            @Min(1) @PathVariable Long reservationId
+    ) {
+        SearchReservationDetailResponse response = reservationService.findReservationById(userId, reservationId);
+        return ResponseEntity.ok(ApiResponse.ok("예약 상세 조회에 성공했습니다.", response));
     }
 }

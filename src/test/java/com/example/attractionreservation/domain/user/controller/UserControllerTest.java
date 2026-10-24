@@ -1,4 +1,4 @@
-package com.example.attractionreservation.user.controller;
+package com.example.attractionreservation.domain.user.controller;
 
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;

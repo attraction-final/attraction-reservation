@@ -170,4 +170,94 @@ class JwtAuthenticationFilterTest {
         ).extracting("authority")
                 .contains("ROLE_USER");
     }
+
+    @Test
+    @DisplayName("Refresh Token으로 일반 API를 호출하면 인증을 거부한다")
+    void doFilter_refreshToken_Fail() throws Exception {
+        // given
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("GET", "/api/orders");
+        request.setServletPath("/api/orders");
+        request.addHeader("Authorization", "Bearer refresh-token");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        Claims claims = mock(Claims.class);
+        when(jwtProvider.parseToken("refresh-token")).thenReturn(claims);
+        when(claims.get("tokenType", String.class)).thenReturn("REFRESH");
+
+        // when
+        jwtAuthenticationFilter.doFilter(request, response, filterChain);
+
+        // then
+        verify(authenticationEntryPoint).commence(
+                eq(request), eq(response), any()
+        );
+        verifyNoInteractions(filterChain, userRepository);
+        assertThat(SecurityContextHolder.getContext().getAuthentication())
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("토큰의 회원이 존재하지 않으면 인증을 거부한다")
+    void doFilter_missingUser_Fail() throws Exception {
+        // given
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("GET", "/api/orders");
+        request.setServletPath("/api/orders");
+        request.addHeader("Authorization", "Bearer access-token");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        Claims claims = mock(Claims.class);
+        when(jwtProvider.parseToken("access-token")).thenReturn(claims);
+        when(claims.get("tokenType", String.class)).thenReturn("ACCESS");
+        when(claims.getSubject()).thenReturn("1");
+        when(userRepository.findById(1L)).thenReturn(Optional.empty());
+
+        // when
+        jwtAuthenticationFilter.doFilter(request, response, filterChain);
+
+        // then
+        verify(userRepository).findById(1L);
+        verify(authenticationEntryPoint).commence(
+                eq(request), eq(response), any()
+        );
+        verifyNoInteractions(filterChain);
+        assertThat(SecurityContextHolder.getContext().getAuthentication())
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("회원이 ACTIVE 상태가 아니면 인증을 거부한다")
+    void doFilter_inactiveUser_Fail() throws Exception {
+        // given
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("GET", "/api/orders");
+        request.setServletPath("/api/orders");
+        request.addHeader("Authorization", "Bearer access-token");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        Claims claims = mock(Claims.class);
+        when(jwtProvider.parseToken("access-token")).thenReturn(claims);
+        when(claims.get("tokenType", String.class)).thenReturn("ACCESS");
+        when(claims.getSubject()).thenReturn("1");
+
+        User user = mock(User.class);
+        when(user.getStatus()).thenReturn(UserStatus.INACTIVE);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        // when
+        jwtAuthenticationFilter.doFilter(request, response, filterChain);
+
+        // then
+        verify(userRepository).findById(1L);
+        verify(authenticationEntryPoint).commence(
+                eq(request), eq(response), any()
+        );
+        verifyNoInteractions(filterChain);
+        assertThat(SecurityContextHolder.getContext().getAuthentication())
+                .isNull();
+    }
 }

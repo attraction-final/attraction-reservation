@@ -26,7 +26,11 @@ import java.time.Instant;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PaymentCompensation extends BaseTimeEntity {
     static final int MAX_ATTEMPTS = 5;
+    // PG가 취소를 접수한 뒤 이 시간 안에 확정되지 않으면 수동 확인으로 넘긴다.
+    static final Duration PG_CHECK_TIMEOUT = Duration.ofHours(24);
     private static final Duration BASE_RETRY_DELAY = Duration.ofMinutes(1);
+    private static final Duration MIN_PG_CHECK_DELAY = Duration.ofMinutes(1);
+    private static final Duration MAX_PG_CHECK_DELAY = Duration.ofMinutes(30);
     private static final int MAX_ERROR_LENGTH = 500;
 
     @Id
@@ -57,6 +61,11 @@ public class PaymentCompensation extends BaseTimeEntity {
 
     private Instant processedAt;
 
+    @Column(length = 100)
+    private String pgCancellationId; // PG 취소 내역 ID. PG_PENDING 확정에 쓴다. 응답을 해석하지 못했으면 null
+
+    private Instant pgPendingSince; // PG_PENDING이 된 시각. 확인 간격과 기한의 기준
+
     private PaymentCompensation(String pgId, Long amount, String reason, Instant now) {
         this.pgId = pgId;
         this.amount = amount;
@@ -84,8 +93,26 @@ public class PaymentCompensation extends BaseTimeEntity {
             case REQUESTED -> true;
             case FAILED -> !nextRetryAt.isAfter(now);
             case PROCESSING -> getUpdatedAt() != null && !getUpdatedAt().isAfter(now.minus(staleTimeout));
-            case DONE, DEAD -> false;
+            // PG가 취소를 접수했을 수 있으므로 취소를 다시 보내지 않는다. 확정은 isPgCheckable 대상에서 조회로 한다.
+            case PG_PENDING, DONE, DEAD -> false;
         };
+    }
+
+    // PG 취소 결과를 조회로 확인할 차례인지 판단한다.
+    public boolean isPgCheckable(Instant now) {
+        return status == CompensationStatus.PG_PENDING && !nextRetryAt.isAfter(now);
+    }
+
+    /**
+     * 결과를 기록하려는 처리가 지금 이 요청을 점유한 처리인지 확인한다.
+     * 처리 중 멈춘 행으로 보고 다른 처리가 다시 점유했다면 시도 횟수가 달라지므로, 이전 처리의 늦은 결과는 거부한다.
+     *
+     * @param claimedAttempt 점유할 때의 시도 횟수
+     */
+    public void verifyClaimedBy(int claimedAttempt) {
+        if (status != CompensationStatus.PROCESSING || attemptCount != claimedAttempt) {
+            throw new BusinessException(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION);
+        }
     }
 
     public void markAsProcessing() {
@@ -98,6 +125,44 @@ public class PaymentCompensation extends BaseTimeEntity {
         this.processedAt = now;
     }
 
+    // PG가 취소를 접수했지만 끝나지 않았거나 결과를 알 수 없다. 1분 뒤 첫 확인을 예약한다.
+    public void markAsPgPending(String cancellationId, Instant now) {
+        transitTo(CompensationStatus.PG_PENDING);
+        this.pgCancellationId = cancellationId;
+        this.pgPendingSince = now;
+        this.nextRetryAt = now.plus(MIN_PG_CHECK_DELAY);
+    }
+
+    // 조회로 PG 취소 완료를 확인했다.
+    public void confirmPgCancelled(Instant now) {
+        requirePgPending();
+        markAsDone(now);
+    }
+
+    // 조회로 PG 취소 실패를 확인했다. 취소를 다시 보낼 수 있으므로 일반 실패와 같이 재시도한다.
+    public void confirmPgCancelFailed(String error, Instant now) {
+        requirePgPending();
+        markAsFailed(error, now);
+    }
+
+    /**
+     * 아직 확정되지 않아 다음 확인을 예약한다. 간격은 PG_PENDING이 된 뒤 지난 시간(1분~30분)이라 대략 두 배씩 늘어난다.
+     * 확인 기한이 지났으면 DEAD로 보낸다.
+     */
+    public void reschedulePgCheck(Instant now) {
+        requirePgPending();
+
+        if (!now.isBefore(pgPendingSince.plus(PG_CHECK_TIMEOUT))) {
+            transitTo(CompensationStatus.DEAD);
+            this.processedAt = now;
+            this.lastError = "PG 취소 확인 기한 초과";
+            return;
+        }
+
+        transitTo(CompensationStatus.PG_PENDING);
+        this.nextRetryAt = now.plus(clamp(Duration.between(pgPendingSince, now)));
+    }
+
     // 지수 백오프: 1분, 2분, 4분, 8분 후 재시도하고 MAX_ATTEMPTS번 실패하면 DEAD
     public void markAsFailed(String error, Instant now) {
         if (attemptCount >= MAX_ATTEMPTS) {
@@ -108,6 +173,20 @@ public class PaymentCompensation extends BaseTimeEntity {
             this.nextRetryAt = now.plus(BASE_RETRY_DELAY.multipliedBy(1L << (attemptCount - 1)));
         }
         this.lastError = truncate(error);
+    }
+
+    private void requirePgPending() {
+        if (status != CompensationStatus.PG_PENDING) {
+            throw new BusinessException(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION);
+        }
+    }
+
+    private Duration clamp(Duration delay) {
+        if (delay.compareTo(MIN_PG_CHECK_DELAY) < 0) {
+            return MIN_PG_CHECK_DELAY;
+        }
+
+        return delay.compareTo(MAX_PG_CHECK_DELAY) > 0 ? MAX_PG_CHECK_DELAY : delay;
     }
 
     private void transitTo(CompensationStatus nextStatus) {

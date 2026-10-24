@@ -5,6 +5,8 @@ import com.example.attractionreservation.domain.payment.entity.PaymentCompensati
 import com.example.attractionreservation.domain.payment.entity.enums.CompensationStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentCompensationRepository;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
@@ -46,7 +49,7 @@ class PaymentCompensationServiceTest {
         Optional<ClaimedCompensation> claimed = paymentCompensationService.claim(id, now);
 
         //then
-        assertThat(claimed).contains(new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치"));
+        assertThat(claimed).contains(new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치", 1, null));
         PaymentCompensation found = find(id);
         assertThat(found.getStatus()).isEqualTo(CompensationStatus.PROCESSING);
         assertThat(found.getAttemptCount()).isEqualTo(1);
@@ -140,7 +143,7 @@ class PaymentCompensationServiceTest {
         Instant now = now();
         Long id = save("pg-1", now);
         paymentCompensationService.claim(id, now);
-        paymentCompensationService.recordDone(id, now);
+        paymentCompensationService.recordDone(id, 1, now);
         flushAndClear();
 
         //when
@@ -159,7 +162,7 @@ class PaymentCompensationServiceTest {
         Instant now = now();
         Long id = save("pg-1", now);
         paymentCompensationService.claim(id, now);
-        CompensationStatus status = paymentCompensationService.recordFailure(id, "결제 취소에 실패했습니다.", now);
+        CompensationStatus status = paymentCompensationService.recordFailure(id, 1, "결제 취소에 실패했습니다.", now);
         flushAndClear();
 
         //when
@@ -185,7 +188,7 @@ class PaymentCompensationServiceTest {
         for (int i = 0; i < 5; i++) {
             Instant attemptAt = now.plus(Duration.ofHours(i));
             paymentCompensationService.claim(id, attemptAt);
-            status = paymentCompensationService.recordFailure(id, "error", attemptAt);
+            status = paymentCompensationService.recordFailure(id, i + 1, "error", attemptAt);
         }
 
         //then
@@ -205,11 +208,11 @@ class PaymentCompensationServiceTest {
         Long retryLater = save("pg-5", now);
         paymentCompensationService.claim(processing, now);
         paymentCompensationService.claim(done, now);
-        paymentCompensationService.recordDone(done, now);
+        paymentCompensationService.recordDone(done, 1, now);
         paymentCompensationService.claim(retryDue, now.minus(Duration.ofMinutes(10)));
-        paymentCompensationService.recordFailure(retryDue, "error", now.minus(Duration.ofMinutes(10)));
+        paymentCompensationService.recordFailure(retryDue, 1, "error", now.minus(Duration.ofMinutes(10)));
         paymentCompensationService.claim(retryLater, now);
-        paymentCompensationService.recordFailure(retryLater, "error", now);
+        paymentCompensationService.recordFailure(retryLater, 1, "error", now);
         flushAndClear();
 
         //when
@@ -228,6 +231,83 @@ class PaymentCompensationServiceTest {
         //when & then
         assertThat(paymentCompensationService.findIdByPgId("pg-1")).contains(id);
         assertThat(paymentCompensationService.findIdByPgId("unknown")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기로 기록하면 취소 처리 대상에서 빠지고, 1분 뒤부터 확인 대상으로 조회된다.")
+    void recordPgPending_claimed_CheckableAfterOneMinute() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        paymentCompensationService.claim(id, now);
+
+        //when
+        paymentCompensationService.recordPgPending(id, 1, "cancel-1", now);
+        flushAndClear();
+
+        //then
+        PaymentCompensation found = find(id);
+        assertThat(found.getStatus()).isEqualTo(CompensationStatus.PG_PENDING);
+        assertThat(found.getPgCancellationId()).isEqualTo("cancel-1");
+        assertThat(paymentCompensationService.findProcessableIds(now.plus(Duration.ofDays(1)), 10)).isEmpty();
+        assertThat(paymentCompensationService.findPgCheckableIds(now.plusSeconds(30), 10)).isEmpty();
+        assertThat(paymentCompensationService.findPgCheckableIds(now.plus(Duration.ofMinutes(1)), 10)).containsExactly(id);
+    }
+
+    @Test
+    @DisplayName("확인할 차례인 PG 확인 대기 요청은 취소 내역 ID와 함께 꺼내고, 차례가 아니면 꺼내지 않는다.")
+    void findPgCheckable_pgPending_ReturnWithCancellationId() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        paymentCompensationService.claim(id, now);
+        paymentCompensationService.recordPgPending(id, 1, "cancel-1", now);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedCompensation> beforeCheck = paymentCompensationService.findPgCheckable(id, now.plusSeconds(30));
+        Optional<ClaimedCompensation> afterCheck = paymentCompensationService.findPgCheckable(id, now.plus(Duration.ofMinutes(1)));
+
+        //then
+        assertThat(beforeCheck).isEmpty();
+        assertThat(afterCheck).contains(new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치", 1, "cancel-1"));
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기 중 취소 완료를 기록하면 DONE이 되고 더 이상 확인 대상이 아니다.")
+    void recordPgCancelled_pgPending_Done() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        paymentCompensationService.claim(id, now);
+        paymentCompensationService.recordPgPending(id, 1, "cancel-1", now);
+
+        //when
+        paymentCompensationService.recordPgCancelled(id, now.plus(Duration.ofMinutes(1)));
+        flushAndClear();
+
+        //then
+        assertThat(find(id).getStatus()).isEqualTo(CompensationStatus.DONE);
+        assertThat(paymentCompensationService.findPgCheckableIds(now.plus(Duration.ofDays(1)), 10)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("멈춘 처리로 보고 다른 처리가 다시 점유했으면 이전 처리의 늦은 실패 결과는 기록되지 않는다.")
+    void recordFailure_reclaimedByOther_Rejected() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        claimAndStallAt(id, now.minus(PaymentCompensationService.STALE_PROCESSING_TIMEOUT).minusMillis(1));
+        paymentCompensationService.claim(id, now); // 다시 점유해 시도 횟수 2
+
+        //when & then
+        assertThatThrownBy(() -> paymentCompensationService.recordFailure(id, 1, "늦은 실패", now))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+        PaymentCompensation found = find(id);
+        assertThat(found.getStatus()).isEqualTo(CompensationStatus.PROCESSING);
+        assertThat(found.getAttemptCount()).isEqualTo(2);
+        assertThat(found.getLastError()).isNull();
     }
 
     // DB가 Instant를 마이크로초 단위로 반올림해 저장하므로, 경계 비교가 흔들리지 않게 밀리초로 자른다.

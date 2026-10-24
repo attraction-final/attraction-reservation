@@ -69,9 +69,16 @@ public class PaymentCompensationService {
         return Optional.of(ClaimedCompensation.from(compensation));
     }
 
+    /**
+     * PG 취소 완료를 기록한다. 아래 record* 메서드와 같이, 이 요청을 다른 처리가 다시 점유했으면
+     * (시도 횟수가 다르면) 기록하지 않고 {@code PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION}을 던진다.
+     *
+     * @param claimedAttempt 점유할 때의 시도 횟수
+     */
     @Transactional
-    public void recordDone(Long compensationId, Instant now) {
-        getWithLock(compensationId).markAsDone(now);
+    public void recordDone(Long compensationId, int claimedAttempt, Instant now) {
+        PaymentCompensation compensation = getClaimedWithLock(compensationId, claimedAttempt);
+        compensation.markAsDone(now);
     }
 
     /**
@@ -80,10 +87,65 @@ public class PaymentCompensationService {
      * @return 기록 후 상태 (FAILED 또는 DEAD)
      */
     @Transactional
-    public CompensationStatus recordFailure(Long compensationId, String error, Instant now) {
-        PaymentCompensation compensation = getWithLock(compensationId);
+    public CompensationStatus recordFailure(Long compensationId, int claimedAttempt, String error, Instant now) {
+        PaymentCompensation compensation = getClaimedWithLock(compensationId, claimedAttempt);
         compensation.markAsFailed(error, now);
         return compensation.getStatus();
+    }
+
+    // PG가 취소를 접수했지만 끝나지 않았거나 결과를 알 수 없다. 이후로는 취소를 다시 보내지 않고 조회로 확정한다.
+    @Transactional
+    public void recordPgPending(Long compensationId, int claimedAttempt, String cancellationId, Instant now) {
+        PaymentCompensation compensation = getClaimedWithLock(compensationId, claimedAttempt);
+        compensation.markAsPgPending(cancellationId, now);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Long> findPgCheckableIds(Instant now, int limit) {
+        return paymentCompensationRepository.findPgCheckableIds(
+                CompensationStatus.PG_PENDING, now, PageRequest.of(0, limit));
+    }
+
+    /**
+     * 조회로 확인할 차례인 PG_PENDING 요청을 꺼낸다. 확인은 읽기만 하므로 점유하지 않는다.
+     * 여러 처리가 겹쳐도 결과 기록이 행을 잠그고 PG_PENDING인지 다시 확인하므로 한 번만 반영된다.
+     */
+    @Transactional(readOnly = true)
+    public Optional<ClaimedCompensation> findPgCheckable(Long compensationId, Instant now) {
+        return paymentCompensationRepository.findById(compensationId)
+                .filter(compensation -> compensation.isPgCheckable(now))
+                .map(ClaimedCompensation::from);
+    }
+
+    @Transactional
+    public void recordPgCancelled(Long compensationId, Instant now) {
+        getWithLock(compensationId).confirmPgCancelled(now);
+    }
+
+    /**
+     * @return 기록 후 상태 (FAILED 또는 DEAD)
+     */
+    @Transactional
+    public CompensationStatus recordPgCancelFailed(Long compensationId, String error, Instant now) {
+        PaymentCompensation compensation = getWithLock(compensationId);
+        compensation.confirmPgCancelFailed(error, now);
+        return compensation.getStatus();
+    }
+
+    /**
+     * @return 기록 후 상태 (PG_PENDING 또는 확인 기한이 지나 DEAD)
+     */
+    @Transactional
+    public CompensationStatus reschedulePgCheck(Long compensationId, Instant now) {
+        PaymentCompensation compensation = getWithLock(compensationId);
+        compensation.reschedulePgCheck(now);
+        return compensation.getStatus();
+    }
+
+    private PaymentCompensation getClaimedWithLock(Long compensationId, int claimedAttempt) {
+        PaymentCompensation compensation = getWithLock(compensationId);
+        compensation.verifyClaimedBy(claimedAttempt);
+        return compensation;
     }
 
     private PaymentCompensation getWithLock(Long compensationId) {

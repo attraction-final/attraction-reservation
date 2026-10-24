@@ -115,6 +115,18 @@ public class PaymentCompensation extends BaseTimeEntity {
         }
     }
 
+    /**
+     * PG 확인 결과를 기록하려는 처리가 지금의 PG_PENDING 주기를 확인한 것인지 확인한다.
+     * 확인 사이에 취소 실패 → 재취소로 새 PG_PENDING이 되면 시작 시각이 달라지므로, 이전 주기의 늦은 결과는 거부한다.
+     *
+     * @param checkedPendingSince 확인 대상으로 꺼낼 때의 PG_PENDING 시작 시각
+     */
+    public void verifyPgPendingSince(Instant checkedPendingSince) {
+        if (status != CompensationStatus.PG_PENDING || !pgPendingSince.equals(checkedPendingSince)) {
+            throw new BusinessException(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION);
+        }
+    }
+
     public void markAsProcessing() {
         transitTo(CompensationStatus.PROCESSING);
         this.attemptCount++;

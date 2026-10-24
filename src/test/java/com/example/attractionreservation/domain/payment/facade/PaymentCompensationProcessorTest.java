@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.CannotAcquireLockException;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,15 +40,16 @@ class PaymentCompensationProcessorTest {
 
     private static final Long COMPENSATION_ID = 1L;
     private static final String PG_ID = "pg-id";
+    private static final Instant PENDING_SINCE = Instant.parse("2026-10-20T01:00:00Z");
     private static final ClaimedCompensation CLAIMED =
-            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, null);
+            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, null, null);
     // 이전 시도가 있었던 재시도 (점유 시 시도 횟수 2)
     private static final ClaimedCompensation CLAIMED_RETRY =
-            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 2, null);
+            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 2, null, null);
     private static final ClaimedCompensation PENDING =
-            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, "cancel-1");
+            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, "cancel-1", PENDING_SINCE);
     private static final ClaimedCompensation PENDING_WITHOUT_ID =
-            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, null);
+            new ClaimedCompensation(COMPENSATION_ID, PG_ID, 9999L, "결제 금액 불일치", 1, null, PENDING_SINCE);
     private static final PaymentCancellationResponse SUCCEEDED =
             new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED);
 
@@ -243,7 +245,7 @@ class PaymentCompensationProcessorTest {
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), any());
+        verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 
@@ -254,15 +256,15 @@ class PaymentCompensationProcessorTest {
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any())).willReturn(Optional.of(PENDING));
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.PAID,
                 new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.FAILED))));
-        given(paymentCompensationService.recordPgCancelFailed(eq(COMPENSATION_ID), any(), any()))
+        given(paymentCompensationService.recordPgCancelFailed(eq(COMPENSATION_ID), eq(PENDING_SINCE), any(), any()))
                 .willReturn(CompensationStatus.FAILED);
 
         //when
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).recordPgCancelFailed(eq(COMPENSATION_ID), any(), any());
-        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any());
+        verify(paymentCompensationService).recordPgCancelFailed(eq(COMPENSATION_ID), eq(PENDING_SINCE), any(), any());
+        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any(), any());
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 
@@ -273,15 +275,15 @@ class PaymentCompensationProcessorTest {
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any())).willReturn(Optional.of(PENDING));
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.PAID,
                 new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED))));
-        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), any()))
+        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any()))
                 .willReturn(CompensationStatus.PG_PENDING);
 
         //when
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), any());
-        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any());
+        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
+        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any(), any());
     }
 
     @Test
@@ -291,15 +293,15 @@ class PaymentCompensationProcessorTest {
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any())).willReturn(Optional.of(PENDING));
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.CANCELLED,
                 new PaymentCancellationResponse("cancel-other", GatewayCancellationStatus.SUCCEEDED))));
-        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), any()))
+        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any()))
                 .willReturn(CompensationStatus.PG_PENDING);
 
         //when
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), any());
-        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any());
+        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
+        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any(), any());
     }
 
     @Test
@@ -308,15 +310,15 @@ class PaymentCompensationProcessorTest {
         //given
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any())).willReturn(Optional.of(PENDING));
         given(paymentGateway.getPayment(PG_ID)).willThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
-        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), any()))
+        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any()))
                 .willReturn(CompensationStatus.PG_PENDING);
 
         //when
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), any());
-        verify(paymentCompensationService, never()).recordPgCancelFailed(anyLong(), any(), any());
+        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
+        verify(paymentCompensationService, never()).recordPgCancelFailed(anyLong(), any(), any(), any());
     }
 
     @Test
@@ -325,14 +327,14 @@ class PaymentCompensationProcessorTest {
         //given
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any())).willReturn(Optional.of(PENDING));
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.empty());
-        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), any()))
+        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any()))
                 .willReturn(CompensationStatus.PG_PENDING);
 
         //when
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), any());
+        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
     }
 
     @Test
@@ -347,7 +349,7 @@ class PaymentCompensationProcessorTest {
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), any());
+        verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
     }
 
     @Test
@@ -357,15 +359,15 @@ class PaymentCompensationProcessorTest {
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any()))
                 .willReturn(Optional.of(PENDING_WITHOUT_ID));
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.PAID)));
-        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), any()))
+        given(paymentCompensationService.reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any()))
                 .willReturn(CompensationStatus.PG_PENDING);
 
         //when
         paymentCompensationProcessor.confirmPending(COMPENSATION_ID);
 
         //then
-        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), any());
-        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any());
+        verify(paymentCompensationService).reschedulePgCheck(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
+        verify(paymentCompensationService, never()).recordPgCancelled(anyLong(), any(), any());
     }
 
     @Test
@@ -389,7 +391,7 @@ class PaymentCompensationProcessorTest {
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.CANCELLED,
                 new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED))));
         willThrow(new BusinessException(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION))
-                .given(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), any());
+                .given(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
 
         //when & then
         assertThatCode(() -> paymentCompensationProcessor.confirmPending(COMPENSATION_ID)).doesNotThrowAnyException();
@@ -409,7 +411,7 @@ class PaymentCompensationProcessorTest {
         paymentCompensationProcessor.processPending(10);
 
         //then
-        verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), any());
+        verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 

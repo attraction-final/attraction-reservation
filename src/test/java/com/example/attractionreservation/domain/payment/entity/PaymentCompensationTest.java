@@ -380,6 +380,46 @@ class PaymentCompensationTest {
                 .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
     }
 
+    @Test
+    @DisplayName("확인한 PG 확인 대기 주기와 시작 시각이 같으면 확인 결과를 기록할 수 있다.")
+    void verifyPgPendingSince_sameCycle_Pass() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+
+        //when & then
+        compensation.verifyPgPendingSince(NOW);
+    }
+
+    @Test
+    @DisplayName("확인한 뒤 재취소로 새 PG 확인 대기 주기가 됐으면 이전 주기의 확인 결과는 거부한다.")
+    void verifyPgPendingSince_newCycle_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant retriedAt = NOW.plus(Duration.ofMinutes(10));
+        compensation.confirmPgCancelFailed("PG 취소 실패 확인", NOW);
+        compensation.markAsProcessing();
+        compensation.markAsPgPending("cancel-2", retriedAt);
+
+        //when & then
+        assertThatThrownBy(() -> compensation.verifyPgPendingSince(NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+        compensation.verifyPgPendingSince(retriedAt);
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기가 아니면 확인 결과를 기록할 수 없다.")
+    void verifyPgPendingSince_notPgPending_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        compensation.confirmPgCancelled(NOW);
+
+        //when & then
+        assertThatThrownBy(() -> compensation.verifyPgPendingSince(NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
     private PaymentCompensation createCompensation() {
         return PaymentCompensation.request("pg-id", 9999L, "결제 금액 불일치", NOW);
     }

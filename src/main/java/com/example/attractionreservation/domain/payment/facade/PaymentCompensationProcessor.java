@@ -128,17 +128,19 @@ public class PaymentCompensationProcessor {
         try {
             switch (result) {
                 case SUCCEEDED -> {
-                    paymentCompensationService.recordPgCancelled(compensationId, Instant.now());
+                    paymentCompensationService.recordPgCancelled(
+                            compensationId, compensation.pgPendingSince(), Instant.now());
                     log.info("[Compensation] PG 취소 완료 확인: compensationId={}, pgId={}, amount={}",
                             compensationId, compensation.pgId(), compensation.amount());
                 }
                 case FAILED -> {
                     CompensationStatus status = paymentCompensationService.recordPgCancelFailed(
-                            compensationId, PG_CANCEL_FAILED_REASON, Instant.now());
+                            compensationId, compensation.pgPendingSince(), PG_CANCEL_FAILED_REASON, Instant.now());
                     logFailureStatus(compensation, status, null);
                 }
                 default -> {
-                    CompensationStatus status = paymentCompensationService.reschedulePgCheck(compensationId, Instant.now());
+                    CompensationStatus status = paymentCompensationService.reschedulePgCheck(
+                            compensationId, compensation.pgPendingSince(), Instant.now());
                     if (status == CompensationStatus.DEAD) {
                         log.error("[Compensation] PG 취소 확인 기한 초과, 수동 확인 필요: compensationId={}, pgId={}, cancellationId={}, amount={}",
                                 compensationId, compensation.pgId(), compensation.pgCancellationId(), compensation.amount());
@@ -149,7 +151,7 @@ public class PaymentCompensationProcessor {
             if (e.getErrorCode() != ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION) {
                 throw e;
             }
-            // 다른 처리가 먼저 확인 결과를 기록한 경우
+            // 다른 처리가 먼저 확인 결과를 기록했거나, 그 뒤 재취소로 새 PG_PENDING 주기가 된 경우
             log.info("[Compensation] 다른 처리가 먼저 PG 취소 확인을 기록해 건너뜀: compensationId={}", compensationId);
         }
     }

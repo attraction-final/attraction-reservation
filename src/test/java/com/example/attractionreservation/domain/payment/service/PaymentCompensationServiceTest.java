@@ -49,7 +49,7 @@ class PaymentCompensationServiceTest {
         Optional<ClaimedCompensation> claimed = paymentCompensationService.claim(id, now);
 
         //then
-        assertThat(claimed).contains(new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치", 1, null));
+        assertThat(claimed).contains(new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치", 1, null, null));
         PaymentCompensation found = find(id);
         assertThat(found.getStatus()).isEqualTo(CompensationStatus.PROCESSING);
         assertThat(found.getAttemptCount()).isEqualTo(1);
@@ -270,7 +270,8 @@ class PaymentCompensationServiceTest {
 
         //then
         assertThat(beforeCheck).isEmpty();
-        assertThat(afterCheck).contains(new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치", 1, "cancel-1"));
+        assertThat(afterCheck).contains(
+                new ClaimedCompensation(id, "pg-1", 9999L, "결제 금액 불일치", 1, "cancel-1", find(id).getPgPendingSince()));
     }
 
     @Test
@@ -283,12 +284,37 @@ class PaymentCompensationServiceTest {
         paymentCompensationService.recordPgPending(id, 1, "cancel-1", now);
 
         //when
-        paymentCompensationService.recordPgCancelled(id, now.plus(Duration.ofMinutes(1)));
+        paymentCompensationService.recordPgCancelled(id, find(id).getPgPendingSince(), now.plus(Duration.ofMinutes(1)));
         flushAndClear();
 
         //then
         assertThat(find(id).getStatus()).isEqualTo(CompensationStatus.DONE);
         assertThat(paymentCompensationService.findPgCheckableIds(now.plus(Duration.ofDays(1)), 10)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("확인한 뒤 취소 실패와 재취소로 새 PG 확인 대기 주기가 됐으면 이전 주기의 늦은 확인 결과는 기록되지 않는다.")
+    void reschedulePgCheck_previousCycle_Rejected() {
+        //given
+        Instant now = now();
+        Long id = save("pg-1", now);
+        paymentCompensationService.claim(id, now);
+        paymentCompensationService.recordPgPending(id, 1, "cancel-1", now);
+        Instant firstCycle = find(id).getPgPendingSince();
+        paymentCompensationService.recordPgCancelFailed(id, firstCycle, "PG 취소 실패 확인", now.plus(Duration.ofMinutes(1)));
+        Instant retriedAt = now.plus(Duration.ofMinutes(3));
+        paymentCompensationService.claim(id, retriedAt);
+        paymentCompensationService.recordPgPending(id, 2, "cancel-2", retriedAt);
+        flushAndClear();
+
+        //when & then
+        assertThatThrownBy(() -> paymentCompensationService.reschedulePgCheck(id, firstCycle, now.plus(Duration.ofMinutes(5))))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+        PaymentCompensation found = find(id);
+        assertThat(found.getStatus()).isEqualTo(CompensationStatus.PG_PENDING);
+        assertThat(found.getPgCancellationId()).isEqualTo("cancel-2");
+        assertThat(found.getNextRetryAt()).isEqualTo(retriedAt.plus(Duration.ofMinutes(1)));
     }
 
     @Test

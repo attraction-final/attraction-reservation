@@ -117,17 +117,23 @@ public class PaymentCompensationService {
                 .map(ClaimedCompensation::from);
     }
 
+    /**
+     * 조회로 확인한 PG 취소 완료를 기록한다. 아래 확인 기록 메서드와 같이, 확인한 뒤 다른 처리가 결과를 기록해
+     * 새 PG_PENDING 주기가 됐으면(시작 시각이 다르면) 기록하지 않고 {@code PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION}을 던진다.
+     *
+     * @param checkedPendingSince 확인 대상으로 꺼낼 때의 PG_PENDING 시작 시각
+     */
     @Transactional
-    public void recordPgCancelled(Long compensationId, Instant now) {
-        getWithLock(compensationId).confirmPgCancelled(now);
+    public void recordPgCancelled(Long compensationId, Instant checkedPendingSince, Instant now) {
+        getPgPendingWithLock(compensationId, checkedPendingSince).confirmPgCancelled(now);
     }
 
     /**
      * @return 기록 후 상태 (FAILED 또는 DEAD)
      */
     @Transactional
-    public CompensationStatus recordPgCancelFailed(Long compensationId, String error, Instant now) {
-        PaymentCompensation compensation = getWithLock(compensationId);
+    public CompensationStatus recordPgCancelFailed(Long compensationId, Instant checkedPendingSince, String error, Instant now) {
+        PaymentCompensation compensation = getPgPendingWithLock(compensationId, checkedPendingSince);
         compensation.confirmPgCancelFailed(error, now);
         return compensation.getStatus();
     }
@@ -136,10 +142,16 @@ public class PaymentCompensationService {
      * @return 기록 후 상태 (PG_PENDING 또는 확인 기한이 지나 DEAD)
      */
     @Transactional
-    public CompensationStatus reschedulePgCheck(Long compensationId, Instant now) {
-        PaymentCompensation compensation = getWithLock(compensationId);
+    public CompensationStatus reschedulePgCheck(Long compensationId, Instant checkedPendingSince, Instant now) {
+        PaymentCompensation compensation = getPgPendingWithLock(compensationId, checkedPendingSince);
         compensation.reschedulePgCheck(now);
         return compensation.getStatus();
+    }
+
+    private PaymentCompensation getPgPendingWithLock(Long compensationId, Instant checkedPendingSince) {
+        PaymentCompensation compensation = getWithLock(compensationId);
+        compensation.verifyPgPendingSince(checkedPendingSince);
+        return compensation;
     }
 
     private PaymentCompensation getClaimedWithLock(Long compensationId, int claimedAttempt) {

@@ -16,6 +16,7 @@ import com.example.attractionreservation.domain.user.service.UserService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -199,5 +200,34 @@ public class ReservationService {
         // 관리자가 직접 마감하거나 운영 중단·취소한 슬롯은 자동으로 열지 않음
 
         return UpdateReservationCancelResponse.from(reservation);
+    }
+
+    // 관리자 예약 목록 조회
+    public Page<SearchAdminReservationResponse> findAdminReservationAll(
+            SearchAdminReservationCondition condition,
+            Pageable stablePageable
+    ) {
+        LocalDateTime dayStart;
+        LocalDateTime nextDayStart;
+
+        // 날짜가 null일 경우 메서드 호출시 npe 방지
+        if (condition.date() == null) {
+            dayStart = null;
+            nextDayStart = null;
+        } else {
+            dayStart = condition.date().atStartOfDay();
+            nextDayStart = condition.date().plusDays(1).atStartOfDay();
+        }
+
+        Page<Reservation> reservations = reservationRepository.findAdminReservationByCondition(
+                condition.userId(),
+                condition.attractionId(),
+                condition.status(),
+                dayStart,
+                nextDayStart,
+                stablePageable
+        );
+
+        return reservations.map(SearchAdminReservationResponse::from);
     }
 }

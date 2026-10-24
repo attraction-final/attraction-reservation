@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Getter
@@ -68,5 +69,15 @@ public class Reservation extends BaseTimeEntity {
         this.ticket = ticket;
         this.attractionSlot = attractionSlot;
         this.status = ReservationStatus.RESERVED;
+    }
+
+    // 취소 요청
+    public void cancelReservation(Instant now) {
+        if (this.status != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        this.status = ReservationStatus.CANCELLED;
+        this.cancelledAt = now;
     }
 }

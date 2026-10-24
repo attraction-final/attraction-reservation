@@ -16,6 +16,7 @@ import com.example.attractionreservation.domain.user.service.UserService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -164,5 +165,39 @@ public class ReservationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         return SearchReservationDetailResponse.from(reservation);
+    }
+
+    // 내 예약 취소
+    // 추후 동시성 해결 필요
+    @Transactional
+    public UpdateReservationCancelResponse cancelReservation(Long userId, Long reservationId) {
+
+        Reservation reservation = reservationRepository.findReservationByIdAndUser_Id(reservationId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
+
+        // 예약 상태가 RESERVED인지 확인
+        if (reservation.getStatus() != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        // 현재 KST 시각이 슬롯 시작 30분 전 이내인지 확인
+        Instant now = Instant.now();
+        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime deadLine = reservation.getAttractionSlot().getStartsAt().minusMinutes(30);
+
+        if (currentTime.isAfter(deadLine)) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_DEADLINE_PASSED);
+        }
+
+        // 취소 성공 시 예약 상태를 CANCELLED로 변경하고 취소 시각 기록
+        reservation.cancelReservation(now);
+
+        // 슬롯 예약 인원을 1 감소시켜 잔여 정원 복구
+        Long slotId = reservation.getAttractionSlot().getId();
+        attractionSlotService.releaseReservationCapacity(slotId);
+
+        // 관리자가 직접 마감하거나 운영 중단·취소한 슬롯은 자동으로 열지 않음
+
+        return UpdateReservationCancelResponse.from(reservation);
     }
 }

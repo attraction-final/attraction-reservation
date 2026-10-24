@@ -215,4 +215,18 @@ public class AttractionSlotService {
         // 마지막 자리가 찼다면 CLOSED, autoClosed=true로 변경
         slot.syncStatusWithRemainingCount();
     }
+
+    // 예약 - 취소시 reservedCount -1
+    @Transactional
+    public void releaseReservationCapacity(Long slotId) {
+        int updatedCount = attractionSlotRepository.tryReleaseCapacity(slotId);
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.RESERVATION_CAPACITY_RESTORE_FAILED);
+        }
+
+        AttractionSlot slot = findAttractionSlotById(slotId);
+        entityManager.refresh(slot);
+        slot.syncStatusWithRemainingCount();
+    }
 }

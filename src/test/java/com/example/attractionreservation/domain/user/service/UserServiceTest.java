@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
 import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
@@ -200,5 +202,84 @@ class UserServiceTest {
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.UNAUTHORIZED)
                 );
+    }
+
+    @Test
+    void updateMe_activeUser_updatesOnlyNickname() {
+        Long userId = 1L;
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password("encoded-password")
+                .nickname("기존닉네임")
+                .build();
+
+        ReflectionTestUtils.setField(user, "id", userId);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        UpdateUserResponse response = userService.updateMe(
+                userId,
+                new UpdateUserRequest("새로운닉네임")
+        );
+
+        assertThat(response).isEqualTo(new UpdateUserResponse(
+                userId,
+                "test@gmail.com",
+                "새로운닉네임"
+        ));
+        assertThat(user.getNickname()).isEqualTo("새로운닉네임");
+        assertThat(user.getEmail()).isEqualTo("test@gmail.com");
+        assertThat(user.getPassword()).isEqualTo("encoded-password");
+        assertThat(user.getRole().name()).isEqualTo("USER");
+        assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+
+        verify(userRepository).findById(userId);
+        verifyNoMoreInteractions(userRepository);
+    }
+
+    @Test
+    void updateMe_missingUser_throwsUnauthorized() {
+        Long userId = 1L;
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updateMe(
+                userId,
+                new UpdateUserRequest("새로운닉네임")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+    }
+
+    @Test
+    void updateMe_withdrawnUser_throwsUnauthorized() {
+        Long userId = 1L;
+        User user = User.builder()
+                .email("withdrawn@gmail.com")
+                .password("encoded-password")
+                .nickname("기존닉네임")
+                .build();
+
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateMe(
+                userId,
+                new UpdateUserRequest("새로운닉네임")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+
+        assertThat(user.getNickname()).isEqualTo("기존닉네임");
     }
 }

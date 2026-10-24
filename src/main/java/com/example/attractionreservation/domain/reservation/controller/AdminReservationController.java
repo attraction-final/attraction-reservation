@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.reservation.controller;
 
 import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationCondition;
+import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationDetailResponse;
 import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationListResponse;
 import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationResponse;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;

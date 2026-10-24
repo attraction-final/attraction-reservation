@@ -135,6 +135,19 @@ PG_PENDING ──→ DONE        (조회: 취소 완료)
 - 결과 기록 중 `PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION`: 다른 처리가 먼저 기록했거나 다시 점유한 경우라 실패로 기록하지 않고 건너뛴다.
 - `processPending`은 요청마다 예외를 격리한다.
 
+### 재시도 전 PG 확인
+
+이전 시도가 취소를 보낸 뒤 결과를 기록하지 못했을 수 있다(서버 종료, `recordPgPending` 등 결과 기록 실패, 통신 실패 3회, 409 `IDEMPOTENCY_OUTSTANDING_REQUEST`). 이때 취소를 바로 다시 보내면, 이전 취소가 PG에서 진행 중(`REQUESTED`)일 때 PortOne이 어떻게 응답할지 확인되지 않은 요청을 보내게 된다. 그래서 **재시도(점유 시 `attempt_count` 2 이상)는 취소 전에 PG 결제를 먼저 조회한다.** 첫 시도는 보낸 취소가 없으므로 조회하지 않는다.
+
+| 조회 결과 | 처리 | 취소 요청 |
+|---|---|---|
+| PG 결제가 `CANCELLED` | `DONE` (이전 취소가 이미 반영됨) | 보내지 않음 |
+| `cancellations`에 `REQUESTED` 내역이 있음 | 그 내역 ID로 `PG_PENDING` | 보내지 않음 |
+| 그 밖 (`PAID`이면서 진행 중인 취소 없음, 이전 취소 `FAILED`, PG에 결제 없음) | 기존 흐름 | 보냄 |
+| 조회 실패 | `FAILED` (백오프 후 다시 확인) | 보내지 않음 |
+
+- 조회 실패 시 취소를 보내지 않는다. PortOne 조회가 실패할 때는 취소 API도 실패할 가능성이 높고, 결과를 모른 채 다시 보내지 않는 편이 안전하다. 장애가 길어 최대 시도 횟수를 넘기면 `DEAD`로 수동 확인한다.
+
 ### PG 취소와 멱등성
 
 - 보상은 **전체 취소**(`amount = null`)로 보낸다. PG에서 결제된 금액을 모두 돌려주는 것이 보상의 의미이고, 중복 호출 시 두 번째가 확실히 "이미 취소됨"으로 응답되기 때문이다.
@@ -188,7 +201,9 @@ payment:
 | `failPaymentWithCompensation` 트랜잭션 실패 | 결제 실패·보상 요청 모두 롤백. 다음 요청에서 다시 판단 |
 | 커밋 직후 즉시 시도 전 서버 종료 | 보상 요청이 `REQUESTED`로 남아 스케줄러가 처리 |
 | 즉시 PG 취소 실패 | `FAILED` + 백오프, 스케줄러 재시도 (새 멱등 키) |
-| PG 취소 성공 후 `DONE` 기록 전 종료 | 5분 뒤 재점유 → 재취소는 "이미 취소됨"으로 성공 → `DONE` |
+| PG 취소 성공 후 `DONE` 기록 전 종료 | 5분 뒤 재점유 → 재시도 전 조회에서 PG `CANCELLED` 확인 → 취소를 다시 보내지 않고 `DONE` |
+| `REQUESTED` 응답 후 `PG_PENDING` 기록 전 종료·기록 실패 | 재점유 또는 `FAILED` 재시도 → 재시도 전 조회에서 `REQUESTED` 내역 확인 → 취소를 다시 보내지 않고 `PG_PENDING` |
+| 재시도 전 PG 조회 실패 | 취소를 보내지 않고 `FAILED` + 백오프 |
 | 즉시 시도와 스케줄러 동시 점유 | 행 잠금 후 재확인으로 한쪽만 처리 |
 | 승인 API·웹훅 동시 금액 불일치 | 결제 락으로 순차 실행, 두 번째는 `false`로 보상 요청 생략 |
 | 취소된 결제 승인 중 종료 | 원장 확인과 보상 요청이 같은 트랜잭션이라 커밋 전 종료면 둘 다 롤백(다음 요청에서 다시 판단), 커밋 후 종료면 보상 요청이 `REQUESTED`로 남아 스케줄러가 처리 |
@@ -208,7 +223,7 @@ payment:
 | `PaymentCompensationOutboxTest` | `@DataJpaTest` + H2, **실제 트랜잭션** | 결제 실패·주문 취소·보상 요청 함께 커밋, 보상 저장 실패 시 모두 롤백, 중복 요청 시 1건, 취소된 결제 승인 시 보상 요청이 같은 트랜잭션으로 커밋·다시 승인해도 1건 |
 | `PaymentCompensationServiceTest` | `@DataJpaTest` + H2 | 점유(요청 시각이 미래인 REQUESTED 포함), 중복 점유 거부, 완료 후 점유 거부, 재시도 시각 전후, DEAD, 처리 대상 조회, `PG_PENDING` 기록·확인 대상 조회·확정, 재점유 후 늦은 실패 기록 거부 |
 | `PaymentCompensationClaimConcurrencyTest` | `@SpringBootTest` + Testcontainers MySQL | 두 처리가 동시에 점유해도 한쪽만 점유, 락을 잡은 점유 트랜잭션 커밋 후 대기하던 점유는 건너뜀 |
-| `PaymentCompensationProcessorTest` | Mockito | 전체 취소 후 DONE, 점유 실패·락 충돌 건너뜀, 취소 실패 기록, 다른 처리가 먼저 기록, 즉시 시도·예외 삼킴, 배치 예외 격리, 취소 응답 REQUESTED·UNKNOWN이면 `PG_PENDING`, 조회 결과별 확정(완료·실패·미확정·내역 없음·조회 실패·결제 없음·ID 없음), `PG_PENDING`에서 취소 미호출 |
+| `PaymentCompensationProcessorTest` | Mockito | 전체 취소 후 DONE, 점유 실패·락 충돌 건너뜀, 취소 실패 기록, 다른 처리가 먼저 기록, 즉시 시도·예외 삼킴, 배치 예외 격리, 취소 응답 REQUESTED·UNKNOWN이면 `PG_PENDING`, 조회 결과별 확정(완료·실패·미확정·내역 없음·조회 실패·결제 없음·ID 없음), `PG_PENDING`에서 취소 미호출, 재시도 전 조회(이미 취소·접수된 취소·미반영·결제 없음·조회 실패, 첫 시도는 조회 안 함) |
 | `PaymentCompensationSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, 설정에 따른 빈 등록 |
 | `PaymentFacadeTest` | Mockito | 금액 불일치 시 보상 요청 후 `processByPgId` 즉시 시도·이미 처리됐으면 생략, 취소된 결제의 PG 결제 완료 시 `approvePayment`의 CANCELLED 응답으로 즉시 시도 후 `PAYMENT_ALREADY_CANCELLED`(중복은 Processor가 건너뜀)·PG 금액을 보상 금액으로 전달, 웹훅 `COMPENSATED` |
 | `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장(원장 CANCELLED면 실패 처리 없이 저장), 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음, `approvePayment`의 취소된 결제 보상 저장·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파 |

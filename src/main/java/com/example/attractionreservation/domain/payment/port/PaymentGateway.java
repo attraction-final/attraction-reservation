@@ -35,7 +35,8 @@ public interface PaymentGateway {
      *     <li>{@code REQUESTED}: PG가 취소를 접수했지만 아직 끝나지 않았다. 다시 취소하지 말고
      *     {@link #getPayment(String)}의 취소 내역으로 확정해야 한다.</li>
      *     <li>{@code UNKNOWN}: 취소 요청은 성공 응답을 받았지만 결과를 해석할 수 없다. 취소됐을 수 있으므로
-     *     {@code REQUESTED}처럼 조회로 확정해야 한다. 취소 내역 ID는 null이다.</li>
+     *     {@code REQUESTED}처럼 조회로 확정해야 한다. 응답에 취소 내역이 없거나 본문을 읽지 못했으면 취소 내역 ID는 null이고,
+     *     취소 상태 값만 알 수 없으면 취소 내역 ID가 있다.</li>
      * </ul>
      * {@code FAILED}는 반환하지 않고 예외로 알린다.
      *

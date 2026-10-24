@@ -86,7 +86,7 @@ domain/payment
          PROCESSING → PROCESSING (멈춘 처리 회수)
 
 PG_PENDING ──→ DONE        (조회: 취소 완료)
-           ├─→ FAILED      (조회: 취소 실패, 백오프 후 취소 재시도)
+           ├─→ FAILED      (조회: 취소 실패, 백오프 후 취소 재시도. 최대 시도 횟수면 DEAD)
            ├─→ DEAD        (확인 기한 24시간 초과)
            └─→ PG_PENDING  (아직 확정 안 됨·조회 실패, 다음 확인 예약)
 ```
@@ -157,22 +157,23 @@ PG_PENDING ──→ DONE        (조회: 취소 완료)
 
 ### PG 취소 결과 확인 (`PG_PENDING`)
 
-PortOne은 HTTP 200이어도 취소 응답의 `cancellation.status`가 `REQUESTED`(취소 요청)·`FAILED`(취소 실패)·`SUCCEEDED`(취소 완료) 중 하나다. 200만 보고 `DONE`으로 기록하면 실제로 취소되지 않은 결제가 완료로 남는다.
+PortOne은 HTTP 200이어도 취소 응답의 `cancellation.status`가 `REQUESTED`(취소 요청)·`FAILED`(취소 실패)·`SUCCEEDED`(취소 완료) 중 하나다. 200만 보고 `DONE`으로 기록하면 실제로 취소되지 않은 결제가 완료로 남는다. ([PortOne REST API V2 – 결제](https://developers.portone.io/api/rest-v2/payment?v=v2)의 `CancelPaymentResponse`, `PaymentCancellation`)
 
 | 취소 응답 | `PortOneClient.cancelPayment` | 보상 |
 |---|---|---|
 | 200 + `SUCCEEDED`, 409 `PAYMENT_ALREADY_CANCELLED` | `SUCCEEDED` 반환 | `DONE` |
 | 200 + `REQUESTED` | `REQUESTED` + 취소 내역 ID 반환 | `PG_PENDING` (취소 내역 ID 저장) |
-| 200인데 취소 내역이 없거나 본문을 해석할 수 없음, 모르는 상태 | `UNKNOWN` 반환 | `PG_PENDING` |
+| 200인데 취소 내역이 없거나 본문을 읽지 못함(형식 오류, 처리할 수 없는 content-type) | `UNKNOWN` 반환, 취소 내역 ID 없음 | `PG_PENDING` (ID 없음) |
+| 200인데 취소 상태 값을 모름 | `UNKNOWN` + 취소 내역 ID 반환 | `PG_PENDING` (ID 기준으로 확인) |
 | 200 + `FAILED`, 4xx·5xx, 통신 실패 | `PAYMENT_CANCELLATION_FAILED` 예외 | `FAILED` (백오프 후 재시도) |
 
 - `PG_PENDING`에서는 **취소를 다시 보내지 않는다.** 취소가 이미 반영됐을 수 있으므로 PG 결제 조회(`GET /payments/{id}`)로만 확정한다.
-- PortOne 결제 조회 응답은 결제 완료(`PAID`) 상태에서도 `cancellations`(결제 취소 요청 내역)를 돌려준다. 확정 판단(`confirmPending`):
+- PortOne 결제 조회 응답은 결제 완료(`PAID`) 상태에서도 `cancellations`(결제 취소 요청 내역)를 돌려준다(같은 문서의 `PaidPayment.cancellations`). 확정 판단(`confirmPending`):
   - 취소 내역 ID가 있으면 같은 ID의 내역 상태로 판단: `SUCCEEDED` → `DONE`, `FAILED` → `FAILED`(취소 재시도), 그 밖·목록에 없음 → 다음 확인 예약
-  - 취소 내역 ID가 없으면(응답을 해석하지 못함) PG 결제가 `CANCELLED`일 때 `DONE`. 보상은 항상 전체 취소라 이 기준이 맞다
+  - 취소 내역 ID가 없으면(취소 내역이 없거나 본문을 읽지 못함) PG 결제가 `CANCELLED`일 때 `DONE`. 보상은 항상 전체 취소라 이 기준이 맞다
   - PG 조회 실패·PG에 결제 없음 → 실패로 기록하지 않고 다음 확인 예약
 - 확인 간격은 `PG_PENDING`이 된 뒤 지난 시간(1분~30분)이라 대략 두 배씩 늘어난다. 24시간 안에 확정되지 않으면 `DEAD` + error 로그("PG 취소 확인 기한 초과, 수동 확인 필요").
-- 확인은 읽기만 하므로 점유하지 않는다. 결과 기록이 행을 잠그고 `PG_PENDING`인지 다시 확인하므로 여러 처리가 겹쳐도 한 번만 반영된다.
+- 확인은 읽기만 하므로 점유하지 않는다. 확인 결과 기록(`recordPgCancelled`·`recordPgCancelFailed`·`reschedulePgCheck`)은 확인 대상으로 꺼낼 때의 `pg_pending_since`를 함께 받아, 행을 잠근 뒤 같은 `PG_PENDING` 주기일 때만 기록한다. 그래서 확정(`DONE`·`FAILED`·`DEAD`)은 한 번만 반영되고, 확인 사이에 취소 실패 → 재취소로 새 주기가 됐으면 이전 주기의 늦은 결과는 거부된다. 다음 확인 예약은 겹쳐도 같은 주기 안에서 시각만 다시 정한다.
 - 확정은 스케줄러의 조회가 책임진다. 취소 웹훅이 오지 않거나 처리에 실패해도 확정된다.
 
 ### 스케줄러 설정
@@ -189,9 +190,10 @@ payment:
     scheduler:
       enabled: true      # false면 스케줄러 빈을 등록하지 않음 (테스트에서는 false)
       fixed-delay: 30s   # 재시도 백오프가 1분부터라 웹훅(10s)보다 길게 둔다
-      batch-size: 20     # 요청 하나가 PG 취소 호출 하나라 웹훅보다 작게 둔다
+      batch-size: 20     # 요청 하나가 PG 호출 하나라 웹훅보다 작게 둔다. 취소 대상·확인 대상에 각각 적용된다
 ```
 
+- `processPending`은 취소 대상과 PG 확인 대상을 같은 `batch-size`로 각각 조회하므로, 한 번 실행에 PG 호출은 최대 2 × `batch-size`(기본 40회)다. 재시도는 취소 전 조회가 더해져 요청 하나가 PG 호출 2회일 수 있다.
 - 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) = 45초)보다 길어야 한다.
 
 ## 6. 장애 시나리오
@@ -209,25 +211,26 @@ payment:
 | 취소된 결제 승인 중 종료 | 원장 확인과 보상 요청이 같은 트랜잭션이라 커밋 전 종료면 둘 다 롤백(다음 요청에서 다시 판단), 커밋 후 종료면 보상 요청이 `REQUESTED`로 남아 스케줄러가 처리 |
 | 최대 시도 횟수 초과 | `DEAD` + error 로그 → 수동 환불 |
 | PG가 취소를 접수만 함(`REQUESTED`) | `PG_PENDING`, 취소 재요청 없이 조회로 확정 |
-| 취소 성공 응답을 해석하지 못함 | `PG_PENDING`(ID 없음), PG 결제 `CANCELLED`면 `DONE` |
+| 취소 성공 응답에 취소 내역이 없거나 본문을 읽지 못함 | `PG_PENDING`(ID 없음), PG 결제 `CANCELLED`면 `DONE` |
 | `PG_PENDING` 확인 중 PG 조회 실패 | 실패로 기록하지 않고 다음 확인 예약 |
 | `PG_PENDING` 24시간 내 미확정 | `DEAD` + error 로그 → 수동 확인 |
 | 멈춘 행 재점유 후 이전 처리의 늦은 결과 | 시도 횟수가 달라 기록 거부(펜싱), 새 점유의 결과만 반영 |
+| 이전 `PG_PENDING` 주기의 늦은 확인 결과 | `pg_pending_since`가 달라 기록 거부(펜싱) |
 
 ## 7. 테스트
 
 | 테스트 | 종류 | 내용 |
 |---|---|---|
-| `PaymentCompensationTest` | 단위 | 생성 상태·금액 검증, 상태 전이, 백오프, DEAD(처리 종료 시각 기록), 실패 사유 자르기, 처리 가능 판단(요청 시각이 미래여도 REQUESTED는 대상), `PG_PENDING` 전이·확인 간격·확인 기한, 점유 확인(펜싱) |
+| `PaymentCompensationTest` | 단위 | 생성 상태·금액 검증, 상태 전이, 백오프, DEAD(처리 종료 시각 기록), 실패 사유 자르기, 처리 가능 판단(요청 시각이 미래여도 REQUESTED는 대상), `PG_PENDING` 전이·확인 간격·확인 기한, 점유 확인(펜싱), PG 확인 대기 주기 확인(펜싱) |
 | `PaymentCompensationRepositoryTest` | `@DataJpaTest` + H2 | 36자 pgId·int 범위 초과 금액 저장, `pg_id` UNIQUE |
 | `PaymentCompensationOutboxTest` | `@DataJpaTest` + H2, **실제 트랜잭션** | 결제 실패·주문 취소·보상 요청 함께 커밋, 보상 저장 실패 시 모두 롤백, 중복 요청 시 1건, 취소된 결제 승인 시 보상 요청이 같은 트랜잭션으로 커밋·다시 승인해도 1건 |
-| `PaymentCompensationServiceTest` | `@DataJpaTest` + H2 | 점유(요청 시각이 미래인 REQUESTED 포함), 중복 점유 거부, 완료 후 점유 거부, 재시도 시각 전후, DEAD, 처리 대상 조회, `PG_PENDING` 기록·확인 대상 조회·확정, 재점유 후 늦은 실패 기록 거부 |
+| `PaymentCompensationServiceTest` | `@DataJpaTest` + H2 | 점유(요청 시각이 미래인 REQUESTED 포함), 중복 점유 거부, 완료 후 점유 거부, 재시도 시각 전후, DEAD, 처리 대상 조회, `PG_PENDING` 기록·확인 대상 조회·확정, 재점유 후 늦은 실패 기록 거부, 이전 PG 확인 대기 주기의 늦은 확인 결과 거부 |
 | `PaymentCompensationClaimConcurrencyTest` | `@SpringBootTest` + Testcontainers MySQL | 두 처리가 동시에 점유해도 한쪽만 점유, 락을 잡은 점유 트랜잭션 커밋 후 대기하던 점유는 건너뜀 |
 | `PaymentCompensationProcessorTest` | Mockito | 전체 취소 후 DONE, 점유 실패·락 충돌 건너뜀, 취소 실패 기록, 다른 처리가 먼저 기록, 즉시 시도·예외 삼킴, 배치 예외 격리, 취소 응답 REQUESTED·UNKNOWN이면 `PG_PENDING`, 조회 결과별 확정(완료·실패·미확정·내역 없음·조회 실패·결제 없음·ID 없음), `PG_PENDING`에서 취소 미호출, 재시도 전 조회(이미 취소·접수된 취소·미반영·결제 없음·조회 실패, 첫 시도는 조회 안 함) |
 | `PaymentCompensationSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, 설정에 따른 빈 등록 |
 | `PaymentFacadeTest` | Mockito | 금액 불일치 시 보상 요청 후 `processByPgId` 즉시 시도·이미 처리됐으면 생략, 취소된 결제의 PG 결제 완료 시 `approvePayment`의 CANCELLED 응답으로 즉시 시도 후 `PAYMENT_ALREADY_CANCELLED`(중복은 Processor가 건너뜀)·PG 금액을 보상 금액으로 전달, 웹훅 `COMPENSATED` |
 | `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장(원장 CANCELLED면 실패 처리 없이 저장), 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음, `approvePayment`의 취소된 결제 보상 저장·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파 |
-| `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 이미 취소됨 성공 처리, 취소 응답 상태별 반환(SUCCEEDED·REQUESTED·FAILED 예외·UNKNOWN·내역 없음·해석 불가), 결제 조회의 취소 내역 매핑 |
+| `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 이미 취소됨 성공 처리, 취소 응답 상태별 반환(SUCCEEDED·REQUESTED·FAILED 예외·UNKNOWN·내역 없음·해석 불가·처리할 수 없는 content-type), 결제 조회의 취소 내역 매핑 |
 
 - `PaymentCompensationOutboxTest`는 테스트 메서드 트랜잭션에 묶이지 않도록 `NOT_SUPPORTED`로 실행하고 데이터를 직접 정리한다.
 
@@ -242,19 +245,25 @@ payment:
       ADD COLUMN pg_cancellation_id VARCHAR(100) NULL,
       ADD COLUMN pg_pending_since DATETIME(6) NULL;
   ```
-  - `status`를 `VARCHAR(20)`으로 만들었다면 `PG_PENDING`(10자)이 그대로 들어간다. `ENUM`으로 만들었다면 `PG_PENDING`을 값 목록에 추가해야 한다.
+  - **`status` 컬럼 타입을 먼저 확인한다**(`SHOW CREATE TABLE payment_compensations`). Hibernate 7은 MySQL에서 `@Enumerated(STRING)` 컬럼을 `ENUM`으로 만든다(MySQL 9.6 컨테이너에서 확인: `enum('DEAD','DONE','FAILED','PROCESSING','REQUESTED')` → KAN-66 이후 `PG_PENDING` 포함). Hibernate DDL로 만든 테이블이면 `PG_PENDING`을 넣기 전에 값을 추가해야 한다. 추가하지 않으면 `PG_PENDING` 기록이 실패해 `FAILED` 재시도로 빠진다.
+    ```sql
+    ALTER TABLE payment_compensations
+        MODIFY COLUMN status ENUM('DEAD','DONE','FAILED','PG_PENDING','PROCESSING','REQUESTED') NOT NULL;
+    ```
+  - `VARCHAR(20)`으로 만들었다면 `PG_PENDING`(10자)이 그대로 들어가므로 변경하지 않는다.
 
 ### 검증
 
 - [ ] Testcontainers MySQL
   - [x] 같은 보상 요청을 동시에 점유해도 한쪽만 점유한다 (`PaymentCompensationClaimConcurrencyTest`)
-  - 승인 API와 웹훅이 동시에 금액 불일치를 처리해도 보상 요청은 1건이다
-  - 승인 API와 웹훅이 동시에 취소된 결제의 PG 결제 완료를 처리해도 보상 요청은 1건이다
+  - [ ] 승인 API와 웹훅이 동시에 금액 불일치를 처리해도 보상 요청은 1건이다
+  - [ ] 승인 API와 웹훅이 동시에 취소된 결제의 PG 결제 완료를 처리해도 보상 요청은 1건이다
 
 ### 운영
 
 - [ ] `DEAD` 보상 요청 확인 수단(알림, 조회 쿼리 또는 API)과 수동 환불 절차. 확인 기한 초과(`last_error` = "PG 취소 확인 기한 초과")는 PG 취소 내역을 먼저 확인한다
 - [ ] 결제 수단 확정 후 PortOne 테스트 채널에서 실제 취소로 확인: 취소 응답 상태, `REQUESTED`일 때 결제 조회의 `cancellations`·`amount.cancelled`, 웹훅 수신 없이 스케줄러만으로 확정
+- [ ] PortOne 호출 제한을 확인하고, 필요하면 PG 확인 대상의 배치 크기를 취소 대상과 분리한다
 - [ ] (선택) 취소 웹훅 수신 시 해당 pgId의 `PG_PENDING` 요청 `next_retry_at`을 즉시로 당겨 확정 앞당기기
 - [ ] 즉시 시도가 요청 스레드에서 PG 취소를 기다린다(최악 약 45초). 필요하면 커밋 후 `@Async`로 전환한다. 보상 요청이 이미 저장돼 있어 안전성은 같다.
 - [ ] 금액 불일치 응답 메시지에 "환불은 자동으로 진행됩니다" 포함 검토

@@ -235,6 +235,88 @@ class PaymentCustomRepositoryImplTest {
     }
 
     @Test
+    @DisplayName("생성 시각 오름차순 정렬 조건이면 오래된 결제부터 조회된다.")
+    void searchAllByUserId_sortByCreatedAtAsc_ReturnsAscending() {
+        //given
+        Payment middle = savePayment(user);
+        Payment latest = savePayment(user);
+        Payment oldest = savePayment(user);
+        updateCreatedAt(middle, Instant.parse("2026-01-02T00:00:00Z"));
+        updateCreatedAt(latest, Instant.parse("2026-01-03T00:00:00Z"));
+        updateCreatedAt(oldest, Instant.parse("2026-01-01T00:00:00Z"));
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), PageRequest.of(0, 10, Sort.by(Sort.Direction.ASC, "createdAt")),
+                new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(oldest.getId(), middle.getId(), latest.getId());
+    }
+
+    @Test
+    @DisplayName("생성 시각 내림차순 정렬 조건이면 최신 결제부터 조회된다.")
+    void searchAllByUserId_sortByCreatedAtDesc_ReturnsDescending() {
+        //given
+        Payment middle = savePayment(user);
+        Payment latest = savePayment(user);
+        Payment oldest = savePayment(user);
+        updateCreatedAt(middle, Instant.parse("2026-01-02T00:00:00Z"));
+        updateCreatedAt(latest, Instant.parse("2026-01-03T00:00:00Z"));
+        updateCreatedAt(oldest, Instant.parse("2026-01-01T00:00:00Z"));
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt")),
+                new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(latest.getId(), middle.getId(), oldest.getId());
+    }
+
+    @Test
+    @DisplayName("결제 완료 시각 오름차순 정렬 조건이면 미결제(null) 결제가 먼저, 이후 이른 결제부터 조회된다.")
+    void searchAllByUserId_sortByPaidAtAsc_ReturnsNullFirstThenAscending() {
+        //given
+        Payment late = savePaidPayment(user, Instant.parse("2026-01-02T00:00:00Z"));
+        Payment pending = savePayment(user);
+        Payment early = savePaidPayment(user, Instant.parse("2026-01-01T00:00:00Z"));
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), PageRequest.of(0, 10, Sort.by(Sort.Direction.ASC, "paidAt")),
+                new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(pending.getId(), early.getId(), late.getId());
+    }
+
+    @Test
+    @DisplayName("결제 완료 시각 내림차순 정렬 조건이면 최근 결제부터, 미결제(null) 결제는 마지막에 조회된다.")
+    void searchAllByUserId_sortByPaidAtDesc_ReturnsDescendingThenNullLast() {
+        //given
+        Payment late = savePaidPayment(user, Instant.parse("2026-01-02T00:00:00Z"));
+        Payment pending = savePayment(user);
+        Payment early = savePaidPayment(user, Instant.parse("2026-01-01T00:00:00Z"));
+
+        //when
+        Page<PaymentResponse> result = paymentRepository.searchAllByUserId(
+                user.getId(), PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "paidAt")),
+                new SearchPaymentCondition(null));
+
+        //then
+        assertThat(result.getContent())
+                .extracting(PaymentResponse::paymentId)
+                .containsExactly(late.getId(), early.getId(), pending.getId());
+    }
+
+    @Test
     @DisplayName("정렬 조건이 페이지 단위에도 적용된다.")
     void searchAllByUserId_sortWithPaging_ReturnsSortedPage() {
         //given
@@ -281,6 +363,19 @@ class PaymentCustomRepositoryImplTest {
     private Payment savePayment(User owner, int amount) {
         Order order = em.persist(Order.create(owner, amount));
         return em.persist(Payment.create(order));
+    }
+
+    // 정렬 검증을 위해 DB의 paid_at도 같은 값으로 직접 맞춘다
+    private Payment savePaidPayment(User owner, Instant paidAt) {
+        Payment payment = savePayment(owner);
+        payment.markAsPaid(paidAt);
+        em.flush();
+        em.getEntityManager()
+                .createNativeQuery("update payments set paid_at = :paidAt where id = :id")
+                .setParameter("paidAt", paidAt)
+                .setParameter("id", payment.getId())
+                .executeUpdate();
+        return payment;
     }
 
     // createdAt은 Auditing으로 저장 시점에 채워지므로, 정렬 검증을 위해 DB 값을 직접 변경

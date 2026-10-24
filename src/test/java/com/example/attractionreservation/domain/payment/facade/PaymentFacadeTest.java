@@ -75,7 +75,7 @@ class PaymentFacadeTest {
     @DisplayName("PG에서 결제 완료됐고 금액이 일치하면 결제를 승인한다.")
     void confirmPayment_paid_Success() {
         //given
-        ConfirmPaymentResponse approved = ConfirmPaymentResponse.from(payment);
+        ConfirmPaymentResponse approved = paidResponse();
         given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
         given(paymentCommandService.approvePayment(pgId, PAID_AT, 10000L)).willReturn(approved);
@@ -85,6 +85,8 @@ class PaymentFacadeTest {
 
         //then
         assertEquals(approved, response);
+        assertEquals(PaymentStatus.PAID, response.status());
+        assertEquals(PAID_AT, response.paidAt());
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 
@@ -310,7 +312,7 @@ class PaymentFacadeTest {
         //given
         given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
-        given(paymentCommandService.approvePayment(pgId, PAID_AT, 10000L)).willReturn(ConfirmPaymentResponse.from(payment));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT, 10000L)).willReturn(paidResponse());
 
         //when
         PaymentSyncResult result = paymentFacade.syncPayment(pgId);
@@ -408,6 +410,11 @@ class PaymentFacadeTest {
         assertThatThrownBy(() -> paymentFacade.syncPayment(pgId))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_GATEWAY_ERROR.getMessage());
+    }
+
+    // approvePayment가 승인에 성공했을 때의 응답
+    private ConfirmPaymentResponse paidResponse() {
+        return new ConfirmPaymentResponse(payment.getId(), ORDER_ID, pgId, 10000, PaymentStatus.PAID, PAID_AT);
     }
 
     private PaymentGatewayResponse pgResponse(GatewayPaymentStatus status, Long amount) {

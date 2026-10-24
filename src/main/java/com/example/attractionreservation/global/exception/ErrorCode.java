@@ -88,6 +88,7 @@ public enum ErrorCode {
     RESERVATION_DEADLINE_PASSED(HttpStatus.CONFLICT, "슬롯 시작 30분 전까지만 예약할 수 있습니다."),
     RESERVATION_DUPLICATED(HttpStatus.CONFLICT, "이미 예약한 슬롯입니다."),
     RESERVATION_TIME_CONFLICT(HttpStatus.CONFLICT, "다른 예약과 탑승 시간이 겹칩니다."),
+    NOT_FOUND_RESERVATION(HttpStatus.NOT_FOUND, "예약을 찾을 수 없습니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

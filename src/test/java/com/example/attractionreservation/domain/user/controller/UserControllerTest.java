@@ -1,4 +1,4 @@
-package com.example.attractionreservation.user.controller;
+package com.example.attractionreservation.domain.user.controller;
 
 import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import org.junit.jupiter.params.ParameterizedTest;

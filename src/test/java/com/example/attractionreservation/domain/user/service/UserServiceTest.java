@@ -1,4 +1,4 @@
-package com.example.attractionreservation.user.service;
+package com.example.attractionreservation.domain.user.service;
 
 import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;

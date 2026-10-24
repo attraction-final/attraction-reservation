@@ -4,6 +4,7 @@ package com.example.attractionreservation.domain.auth.controller;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
+import com.example.attractionreservation.domain.auth.dto.CreateAuthRefreshResponse;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.service.AuthService;
 import com.example.attractionreservation.global.response.ApiResponse;
@@ -13,10 +14,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
 
@@ -49,5 +48,40 @@ public class AuthController {
                 .status(HttpStatus.OK)
                 .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
                 .body(ApiResponse.ok("로그인에 성공했습니다.", result.response()));
+    }
+
+
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<CreateAuthRefreshResponse>> refresh(
+            @CookieValue(value = "refreshToken", required = false)
+            String refreshToken
+    ) {
+        CreateAuthRefreshResponse response = authService.refresh(refreshToken);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("토큰 재발급에 성공했습니다.", response)
+        );
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @AuthenticationPrincipal Long userId,
+            @CookieValue(value = "refreshToken", required = false) String refreshToken
+    ) {
+        // 인증된 회원의 Refresh Token을 Redis에서 무효화한다.
+        authService.logout(userId, refreshToken);
+
+        // 브라우저에 저장된 Refresh Token Cookie를 삭제한다.
+        ResponseCookie expiredCookie = ResponseCookie.from("refreshToken", "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/api/auth")
+                .maxAge(Duration.ZERO)
+                .build();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, expiredCookie.toString())
+                .body(ApiResponse.ok("로그아웃에 성공했습니다.", null));
     }
 }

@@ -23,8 +23,12 @@ public class TicketProductService {
     @Transactional
     public CreateTicketProductResponse createTicketProduct(CreateTicketProductRequest request) {
         TicketProduct ticketProduct = new TicketProduct(
-                request.name(), request.price(), request.description(),
-                request.type(), request.stock(), request.saleStatus()
+                request.name(),
+                request.price(),
+                request.description(),
+                request.type(),
+                request.stock(),
+                request.saleStatus()
         );
 
         TicketProduct savedTicketProduct = ticketProductRepository.save(ticketProduct);
@@ -68,5 +72,13 @@ public class TicketProductService {
                 pageable);
 
         return ticketProducts.map(SearchTicketProductResponse::from);
+    }
+
+    // 티켓 상품 상세 조회
+    public SearchTicketProductResponse findTicketProductById(Long ticketProductId) {
+        TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        return SearchTicketProductResponse.from(ticketProduct);
     }
 }

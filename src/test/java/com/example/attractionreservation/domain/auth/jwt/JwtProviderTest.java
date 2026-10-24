@@ -152,4 +152,44 @@ class JwtProviderTest {
         assertThat(expirationSeconds).isEqualTo(259200L);
     }
 
+    @Test
+    @DisplayName("만료된 Refresh Token은 검증할 수 없다.")
+    void parseToken_expiredRefreshToken_throwsExpiredJwtException() {
+        // given
+        // 대기 없이 만료를 검증하도록 이미 만료된 토큰을 생성한다.
+        JwtProvider expiredProvider = new JwtProvider(
+                SECRET,
+                ACCESS_EXPIRATION,
+                -60_000L
+        );
+
+        String expiredToken = expiredProvider.createRefreshToken(1L);
+
+        // when & then
+        assertThatThrownBy(() -> jwtProvider.parseToken(expiredToken))
+                .isInstanceOf(ExpiredJwtException.class);
+    }
+
+    @Test
+    @DisplayName("다른 비밀 키로 서명한 Refresh Token은 검증할 수 없다.")
+    void parseToken_refreshTokenSignedWithDifferentKey_throwsSignatureException() {
+        // given
+        String anotherSecret = Base64.getEncoder()
+                .encodeToString(
+                        "another-jwt-provider-test-secret-key-over-32-bytes"
+                                .getBytes(StandardCharsets.UTF_8)
+                );
+
+        JwtProvider anotherProvider = new JwtProvider(
+                anotherSecret,
+                ACCESS_EXPIRATION,
+                REFRESH_EXPIRATION
+        );
+
+        String refreshToken = anotherProvider.createRefreshToken(1L);
+
+        // when & then
+        assertThatThrownBy(() -> jwtProvider.parseToken(refreshToken))
+                .isInstanceOf(io.jsonwebtoken.security.SignatureException.class);
+    }
 }

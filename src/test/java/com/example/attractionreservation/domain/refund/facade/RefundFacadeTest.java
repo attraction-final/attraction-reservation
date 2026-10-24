@@ -25,6 +25,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
@@ -81,6 +83,38 @@ class RefundFacadeTest {
         inOrder.verify(refundService).createRefund(eq(USER_ID), eq(PG_ID), any(), eq("단순 변심"), any());
         inOrder.verify(refundProcessor).processById(1L);
         inOrder.verify(refundService).findRefundById(1L);
+    }
+
+    @Test
+    @DisplayName("전체 환불 저장에 실패하면 PG 취소를 시도하지 않고 예외를 그대로 던진다.")
+    void createRefund_saveFailed_NotProcessed() {
+        //given
+        given(refundService.createFullRefund(eq(USER_ID), eq(PG_ID), eq("단순 변심"), any()))
+                .willThrow(new BusinessException(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT));
+
+        //when & then
+        assertThatThrownBy(() -> refundFacade.createRefund(USER_ID, PG_ID, new CreateRefundRequest("단순 변심")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT.getMessage());
+        verifyNoInteractions(refundProcessor);
+        verify(refundService, never()).findRefundById(any());
+    }
+
+    @Test
+    @DisplayName("부분 환불 저장에 실패하면 PG 취소를 시도하지 않고 예외를 그대로 던진다.")
+    void createPartialRefund_saveFailed_NotProcessed() {
+        //given
+        CreatePartialRefundRequest request = new CreatePartialRefundRequest(
+                List.of(new RefundItemRequest(100L, 5)), "단순 변심");
+        given(refundService.createRefund(eq(USER_ID), eq(PG_ID), eq(Map.of(100L, 5)), eq("단순 변심"), any()))
+                .willThrow(new BusinessException(ErrorCode.REFUND_INVALID_QUANTITY));
+
+        //when & then
+        assertThatThrownBy(() -> refundFacade.createPartialRefund(USER_ID, PG_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_QUANTITY.getMessage());
+        verifyNoInteractions(refundProcessor);
+        verify(refundService, never()).findRefundById(any());
     }
 
     @Test

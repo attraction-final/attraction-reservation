@@ -66,5 +66,7 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             Pageable stablePageable
     );
 
-    Optional<Reservation> findReservationByIdAndUser_Id(Long reservationId, Long userId);
+    // 내 예약 상세 조회
+    @Query("SELECT r FROM Reservation r WHERE r.user.id = :userId AND r.id = :reservationId")
+    Optional<Reservation> findReservationByIdAndUser_Id(@Param("reservationId") Long reservationId, @Param("userId") Long userId);
 }

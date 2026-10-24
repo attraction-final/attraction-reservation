@@ -35,7 +35,7 @@ PaymentController
           ├─ 이미 PAID                → 현재 결제 정보 반환 (멱등)
           ├─ FAILED                   → PAYMENT_ALREADY_PROCESSED (409)
           ├─ 그 밖의 전이 불가         → PAYMENT_INVALID_STATUS_TRANSITION (409)
-          └─ 정상                     → 결제 PAID(paidAt = PG 결제 시각) + 주문 PAID
+          └─ 정상                     → 결제 PAID(paidAt = PG 결제 시각) + 주문 COMPLETED
 ```
 
 ## 3. 패키지 구조와 파일

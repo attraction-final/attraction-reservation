@@ -270,7 +270,7 @@ class PaymentControllerTest {
                 .andExpect(jsonPath("$.data.status").value("PAID"))
                 .andExpect(jsonPath("$.data.order.orderId").value(20))
                 .andExpect(jsonPath("$.data.order.totalAmount").value(10000))
-                .andExpect(jsonPath("$.data.order.status").value("PAID"))
+                .andExpect(jsonPath("$.data.order.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.order.orderItems[0].orderItemId").value(30))
                 .andExpect(jsonPath("$.data.order.orderItems[0].ticketProductId").value(40))
                 .andExpect(jsonPath("$.data.order.orderItems[0].ticketProductName").value("종일이용권"))
@@ -332,7 +332,7 @@ class PaymentControllerTest {
 
     private PaymentDetailResponse paymentDetail(PaymentStatus status, Instant paidAt) {
         OrderResponse order = new OrderResponse(
-                20L, 10000, OrderStatus.PAID, Instant.parse("2026-10-19T00:00:00Z"),
+                20L, 10000, OrderStatus.COMPLETED, Instant.parse("2026-10-19T00:00:00Z"),
                 List.of(new OrderItemResponse(30L, 40L, "종일이용권", 5000, 2))
         );
         return new PaymentDetailResponse(10L, 10000, status, paidAt, Instant.parse("2026-10-19T00:00:00Z"), order);

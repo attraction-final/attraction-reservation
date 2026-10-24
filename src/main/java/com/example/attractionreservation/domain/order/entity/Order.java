@@ -49,11 +49,11 @@ public class Order extends BaseTimeEntity {
     }
 
     public void markAsPaid() {
-        if (!this.status.canTransitTo(OrderStatus.PAID)) {
+        if (!this.status.canTransitTo(OrderStatus.COMPLETED)) {
             throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
         }
 
-        this.status = OrderStatus.PAID;
+        this.status = OrderStatus.COMPLETED;
     }
 
     public void markAsCancelled() {

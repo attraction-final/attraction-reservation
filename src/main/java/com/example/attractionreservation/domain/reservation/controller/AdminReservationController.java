@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.reservation.dto.SearchAdminReser
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -13,10 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -41,5 +39,14 @@ public class AdminReservationController {
         SearchAdminReservationListResponse response = SearchAdminReservationListResponse.from(result);
 
         return ResponseEntity.ok(ApiResponse.ok("예약 목록 조회에 성공했습니다.", response));
+    }
+
+    // 관리자 예약 상세 조회
+    @GetMapping("/{reservationId}")
+    public ResponseEntity<ApiResponse<SearchAdminReservationDetailResponse>> getAdminReservationById(
+            @Min(1) @PathVariable Long reservationId
+    ) {
+        SearchAdminReservationDetailResponse response = reservationService.findAdminReservationById(reservationId);
+        return ResponseEntity.ok(ApiResponse.ok("예약 상세 조회에 성공했습니다.", response));
     }
 }

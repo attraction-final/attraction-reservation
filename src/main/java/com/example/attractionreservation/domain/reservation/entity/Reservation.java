@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.reservation.entity;
 
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.user.entity.User;
@@ -13,7 +14,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Getter
@@ -31,7 +31,8 @@ public class Reservation extends BaseTimeEntity {
     private ReservationStatus status;
 
     @Column(name = "cancel_reason", length = 255)
-    private String cancelReason;
+    @Enumerated(EnumType.STRING)
+    private ReservationCancelReason cancelReason;
 
     @Column(name = "cancelled_at")
     private Instant cancelledAt;

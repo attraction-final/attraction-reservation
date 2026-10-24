@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
@@ -26,6 +29,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
@@ -225,4 +232,229 @@ class UserControllerTest {
         verify(jwtProvider).parseToken("invalid-token");
         verifyNoInteractions(userService, userRepository);
     }
+
+    @Test
+    void updateMe_authenticated_updatesOwnNickname() throws Exception {
+        Long userId = 1L;
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                userId,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        UpdateUserRequest request = new UpdateUserRequest("새로운닉네임");
+
+        when(userService.updateMe(userId, request))
+                .thenReturn(new UpdateUserResponse(
+                        userId, "test@gmail.com", "새로운닉네임"
+                ));
+
+        mockMvc.perform(patch("/api/users/me")
+                        .with(authentication(authenticatedUser))
+                        .param("userId", "999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "nickname": "새로운닉네임"
+                            }
+                            """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("회원 정보 수정에 성공했습니다."))
+                .andExpect(jsonPath("$.data.id").value(1))
+                .andExpect(jsonPath("$.data.email").value("test@gmail.com"))
+                .andExpect(jsonPath("$.data.nickname").value("새로운닉네임"))
+                .andExpect(jsonPath("$.data.password").doesNotExist());
+
+        verify(userService).updateMe(userId, request);
+        verifyNoMoreInteractions(userService);
+    }
+
+    @Test
+    void updateMe_withoutAuthentication_returnsUnauthorized() throws Exception {
+        mockMvc.perform(patch("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "nickname": "새로운닉네임"
+                            }
+                            """))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void updateMe_blankNickname_returnsBadRequest() throws Exception {
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        mockMvc.perform(patch("/api/users/me")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "nickname": "   "
+                            }
+                            """))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void updateMe_missingNickname_returnsBadRequest() throws Exception {
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        mockMvc.perform(patch("/api/users/me")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void updateMe_nicknameExceeds50Characters_returnsBadRequest()
+            throws Exception {
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        String requestBody = """
+            {
+                "nickname": "%s"
+            }
+            """.formatted("가".repeat(51));
+
+        mockMvc.perform(patch("/api/users/me")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void updatePassword_authenticated_returnsOk() throws Exception {
+        Long userId = 1L;
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                userId,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        // 다른 회원 ID를 보내더라도 인증된 본인의 비밀번호만 변경한다.
+        mockMvc.perform(patch("/api/users/me/password")
+                        .with(authentication(authenticatedUser))
+                        .param("userId", "999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "currentPassword": "Password!123",
+                                "newPassword": "NewPassword!456"
+                            }
+                            """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("비밀번호 변경에 성공했습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.password").doesNotExist());
+
+        verify(userService).updatePassword(
+                userId,
+                new UpdatePasswordRequest("Password!123", "NewPassword!456")
+        );
+        verifyNoMoreInteractions(userService);
+    }
+
+    @Test
+    void updatePassword_wrongCurrentPassword_returnsBadRequest() throws Exception {
+        Long userId = 1L;
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                userId,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+        UpdatePasswordRequest request = new UpdatePasswordRequest(
+                "WrongPassword!123", "NewPassword!456"
+        );
+
+        doThrow(new BusinessException(ErrorCode.CURRENT_PASSWORD_MISMATCH))
+                .when(userService).updatePassword(userId, request);
+
+        mockMvc.perform(patch("/api/users/me/password")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "currentPassword": "WrongPassword!123",
+                                "newPassword": "NewPassword!456"
+                            }
+                            """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.CURRENT_PASSWORD_MISMATCH.getMessage()));
+
+        verify(userService).updatePassword(userId, request);
+    }
+
+    @Test
+    void updatePassword_withoutAuthentication_returnsUnauthorized()
+            throws Exception {
+        mockMvc.perform(patch("/api/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                            {
+                                "currentPassword": "Password!123",
+                                "newPassword": "NewPassword!456"
+                            }
+                            """))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(userService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}",
+            "{\"currentPassword\":\"Password!123\"}",
+            "{\"newPassword\":\"NewPassword!456\"}",
+            "{\"currentPassword\":\"   \",\"newPassword\":\"NewPassword!456\"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"   \"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"Ab1!\"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"abcdefgh123\"}",
+            "{\"currentPassword\":\"Password!123\",\"newPassword\":\"Abcdefghijklmnopqr123!\"}"
+    })
+    void updatePassword_invalidInput_returnsBadRequest(String requestBody)
+            throws Exception {
+        var authenticatedUser = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        mockMvc.perform(patch("/api/users/me/password")
+                        .with(authentication(authenticatedUser))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(userService);
+    }
+
 }

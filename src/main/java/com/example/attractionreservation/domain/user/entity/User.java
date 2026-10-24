@@ -50,4 +50,11 @@ public class User extends BaseTimeEntity {
         this.role = (role != null) ? role : Role.USER;
         this.status = UserStatus.ACTIVE;
     }
+    public void updateNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
+    public void updatePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
 }

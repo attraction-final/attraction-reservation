@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
 import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -71,6 +74,47 @@ public class UserService {
         }
 
         return GetUserResponse.from(user);
+    }
+
+    @Transactional
+    public UpdateUserResponse updateMe(
+            Long userId,
+            UpdateUserRequest request
+    ) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        user.updateNickname(request.nickname());
+
+        return UpdateUserResponse.from(user);
+    }
+
+    @Transactional
+    public void updatePassword(Long userId, UpdatePasswordRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        // BCrypt는 같은 비밀번호도 해시가 달라질 수 있으므로 matches로 검증한다.
+        if (!passwordEncoder.matches(
+                request.currentPassword(),
+                user.getPassword()
+        )) {
+            throw new BusinessException(ErrorCode.CURRENT_PASSWORD_MISMATCH);
+        }
+
+        // 평문 비밀번호를 저장하지 않고 새로 해시 처리한 값만 반영한다.
+        String encodedPassword = passwordEncoder.encode(request.newPassword());
+        user.updatePassword(encodedPassword);
     }
 
     private boolean isDuplicateEmailViolation(DataIntegrityViolationException exception) {

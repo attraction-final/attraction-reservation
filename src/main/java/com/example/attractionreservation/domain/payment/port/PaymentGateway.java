@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.payment.port;
 
+import com.example.attractionreservation.domain.payment.port.dto.PaymentCancellationResponse;
 import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayResponse;
 
 import java.util.Optional;
@@ -28,9 +29,19 @@ public interface PaymentGateway {
      * "이미 취소됨"을 성공으로 처리해 보장한다. 보상 취소의 즉시 시도와 스케줄러 재시도가 겹쳐도
      * 중복 환불되지 않는 근거다.
      *
+     * <p>반환값의 상태로 취소 완료 여부를 판단한다.
+     * <ul>
+     *     <li>{@code SUCCEEDED}: 취소 완료. 이미 취소된 결제면 취소 내역 ID는 null이다.</li>
+     *     <li>{@code REQUESTED}: PG가 취소를 접수했지만 아직 끝나지 않았다. 다시 취소하지 말고
+     *     {@link #getPayment(String)}의 취소 내역으로 확정해야 한다.</li>
+     *     <li>{@code UNKNOWN}: 취소 요청은 성공 응답을 받았지만 결과를 해석할 수 없다. 취소됐을 수 있으므로
+     *     {@code REQUESTED}처럼 조회로 확정해야 한다. 취소 내역 ID는 null이다.</li>
+     * </ul>
+     * {@code FAILED}는 반환하지 않고 예외로 알린다.
+     *
      * @param amount 취소 금액. null이면 전체 취소
      * @throws com.example.attractionreservation.global.exception.BusinessException
-     *         취소 여부를 확인할 수 없으면 {@code PAYMENT_CANCELLATION_FAILED}
+     *         PG가 취소에 실패했거나 취소 여부를 확인할 수 없으면 {@code PAYMENT_CANCELLATION_FAILED}
      */
-    void cancelPayment(String pgId, String reason, Long amount);
+    PaymentCancellationResponse cancelPayment(String pgId, String reason, Long amount);
 }

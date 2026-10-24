@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -418,7 +419,8 @@ class PaymentFacadeTest {
     }
 
     private PaymentGatewayResponse pgResponse(GatewayPaymentStatus status, Long amount) {
-        return new PaymentGatewayResponse(pgId, status, amount, status == GatewayPaymentStatus.PAID ? PAID_AT : null);
+        return new PaymentGatewayResponse(
+                pgId, status, amount, status == GatewayPaymentStatus.PAID ? PAID_AT : null, List.of());
     }
 
     private Payment createPayment() {

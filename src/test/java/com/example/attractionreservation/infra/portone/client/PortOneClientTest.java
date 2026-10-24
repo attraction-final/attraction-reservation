@@ -1,6 +1,8 @@
 package com.example.attractionreservation.infra.portone.client;
 
+import com.example.attractionreservation.domain.payment.port.dto.PaymentCancellationResponse;
 import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayResponse;
+import com.example.attractionreservation.domain.payment.port.enums.GatewayCancellationStatus;
 import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymentStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -211,10 +213,11 @@ class PortOneClientTest {
                                 """));
 
         //when
-        portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
 
         //then
         server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED));
     }
 
     @Test
@@ -270,6 +273,141 @@ class PortOneClientTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_CANCELLATION_FAILED.getMessage());
         server.verify();
+    }
+
+    @Test
+    @DisplayName("취소 완료 응답이면 취소 내역 ID와 SUCCEEDED를 반환한다.")
+    void cancelPayment_succeeded_ReturnSucceeded() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        assertThat(response).isEqualTo(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED));
+    }
+
+    @Test
+    @DisplayName("취소 요청 접수 응답이면 완료로 보지 않고 취소 내역 ID와 REQUESTED를 반환한다.")
+    void cancelPayment_requested_ReturnRequested() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "REQUESTED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        assertThat(response).isEqualTo(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED));
+    }
+
+    @Test
+    @DisplayName("성공 응답이어도 취소 상태가 FAILED면 재시도 없이 결제 취소 실패로 처리한다.")
+    void cancelPayment_failedStatus_FailWithoutRetry() {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "FAILED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_CANCELLATION_FAILED.getMessage());
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("성공 응답에 알 수 없는 취소 상태가 오면 실패로 보지 않고 UNKNOWN을 반환한다.")
+    void cancelPayment_unsupportedStatus_Unknown() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "PROCESSING" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        assertThat(response).isEqualTo(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.UNKNOWN));
+    }
+
+    @Test
+    @DisplayName("성공 응답에 취소 내역이 없으면 취소됐을 수 있으므로 실패로 보지 않고 UNKNOWN을 반환한다.")
+    void cancelPayment_withoutCancellation_Unknown() {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
+    }
+
+    @Test
+    @DisplayName("성공 응답 본문을 해석할 수 없으면 재시도 없이 UNKNOWN을 반환한다.")
+    void cancelPayment_unreadableBody_Unknown() {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withSuccess("{ not json", MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
+    }
+
+    @Test
+    @DisplayName("결제 조회 응답의 취소 내역을 취소 내역 ID와 상태로 변환한다.")
+    void getPayment_withCancellations_Mapped() {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andRespond(withSuccess("""
+                        { "id": "pg-id", "status": "PAID", "amount": { "total": 10000 }, "paidAt": "2026-10-20T01:00:00Z",
+                          "cancellations": [
+                            { "id": "cancel-1", "status": "REQUESTED" },
+                            { "id": "cancel-2", "status": "SUCCEEDED" }
+                          ] }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentGatewayResponse response = portOneClient.getPayment(PG_ID).orElseThrow();
+
+        //then
+        assertThat(response.cancellations()).containsExactly(
+                new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED),
+                new PaymentCancellationResponse("cancel-2", GatewayCancellationStatus.SUCCEEDED));
+        assertThat(response.findCancellation("cancel-2")).map(PaymentCancellationResponse::status)
+                .contains(GatewayCancellationStatus.SUCCEEDED);
+    }
+
+    @Test
+    @DisplayName("결제 조회 응답에 취소 내역이 없으면 빈 목록으로 변환한다.")
+    void getPayment_withoutCancellations_EmptyList() {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andRespond(withSuccess("""
+                        { "id": "pg-id", "status": "PAID", "amount": { "total": 10000 }, "paidAt": "2026-10-20T01:00:00Z" }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentGatewayResponse response = portOneClient.getPayment(PG_ID).orElseThrow();
+
+        //then
+        assertThat(response.cancellations()).isEmpty();
+        assertThat(response.findCancellation("cancel-1")).isEmpty();
     }
 
     // ---- 아래는 리뷰 2·4·5번(머지 전 항목)을 고치면 활성화할 테스트 ----

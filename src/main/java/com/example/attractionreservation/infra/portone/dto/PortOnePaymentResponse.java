@@ -5,13 +5,15 @@ import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymen
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.time.Instant;
+import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record PortOnePaymentResponse(
         String id,
         String status,
         Amount amount,
-        Instant paidAt
+        Instant paidAt,
+        List<PortOneCancellation> cancellations
 ) {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Amount(Long total) {}
@@ -22,7 +24,10 @@ public record PortOnePaymentResponse(
                 pgId,
                 toGatewayStatus(status),
                 amount == null ? null : amount.total(),
-                paidAt
+                paidAt,
+                cancellations == null ? List.of() : cancellations.stream()
+                        .map(PortOneCancellation::toGatewayResponse)
+                        .toList()
         );
     }
 

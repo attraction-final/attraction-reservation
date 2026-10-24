@@ -1,6 +1,5 @@
 package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.*;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

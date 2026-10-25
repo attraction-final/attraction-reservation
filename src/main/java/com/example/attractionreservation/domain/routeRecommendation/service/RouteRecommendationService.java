@@ -4,6 +4,9 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
+import com.example.attractionreservation.domain.reservation.entity.Reservation;                 // ★ 추가
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     // ★ 추가
+import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   // ★ 추가
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.AttractionView;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelection;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
@@ -46,16 +49,17 @@ import java.util.stream.Collectors;
 public class RouteRecommendationService {
 
     private static final LocalTime AFTERNOON_TICKET_START = LocalTime.of(15, 0);
+    private static final long CANCEL_DEADLINE_MINUTES = 30;
 
-    // 선언 순서 = 생성자 인자 순서
+
     private final RouteRecommendationRepository routeRecommendationRepository;
     private final TicketRepository ticketRepository;
     private final AttractionRepository attractionRepository;
     private final AttractionSlotRepository attractionSlotRepository;
+    private final ReservationRepository reservationRepository;
     private final CandidateSelector candidateSelector;
     private final RouteSearcher routeSearcher;
     private final Clock clock;
-
 
     @Transactional
     public SearchRouteRecommendationResponse createRouteRecommendation(Long userId, CreateRouteRecommendationRequest request) {
@@ -67,22 +71,19 @@ public class RouteRecommendationService {
         LocalDateTime startAt = correctStartAt(request.startAt(), now);
         LocalDateTime endAt = request.endAt();
         validateTimeRange(startAt, endAt, ticket);
-
+        validateNotBlockedByExistingReservation(ticket.getId(), now);   // ★ 추가
 
         List<AttractionView> attractions = findAttractionsInRequestOrder(attractionIds);
         Map<Long, List<SlotView>> slotsByAttractionId = findSlotsByAttraction(attractionIds, ticket.getValidDate());
-
 
         CandidateSelection selection = candidateSelector.select(attractions, slotsByAttractionId, startAt, endAt, now);
         RouteSearchResult route = routeSearcher.search(startAt, endAt, selection.candidates());
         List<Exclusion> exclusions = collectExclusionsInRequestOrder(attractions, selection, route);
 
-
         if (route.isEmpty()) {
             return SearchRouteRecommendationResponse.none(
                     ticket.getId(), startAt, endAt, attractionIds.size(), toExcludedAttractions(exclusions));
         }
-
 
         RouteRecommendation recommendation = RouteRecommendation.create(
                 userId, ticket.getId(), startAt, endAt, toStops(route), toExclusionEntities(exclusions));
@@ -153,13 +154,24 @@ public class RouteRecommendationService {
         };
     }
 
+    private void validateNotBlockedByExistingReservation(Long ticketId, LocalDateTime now) {
+        boolean blocked = reservationRepository
+                .findAllWithSlotByTicketIdAndStatus(ticketId, ReservationStatus.RESERVED).stream()
+                .map(Reservation::getAttractionSlot)
+                .anyMatch(slot -> now.isAfter(slot.getStartsAt().minusMinutes(CANCEL_DEADLINE_MINUTES))
+                        && now.isBefore(slot.getEndsAt()));
+        if (blocked) {
+            throw new BusinessException(ErrorCode.ROUTE_RECOMMENDATION_BLOCKED);
+        }
+    }
+
     private void validateOwner(RouteRecommendation recommendation, Long userId) {
         if (!recommendation.isOwnedBy(userId)) {
             throw new BusinessException(ErrorCode.NOT_ROUTE_OWNER);
         }
     }
 
-    // 조회 + 변환
+    //조회 + 변환
 
     private List<AttractionView> findAttractionsInRequestOrder(List<Long> attractionIds) {
         Map<Long, Attraction> byId = attractionRepository.findAllById(attractionIds).stream()
@@ -191,7 +203,7 @@ public class RouteRecommendationService {
                             slot.getId(),
                             slot.getStartsAt(),
                             slot.getEndsAt(),
-                            SlotState.valueOf(slot.getStatus().name()),
+                            SlotState.valueOf(slot.getStatus().name()),   // 두 enum 의 상수 이름이 같다
                             slot.getCapacity(),
                             slot.getReservedCount()))
                     .toList();

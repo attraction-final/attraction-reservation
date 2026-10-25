@@ -317,7 +317,7 @@ public class RouteRecommendationControllerTest {
     @EnumSource(value = ErrorCode.class, names = {
             "INVALID_ATTRACTION_SELECTION", "INVALID_TIME_RANGE",
             "TICKET_NOT_FOUND", "TICKET_NOT_OWNED", "TICKET_NOT_AVAILABLE",
-            "ATTRACTION_NOT_FOUND"})
+            "ATTRACTION_NOT_FOUND", "ROUTE_RECOMMENDATION_BLOCKED"})
     @DisplayName("서비스 검증 실패를 ErrorCode 의 HTTP 상태로 반환한다")
     void createRouteRecommendation_rejected_returnsExpectedError(ErrorCode errorCode) throws Exception {
         // given

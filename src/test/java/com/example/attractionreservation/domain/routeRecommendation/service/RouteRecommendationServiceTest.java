@@ -5,6 +5,9 @@ import com.example.attractionreservation.domain.attraction.entity.enums.Operatio
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
+import com.example.attractionreservation.domain.reservation.entity.Reservation;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
+import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
@@ -15,6 +18,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.Route
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
 import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
+import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
@@ -72,8 +76,10 @@ class RouteRecommendationServiceTest {
 
     @Mock
     private AttractionSlotRepository attractionSlotRepository;
-
+    @Mock
     private RouteRecommendationService routeRecommendationService;
+    @Mock
+    private ReservationRepository reservationRepository;
 
     @BeforeEach
     void setUp() {
@@ -83,6 +89,7 @@ class RouteRecommendationServiceTest {
                 ticketRepository,
                 attractionRepository,
                 attractionSlotRepository,
+                reservationRepository,
                 new CandidateSelector(),
                 new RouteSearcher(),
                 FIXED_CLOCK
@@ -166,6 +173,14 @@ class RouteRecommendationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(errorCode);
+    }
+
+    private void givenReservationAt(String slotStartHhmm) {
+        Attraction attraction = attraction(201L, "회전목마", 10, 5);
+        Reservation reservation = new Reservation(mock(User.class), mock(Ticket.class),
+                slot(9901L, attraction, slotStartHhmm));
+        when(reservationRepository.findAllWithSlotByTicketIdAndStatus(TICKET_ID, ReservationStatus.RESERVED))
+                .thenReturn(List.of(reservation));
     }
 
     // 생성: 정상
@@ -260,6 +275,41 @@ class RouteRecommendationServiceTest {
         // then
         assertThat(response.startAt()).isEqualTo(at("14:00"));
         assertThat(response.totalDurationMinutes()).isEqualTo(110);
+    }
+
+    @Test
+    @DisplayName("취소 마감이 지났고 끝나지 않은 예약이 있으면 ROUTE_RECOMMENDATION_BLOCKED 예외가 발생한다")
+    void createRouteRecommendation_BlockedByReservation_ThrowsException() {
+        // given: 14:20 탑승 → 취소 마감 13:50 지남, 종료 14:30 전 (현재 14:00)
+        givenUsableTicket();
+        givenReservationAt("14:20");
+
+        // when & then
+        assertErrorCode(
+                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L)),
+                ErrorCode.ROUTE_RECOMMENDATION_BLOCKED);
+        verifyNoInteractions(attractionRepository);
+    }
+
+    @ParameterizedTest(name = "예약 탑승 {0}")
+    @CsvSource({
+            "15:00",   // 취소 마감 14:30 전 → 아직 취소 가능
+            "13:00"    // 13:10 에 이미 끝남
+    })
+    @DisplayName("취소 가능하거나 이미 끝난 예약은 추천 생성을 막지 않는다")
+    void createRouteRecommendation_NotBlockingReservation_Creates(String slotStartHhmm) {
+        // given
+        givenUsableTicket();
+        givenReservationAt(slotStartHhmm);
+        givenTwoReachableAttractions();
+        givenSaveReturnsArgument();
+
+        // when
+        SearchRouteRecommendationResponse response = routeRecommendationService
+                .createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L, 102L));
+
+        // then
+        assertThat(response.resultType()).isEqualTo(RouteResultType.FULL);
     }
 
     //생성: 검증 실패

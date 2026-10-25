@@ -42,7 +42,7 @@ public class ReservationService {
     public CreateReservationResponse createReservation(Long userId, CreateReservationRequest request) {
 
         /* 현재시간, 오늘날짜, 현재시각 */
-        LocalDateTime now = KstTime.toLocalDateTime(Instant.now());
+        LocalDateTime now = KstTime.now();
         LocalDate today = now.toLocalDate();
 
         /* 놀이공원 폐장시간 */

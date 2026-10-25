@@ -82,6 +82,7 @@ public enum ErrorCode {
     TICKET_RESERVATION_NOT_ALLOWED_STATUS(HttpStatus.CONFLICT, "예약에 사용할 수 없는 티켓 상태입니다."),
     TICKET_RESERVATION_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓 방문일과 슬롯 날짜가 일치하지 않습니다."),
     TICKET_RESERVATION_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "티켓 이용 가능 시간에 포함되지 않는 슬롯입니다."),
+    INVALID_TICKET_ENTRY_TIME(HttpStatus.BAD_REQUEST, "입장 처리 시각은 필수입니다."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),

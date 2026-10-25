@@ -14,4 +14,7 @@ public interface RouteRecommendationRepository extends JpaRepository<RouteRecomm
             select r from RouteRecommendation r left join fetch r.stops where r.id = :id and r.deletedAt is null
 """)
     Optional<RouteRecommendation> findDetailById(@Param("id" )Long id);
+
+    Optional<RouteRecommendation> findByIdAndDeletedAtIsNull(Long id);
 }
+

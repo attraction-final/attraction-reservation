@@ -23,9 +23,9 @@ import java.util.Optional;
  * 환불의 PG 취소를 처리한다. 트랜잭션 없이 "점유(짧은 트랜잭션) → PG 부분 취소 → 결과 기록(짧은 트랜잭션)" 순서로 진행한다.
  *
  * <p>환불 요청이 커밋된 직후 {@link #processById(Long)}로 한 번 즉시 시도하고,
- * 실패하거나 시도 전에 서버가 종료된 환불은 스케줄러가 {@link #processPending(int)}로 이어받는다.
+ * 실패하거나 시도 전에 서버가 종료된 환불은 스케줄러가 {@link #processPending(int, int)}로 이어받는다.
  * PG가 취소를 접수만 했거나 응답을 해석하지 못하면 PG_PENDING으로 두고, 취소를 다시 보내지 않고 PG 결제 조회로 확정한다.
- * PG 취소 처리({@link #processById(Long)}, {@link #processPending(int)})는 예외를 밖으로 던지지 않는다. PG 취소 실패는 기록되어 재시도된다.
+ * PG 취소 처리({@link #processById(Long)}, {@link #processPending(int, int)})는 예외를 밖으로 던지지 않는다. PG 취소 실패는 기록되어 재시도된다.
  * 취소 웹훅의 환불 동기화({@link #syncWithPg(String)})는 웹훅이 다시 처리되도록 재시도가 필요한 오류를 던진다.
  */
 @Slf4j
@@ -47,8 +47,13 @@ public class RefundProcessor {
         }
     }
 
-    // 스케줄러에서 실행. PG 취소 대상 환불을 처리한 뒤, PG 취소 결과를 확인할 환불을 처리한다.
-    public void processPending(int limit) {
+    /**
+     * 스케줄러에서 실행. PG 취소 대상 환불을 처리한 뒤, PG 취소 결과를 확인할 환불을 처리한다.
+     *
+     * @param limit        한 번에 처리할 PG 취소 대상 수
+     * @param pgCheckLimit 한 번에 확인할 PG_PENDING 수. 확인마다 PG를 조회하므로 PG 장애로 쌓여도 PG 취소 처리가 밀리지 않게 따로 제한한다
+     */
+    public void processPending(int limit, int pgCheckLimit) {
         for (Long refundId : refundCommandService.findProcessableIds(Instant.now(), limit)) {
             try {
                 process(refundId);
@@ -57,7 +62,7 @@ public class RefundProcessor {
             }
         }
 
-        for (Long refundId : refundCommandService.findPgCheckableIds(Instant.now(), limit)) {
+        for (Long refundId : refundCommandService.findPgCheckableIds(Instant.now(), pgCheckLimit)) {
             try {
                 confirmPending(refundId);
             } catch (RuntimeException e) {

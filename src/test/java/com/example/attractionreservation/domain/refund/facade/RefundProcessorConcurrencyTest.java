@@ -183,7 +183,7 @@ class RefundProcessorConcurrencyTest {
         // 두 환불을 절반씩 동시에 처리한 뒤, 건너뛴 환불은 스케줄러처럼 이어서 처리한다.
         AtomicInteger turn = new AtomicInteger();
         runConcurrently(() -> refundProcessor.processById(turn.getAndIncrement() % 2 == 0 ? adultRefund : childRefund));
-        refundProcessor.processPending(10);
+        refundProcessor.processPending(10, 10);
 
         //then
         assertThat(maxInFlight.get()).isEqualTo(1);
@@ -295,7 +295,7 @@ class RefundProcessorConcurrencyTest {
             if (turn.getAndIncrement() % 2 == 0) {
                 refundProcessor.processById(childRefund);
             } else {
-                refundProcessor.processPending(10);
+                refundProcessor.processPending(10, 10);
             }
         });
 
@@ -309,8 +309,8 @@ class RefundProcessorConcurrencyTest {
                 pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(),
                 List.of(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED, 10000L)))));
         makePgCheckDue(adultRefund);
-        refundProcessor.processPending(10);
-        refundProcessor.processPending(10);
+        refundProcessor.processPending(10, 10);
+        refundProcessor.processPending(10, 10);
 
         //then
         assertThat(findRefund(adultRefund).getStatus()).isEqualTo(RefundStatus.COMPLETED);
@@ -340,7 +340,7 @@ class RefundProcessorConcurrencyTest {
             if (turn.getAndIncrement() % 2 == 0) {
                 syncResults.add(refundProcessor.syncWithPg(pgId));
             } else {
-                refundProcessor.processPending(10);
+                refundProcessor.processPending(10, 10);
             }
         });
 

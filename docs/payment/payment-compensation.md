@@ -126,7 +126,7 @@ PG_PENDING ──→ DONE        (조회: 취소 완료)
 | 경로 | 호출 | 시점 |
 |---|---|---|
 | 즉시 시도 | `PaymentFacade.reconcile` → `processByPgId(pgId)` | `failPaymentWithCompensation`·`approvePayment`(취소된 결제) 커밋 직후, 요청 스레드 |
-| 재시도 | `PaymentCompensationScheduler` → `processPending(20)` | 30초 간격 |
+| 재시도 | `PaymentCompensationScheduler` → `processPending(20, 5)` | 30초 간격 |
 
 - 둘 다 `process(id)`를 쓴다: 점유(행 잠금 후 `isProcessable` 재확인) → PG 전체 취소 → 취소 응답 상태로 `recordDone` / `recordPgPending` / `recordFailure`.
 - 스케줄러는 이어서 `findPgCheckableIds`로 고른 `PG_PENDING` 요청을 `confirmPending(id)`로 확인한다(아래 "PG 취소 결과 확인").
@@ -191,10 +191,12 @@ payment:
     scheduler:
       enabled: true      # false면 스케줄러 빈을 등록하지 않음 (테스트에서는 false)
       fixed-delay: 30s   # 재시도 백오프가 1분부터라 웹훅(10s)보다 길게 둔다
-      batch-size: 20     # 요청 하나가 PG 호출 하나라 웹훅보다 작게 둔다. 취소 대상·확인 대상에 각각 적용된다
+      batch-size: 20     # 요청 하나가 PG 호출 하나라 웹훅보다 작게 둔다. 취소 대상에 적용된다
+      pg-check-batch-size: 5   # 한 번에 확인할 최대 PG_PENDING 수 (확인마다 PG 조회)
 ```
 
-- `processPending`은 취소 대상과 PG 확인 대상을 같은 `batch-size`로 각각 조회하므로, 한 번 실행에 PG 호출은 최대 2 × `batch-size`(기본 40회)다. 재시도는 취소 전 조회가 더해져 요청 하나가 PG 호출 2회일 수 있다.
+- `processPending`은 취소 대상을 `batch-size`, PG 확인 대상을 `pg-check-batch-size`로 각각 조회하므로, 한 번 실행에 PG 호출은 최대 `batch-size` + `pg-check-batch-size`(기본 25회)다. 재시도는 취소 전 조회가 더해져 요청 하나가 PG 호출 2회일 수 있다.
+- 확인 건수를 따로 작게 두는 이유: PG 장애가 복구될 때까지 `PG_PENDING`이 한꺼번에 쌓일 수 있는데, 확인마다 PG를 조회하므로(최대 약 15초) 같은 스레드의 취소 처리가 밀린다. 기본값 5건이면 한 주기의 확인 지연은 최대 약 75초이고, 복구 후에는 30초마다 5건(시간당 약 600건)씩 확정한다. 확인 기한(24시간) 안에 약 1만 4천 건까지 확정할 수 있다.
 - 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) = 45초)보다 길어야 한다.
 
 ## 6. 장애 시나리오

@@ -566,22 +566,22 @@ class RefundProcessorTest {
         given(refundCommandService.claim(eq(2L), any())).willReturn(Optional.empty());
 
         //when
-        refundProcessor.processPending(20);
+        refundProcessor.processPending(20, 5);
 
         //then
         verify(refundCommandService).claim(eq(2L), any());
     }
 
     @Test
-    @DisplayName("스케줄러는 처리 대상 다음에 PG 취소 결과를 확인할 환불도 확인한다.")
+    @DisplayName("스케줄러는 처리 대상 다음에 PG 취소 결과를 확인할 환불을 확인 배치 크기만큼 확인한다.")
     void processPending_pgCheckable_Confirm() {
         //given
         given(refundCommandService.findProcessableIds(any(), anyInt())).willReturn(List.of());
-        given(refundCommandService.findPgCheckableIds(any(), anyInt())).willReturn(List.of(3L));
+        given(refundCommandService.findPgCheckableIds(any(), eq(5))).willReturn(List.of(3L));
         given(refundCommandService.findPgCheckable(eq(3L), any())).willReturn(Optional.empty());
 
         //when
-        refundProcessor.processPending(20);
+        refundProcessor.processPending(20, 5);
 
         //then
         verify(refundCommandService).findPgCheckable(eq(3L), any());

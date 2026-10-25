@@ -19,17 +19,17 @@ class RefundSchedulerTest {
             .withUserConfiguration(RefundScheduler.class);
 
     @Test
-    @DisplayName("스케줄러가 실행되면 설정한 배치 크기만큼 환불 처리를 요청한다.")
+    @DisplayName("스케줄러가 실행되면 설정한 처리 배치 크기와 확인 배치 크기로 환불 처리를 요청한다.")
     void processPendingRefunds_scheduled_ProcessWithBatchSize() {
         //given
         RefundProcessor processor = mock(RefundProcessor.class);
-        RefundScheduler scheduler = new RefundScheduler(processor, 20);
+        RefundScheduler scheduler = new RefundScheduler(processor, 20, 5);
 
         //when
         scheduler.processPendingRefunds();
 
         //then
-        verify(processor).processPending(20);
+        verify(processor).processPending(20, 5);
     }
 
     @Test
@@ -37,8 +37,8 @@ class RefundSchedulerTest {
     void processPendingRefunds_error_Swallowed() {
         //given
         RefundProcessor processor = mock(RefundProcessor.class);
-        willThrow(new DataAccessResourceFailureException("db down")).given(processor).processPending(20);
-        RefundScheduler scheduler = new RefundScheduler(processor, 20);
+        willThrow(new DataAccessResourceFailureException("db down")).given(processor).processPending(20, 5);
+        RefundScheduler scheduler = new RefundScheduler(processor, 20, 5);
 
         //when & then
         assertThatCode(scheduler::processPendingRefunds).doesNotThrowAnyException();

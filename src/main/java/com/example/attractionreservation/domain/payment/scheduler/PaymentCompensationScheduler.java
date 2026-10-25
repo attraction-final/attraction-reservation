@@ -18,21 +18,25 @@ import org.springframework.stereotype.Component;
 public class PaymentCompensationScheduler {
     private final PaymentCompensationProcessor paymentCompensationProcessor;
     private final int batchSize;
+    private final int pgCheckBatchSize;
 
     // pg 사 취소 요청 실패 재처리 스케줄러
     public PaymentCompensationScheduler(
             PaymentCompensationProcessor paymentCompensationProcessor,
-            @Value("${payment.compensation.scheduler.batch-size:20}") int batchSize
+            @Value("${payment.compensation.scheduler.batch-size:20}") int batchSize,
+            // PG 장애로 PG_PENDING이 쌓여도 확인(PG 조회) 때문에 PG 취소 처리가 밀리지 않도록 한 주기의 확인 건수를 따로 제한한다.
+            @Value("${payment.compensation.scheduler.pg-check-batch-size:5}") int pgCheckBatchSize
     ) {
         this.paymentCompensationProcessor = paymentCompensationProcessor;
         this.batchSize = batchSize;
+        this.pgCheckBatchSize = pgCheckBatchSize;
     }
 
     // 30초마다 실행
     @Scheduled(fixedDelayString = "${payment.compensation.scheduler.fixed-delay:30s}")
     public void processPendingCompensations() {
         try {
-            paymentCompensationProcessor.processPending(batchSize);
+            paymentCompensationProcessor.processPending(batchSize, pgCheckBatchSize);
         } catch (RuntimeException e) {
             // 처리 대상 조회 실패 등. 다음 주기에 다시 시도한다.
             log.error("[Compensation] 스케줄러 실행 실패", e);

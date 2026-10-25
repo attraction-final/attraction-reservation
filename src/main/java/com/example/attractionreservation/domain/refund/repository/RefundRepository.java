@@ -28,11 +28,13 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
     boolean existsByPaymentIdAndStatusInAndIdNot(Long paymentId, Collection<RefundStatus> statuses, Long id);
 
     // PG 취소 결과를 조회로 확인할 차례인 환불. 조건은 Refund.isPgCheckable과 같다.
+    // 한 번에 확인하는 건수가 작으므로 확인 시각이 오래 지난 것부터 고른다. 결과 기록이 실패해 확인 시각이 그대로인 건이
+    // 계속 앞에 뽑혀도 id 순과 달리 다른 건이 밀리지 않는다.
     @Query("""
     SELECT r.id
     FROM Refund r
     WHERE r.status = :pgPending AND r.nextRetryAt <= :now
-    ORDER BY r.id
+    ORDER BY r.nextRetryAt, r.id
     """)
     List<Long> findPgCheckableIds(@Param("pgPending") RefundStatus pgPending,
                                   @Param("now") Instant now,

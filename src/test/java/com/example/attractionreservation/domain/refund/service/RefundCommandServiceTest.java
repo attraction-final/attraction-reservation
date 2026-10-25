@@ -512,6 +512,23 @@ class RefundCommandServiceTest {
     }
 
     @Test
+    @DisplayName("PG 확인 대상은 id 순이 아니라 확인 시각이 오래 지난 환불부터 조회한다.")
+    void findPgCheckableIds_multipleDue_OldestCheckFirst() {
+        //given
+        Long recentlyDue = saveRefund(RefundStatus.PG_PENDING, adult, 1, now.minus(Duration.ofMinutes(5)));
+        Long longOverdue = saveRefund(RefundStatus.PG_PENDING, child, 1, now.minus(Duration.ofMinutes(20)));
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findPgCheckableIds(now, 10);
+        List<Long> firstOnly = refundCommandService.findPgCheckableIds(now, 1);
+
+        //then
+        assertThat(ids).containsExactly(longOverdue, recentlyDue);
+        assertThat(firstOnly).containsExactly(longOverdue);
+    }
+
+    @Test
     @DisplayName("확인 대상으로 꺼낸 환불에는 완료된 환불 합계, 취소 내역 ID, 확인 대기 시작 시각이 담긴다.")
     void findPgCheckable_due_ClaimedWithCompletedAmount() {
         //given

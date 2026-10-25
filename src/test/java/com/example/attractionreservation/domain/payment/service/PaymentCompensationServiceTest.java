@@ -255,6 +255,28 @@ class PaymentCompensationServiceTest {
     }
 
     @Test
+    @DisplayName("PG 확인 대상은 id 순이 아니라 확인 시각이 오래 지난 요청부터 조회한다.")
+    void findPgCheckableIds_multipleDue_OldestCheckFirst() {
+        //given
+        Instant now = now();
+        Long recentlyDue = save("pg-1", now);
+        Long longOverdue = save("pg-2", now);
+        paymentCompensationService.claim(recentlyDue, now);
+        paymentCompensationService.recordPgPending(recentlyDue, 1, "cancel-1", now.minus(Duration.ofMinutes(5)));
+        paymentCompensationService.claim(longOverdue, now);
+        paymentCompensationService.recordPgPending(longOverdue, 1, "cancel-2", now.minus(Duration.ofMinutes(20)));
+        flushAndClear();
+
+        //when
+        List<Long> ids = paymentCompensationService.findPgCheckableIds(now, 10);
+        List<Long> firstOnly = paymentCompensationService.findPgCheckableIds(now, 1);
+
+        //then
+        assertThat(ids).containsExactly(longOverdue, recentlyDue);
+        assertThat(firstOnly).containsExactly(longOverdue);
+    }
+
+    @Test
     @DisplayName("확인할 차례인 PG 확인 대기 요청은 취소 내역 ID와 함께 꺼내고, 차례가 아니면 꺼내지 않는다.")
     void findPgCheckable_pgPending_ReturnWithCancellationId() {
         //given

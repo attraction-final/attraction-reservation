@@ -23,7 +23,9 @@ import java.util.Objects;
  * <p>updated_at은 처리 중 멈춘 환불을 다시 점유할 때의 기준이다.
  */
 @Entity
-@Table(name = "refunds")
+// 스케줄러의 처리 대상·확인 대상 조회(상태 + 다음 재시도·확인 시각)에 쓴다.
+@Table(name = "refunds",
+        indexes = @Index(name = "idx_refunds_status_retry", columnList = "status, next_retry_at"))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Refund extends BaseTimeEntity {

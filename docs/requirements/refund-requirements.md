@@ -347,12 +347,17 @@
 | `pg_pending_since` | `PG_PENDING`이 된 시각. 확인 간격과 확인 기한(24시간)의 기준 |
 | `created_at`, `updated_at` | 생성·수정 시각 (필수). `updated_at`은 멈춘 처리 판단 기준 |
 
+인덱스: `idx_refunds_status_retry (status, next_retry_at)` — 스케줄러가 30초마다 처리 대상과 확인 대상을 이 조건으로 조회한다.
+
 이미 `refunds` 테이블이 있으면(KAN-67 이전 배포) 아래를 먼저 적용한다. `status` 컬럼이 Hibernate가 만든 `ENUM`이면(`SHOW CREATE TABLE refunds`로 확인) `PG_PENDING` 값도 추가해야 한다. 추가하지 않으면 `PG_PENDING` 기록이 실패한다.
 
 ```sql
 ALTER TABLE refunds
   ADD COLUMN pg_cancellation_id VARCHAR(100) NULL,
   ADD COLUMN pg_pending_since DATETIME(6) NULL;
+
+-- 스케줄러의 처리 대상·확인 대상 조회용
+CREATE INDEX idx_refunds_status_retry ON refunds (status, next_retry_at);
 ```
 
 **`refund_items` (환불 상품)**

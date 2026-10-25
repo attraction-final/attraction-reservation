@@ -1,10 +1,13 @@
 package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 //최적 방문 순서 탐색
 
+import org.springframework.stereotype.Component;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 
+@Component
 public class RouteSearcher {
 
     public RouteSearchResult search(

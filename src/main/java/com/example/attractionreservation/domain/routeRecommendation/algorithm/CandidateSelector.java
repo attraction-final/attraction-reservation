@@ -2,7 +2,7 @@ package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 //추천 후보 선정
 
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
-import org.w3c.dom.Attr;
+import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 
+@Component
 public  class CandidateSelector {
     public  static final int RESERVATION_DEADLINE_MINUTES = 30;
 

@@ -1,5 +1,9 @@
 package com.example.attractionreservation.domain.routeRecommendation.service;
 
+import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
@@ -7,6 +11,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.Route
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
 import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
+import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
@@ -32,13 +37,31 @@ import static org.mockito.Mockito.when;
 public class RouteRecommendationServiceTest {
     @Mock
     private RouteRecommendationRepository routeRecommendationRepository;
+
+    @Mock
     private RouteRecommendationService routeRecommendationService;
+
+    @Mock
+    private TicketRepository ticketRepository;
+
+    @Mock
+    private AttractionRepository attractionRepository;
+
+    @Mock
+    private AttractionSlotRepository attractionSlotRepository;
 
     private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-10-20T05:00:00Z"), KstTime.ZONE);
 
     @BeforeEach
     void setUp() {
-        routeRecommendationService = new RouteRecommendationService(routeRecommendationRepository, FIXED_CLOCK
+        routeRecommendationService = new RouteRecommendationService(
+                routeRecommendationRepository,
+                ticketRepository,
+                attractionRepository,
+                attractionSlotRepository,
+                new CandidateSelector(),
+                new RouteSearcher(),
+                FIXED_CLOCK
         );
     }
 

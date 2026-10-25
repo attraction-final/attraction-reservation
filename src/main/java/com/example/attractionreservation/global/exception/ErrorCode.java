@@ -77,6 +77,11 @@ public enum ErrorCode {
     //routeRecommendation
     ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다"),
     NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
+    INVALID_ATTRACTION_SELECTION(HttpStatus.BAD_REQUEST, "어트랙션은 중복 없이 1~5개 선택해야 합니다."),
+    INVALID_TIME_RANGE(HttpStatus.BAD_REQUEST, "이용 시작 시각은 종료 시각보다 이전이어야 하며 입장권 이용 시간 안이어야 합니다."),
+    TICKET_NOT_OWNED(HttpStatus.FORBIDDEN, "본인 소유의 입장권이 아닙니다."),
+    TICKET_NOT_AVAILABLE(HttpStatus.CONFLICT, "사용 중인 입장권으로만 추천받을 수 있습니다."),
+    ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "기존 예약의 취소 가능 시간이 지나 새로운 추천 경로를 생성할 수 없습니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

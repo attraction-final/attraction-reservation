@@ -76,7 +76,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/auth/login",
-                                "/api/auth/refresh"
+                                "/api/auth/refresh",
+                                "/api/auth/oauth2/exchange"
                         ).permitAll()
 
                         // 관리자 전용 API는 ADMIN 권한이 있는 회원만 접근할 수 있다.

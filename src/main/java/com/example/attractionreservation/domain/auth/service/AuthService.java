@@ -1,6 +1,7 @@
 
 package com.example.attractionreservation.domain.auth.service;
 
+import com.example.attractionreservation.domain.auth.repository.SocialLoginCodeRepository;
 import com.example.attractionreservation.domain.user.entity.AuthProvider;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
@@ -29,19 +30,42 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final SocialLoginCodeRepository socialLoginCodeRepository;
 
     @Transactional(readOnly = true)
     public CreateAuthLoginServiceResponse login(CreateAuthLoginRequest request) {
-
-        // 이메일, 비밀번호, 회원 상태를 검증한다.
         User user = authenticateUser(request);
+        return issueTokens(user.getId());
+    }
 
-        // API 인증에 사용할 Access Token과 재발급에 사용할 Refresh Token을 생성한다.
-        String accessToken = jwtProvider.createAccessToken(user.getId());
-        String refreshToken = jwtProvider.createRefreshToken(user.getId());
+    @Transactional(readOnly = true)
+    public CreateAuthLoginServiceResponse exchangeSocialLoginCode(String code) {
+        // 읽기와 삭제를 원자적으로 처리하여 동일 코드는 한 번만 사용한다.
+        Long userId = socialLoginCodeRepository.consume(code)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.SOCIAL_LOGIN_CODE_INVALID
+                ));
 
-        // 로그아웃 시 무효화할 수 있도록 Refresh Token 해시값을 Redis에 저장한다.
-        refreshTokenRepository.save(user.getId(), refreshToken);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.SOCIAL_LOGIN_CODE_INVALID
+                ));
+
+        // 제공자 인증 이후 정지·탈퇴했을 수 있으므로 상태를 다시 확인한다.
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.USER_NOT_ACTIVE);
+        }
+
+        return issueTokens(user.getId());
+    }
+
+    private CreateAuthLoginServiceResponse issueTokens(Long userId) {
+        // 일반 로그인과 소셜 코드 교환에 동일한 토큰 발급 정책을 적용한다.
+        String accessToken = jwtProvider.createAccessToken(userId);
+        String refreshToken = jwtProvider.createRefreshToken(userId);
+
+        // 기존 저장 정책을 재사용하여 로그아웃 시 무효화할 수 있게 한다.
+        refreshTokenRepository.save(userId, refreshToken);
 
         CreateAuthLoginResponse response = CreateAuthLoginResponse.of(
                 accessToken,

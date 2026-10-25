@@ -189,6 +189,25 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("취소 요청의 멱등 키는 쌍따옴표로 감싼 문자열로 보낸다.")
+    void cancelPayment_idempotencyKey_SentAsQuotedString() {
+        //given
+        List<String> idempotencyKeys = new ArrayList<>();
+        server.expect(requestTo(CANCEL_URL))
+                .andExpect(request -> idempotencyKeys.add(request.getHeaders().getFirst("Idempotency-Key")))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(idempotencyKeys).singleElement().asString().matches("^\"[0-9a-f-]{36}\"$");
+    }
+
+    @Test
     @DisplayName("부분 취소 요청에는 취소 금액을 보낸다.")
     void cancelPayment_partial_SendAmount() {
         //given

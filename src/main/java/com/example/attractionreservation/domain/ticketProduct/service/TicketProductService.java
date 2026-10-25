@@ -38,7 +38,7 @@ public class TicketProductService {
     // 티켓 상품 수정
     @Transactional
     public UpdateTicketProductResponse updateTicketProduct(Long ticketProductId, UpdateTicketProductRequest request) {
-        TicketProduct ticketProduct = getTicketById(ticketProductId);
+        TicketProduct ticketProduct = getTicketProductById(ticketProductId);
 
         ticketProduct.updateTicketProduct(
                 request.name(),
@@ -54,7 +54,7 @@ public class TicketProductService {
     // 티켓 상품 삭제
     @Transactional
     public void deleteTicketProduct(Long ticketProductId) {
-        TicketProduct ticketProduct = getTicketById(ticketProductId);
+        TicketProduct ticketProduct = getTicketProductById(ticketProductId);
         ticketProduct.delete();
     }
 
@@ -71,14 +71,14 @@ public class TicketProductService {
 
     // 티켓 상품 상세 조회
     public SearchTicketProductResponse findTicketProductById(Long ticketProductId) {
-        TicketProduct ticketProduct = getTicketById(ticketProductId);
+        TicketProduct ticketProduct = getTicketProductById(ticketProductId);
         return SearchTicketProductResponse.from(ticketProduct);
     }
 
     // 티켓 찾기 중복 코드 메서드 분리
-    private TicketProduct getTicketById(Long ticketProductId) {
+    private TicketProduct getTicketProductById(Long ticketProductId) {
         return ticketProductRepository.findById(ticketProductId).orElseThrow(
-                () -> new BusinessException(ErrorCode.TICKET_NOT_FOUND)
+                () -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND)
         );
     }
 }

@@ -52,7 +52,6 @@ public class User extends BaseTimeEntity {
         this.role = (role != null) ? role : Role.USER;
         this.status = UserStatus.ACTIVE;
     }
-
     public void updateStatus(UserStatus newStatus) {
         if (this.status == newStatus) {
             throw new BusinessException(ErrorCode.USER_STATUS_SAME);
@@ -75,5 +74,9 @@ public class User extends BaseTimeEntity {
         }
 
         this.status = newStatus;
+    }
+
+    public void updateNickname(String nickname) {
+        this.nickname = nickname;
     }
 }

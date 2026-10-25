@@ -129,6 +129,15 @@ public class RouteRecommendation extends BaseTimeEntity {
        this.estimatedEndAt =lastStop.getSlotEndAt();
        this.totalDurationMinutes = (int) Duration.between(startAt, estimatedEndAt).toMinutes();
    }
+    public boolean isDeleted() {
+        return deletedAt != null;
+    }
+    public void delete(Instant now) {
+        if (isDeleted()) {
+            return;
+        }
+        this.deletedAt = now;
+    }
 
 
 

@@ -13,9 +13,9 @@ import com.example.attractionreservation.infra.portone.dto.PortOneErrorResponse;
 import com.example.attractionreservation.infra.portone.dto.PortOnePaymentResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -31,6 +31,7 @@ import java.util.UUID;
 public class PortOneClient implements PaymentGateway {
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
+    private static final String PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND";
 
     private final RestClient portOneRestClient;
     private final PortOneProperties portOneProperties;
@@ -46,9 +47,11 @@ public class PortOneClient implements PaymentGateway {
                     .retrieve()
                     .body(PortOnePaymentResponse.class))
                     .map(response -> toGatewayResponse(pgId, response));
-        } catch (HttpClientErrorException.NotFound e) {
-            return Optional.empty();
         } catch (RestClientResponseException e) {
+            if (isPaymentNotFound(e)) {
+                return Optional.empty();
+            }
+
             log.warn("PortOne 결제 조회 실패: pgId={}, httpStatus={}, responseBody={}",
                     pgId, e.getStatusCode().value(), e.getResponseBodyAsString());
 
@@ -159,6 +162,12 @@ public class PortOneClient implements PaymentGateway {
 
         return exception instanceof UnknownContentTypeException unknownContentType
                 && unknownContentType.getStatusCode().is2xxSuccessful();
+    }
+
+    // 경로·상점 설정 오류 등 다른 404를 결제 없음으로 오인하지 않도록 type까지 확인한다.
+    private boolean isPaymentNotFound(RestClientResponseException exception) {
+        return exception.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND)
+                && PAYMENT_NOT_FOUND.equals(extractErrorType(exception));
     }
 
     private boolean isAlreadyCancelled(RestClientResponseException exception) {

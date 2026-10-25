@@ -8,7 +8,6 @@ import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.infra.portone.config.PortOneProperties;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -425,8 +424,6 @@ class PortOneClientTest {
         assertThat(response.findCancellation("cancel-1")).isEmpty();
     }
 
-    // ---- 아래는 리뷰 2·4·5번(머지 전 항목)을 고치면 활성화할 테스트 ----
-
     @Test
     @DisplayName("결제 완료 응답에 결제 완료 시각이 없으면 결제사 오류로 처리한다.")
     void getPayment_paidWithoutPaidAt_Fail() {
@@ -492,7 +489,6 @@ class PortOneClientTest {
     }
 
     @Test
-    @Disabled("리뷰 5번: 404 응답의 type 확인 복구 시 활성화")
     @DisplayName("결제사 404 응답이 결제 없음 오류가 아니면 결제사 오류로 처리한다.")
     void getPayment_notFoundWithoutPaymentNotFoundType_Fail() {
         //given

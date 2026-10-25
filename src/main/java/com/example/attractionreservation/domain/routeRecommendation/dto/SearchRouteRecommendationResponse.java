@@ -65,7 +65,7 @@ public record SearchRouteRecommendationResponse(
             int sequence,
             Long attractionId,
             String attractionName,
-            Long attractionSlotIdm,
+            Long attractionSlotId,
             int estimatedMoveMinutes,
             LocalDateTime estimatedArrivalAt,
             int estimatedWaitMinutes,

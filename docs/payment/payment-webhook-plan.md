@@ -212,7 +212,7 @@ payment:
 ### 보상 취소 Outbox (KAN-39에서 구현)
 
 - 웹훅의 스케줄러·Processor 구조를 그대로 재사용해 구현했다. 상세는 [payment-compensation.md](payment-compensation.md).
-- 두 스케줄러가 서로의 PG 지연에 밀리지 않도록 `spring.task.scheduling.pool.size: 2`로 스레드를 나눴다.
+- 두 스케줄러가 서로의 PG 지연에 밀리지 않도록 `spring.task.scheduling.pool.size: 2`로 스레드를 나눴다. 환불 스케줄러(KAN-51)가 더해져 지금은 `3`이다.
 
 ### 운영
 

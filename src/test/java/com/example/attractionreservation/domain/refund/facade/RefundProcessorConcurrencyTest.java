@@ -197,7 +197,7 @@ class RefundProcessorConcurrencyTest {
         //given
         Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
-                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now())));
+                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(), List.of())));
 
         // PG 취소가 PG에 도착한 뒤 응답 전에 멈춰, 그 사이 웹훅을 처리한다.
         CountDownLatch cancelArrived = new CountDownLatch(1);
@@ -242,7 +242,7 @@ class RefundProcessorConcurrencyTest {
         assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.FAILED);
 
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
-                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now())));
+                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(), List.of())));
         Long eventId = transactionTemplate.execute(status -> {
             WebhookEvent event = WebhookEvent.receive("webhook-1", pgId, "WebhookTransactionCancelled", "{}");
             entityManager.persist(event);

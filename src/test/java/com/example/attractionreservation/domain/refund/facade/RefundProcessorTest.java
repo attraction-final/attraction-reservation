@@ -149,7 +149,7 @@ class RefundProcessorTest {
     void syncWithPg_cancelled_SyncWithCancelledAmount() {
         //given
         given(paymentGateway.getPayment("pg-id")).willReturn(Optional.of(new PaymentGatewayResponse(
-                "pg-id", GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 20000L, Instant.now())));
+                "pg-id", GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 20000L, Instant.now(), List.of())));
         given(refundCommandService.syncWithPgCancelledAmount(eq("pg-id"), eq(20000L), any()))
                 .willReturn(PaymentSyncResult.REFUND_SYNCED);
 
@@ -165,7 +165,7 @@ class RefundProcessorTest {
     void syncWithPg_noCancelledAmount_SyncWithZero() {
         //given
         given(paymentGateway.getPayment("pg-id")).willReturn(Optional.of(new PaymentGatewayResponse(
-                "pg-id", GatewayPaymentStatus.PAID, 50000L, null, Instant.now())));
+                "pg-id", GatewayPaymentStatus.PAID, 50000L, null, Instant.now(), List.of())));
         given(refundCommandService.syncWithPgCancelledAmount(eq("pg-id"), eq(0L), any()))
                 .willReturn(PaymentSyncResult.ALREADY_DONE);
 

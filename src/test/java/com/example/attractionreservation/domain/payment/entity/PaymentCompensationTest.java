@@ -13,6 +13,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Duration;
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -236,6 +237,205 @@ class PaymentCompensationTest {
         assertFalse(compensation.isProcessable(NOW, STALE_TIMEOUT));
     }
 
+    @Test
+    @DisplayName("PG가 취소를 접수하면 PG_PENDING이 되고, 취소를 다시 보내는 대상이 아니며 1분 뒤 확인 대상이 된다.")
+    void markAsPgPending_processing_CheckAfterOneMinute() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
+
+        //when
+        compensation.markAsPgPending("cancel-1", NOW);
+
+        //then
+        assertEquals(CompensationStatus.PG_PENDING, compensation.getStatus());
+        assertEquals("cancel-1", compensation.getPgCancellationId());
+        assertEquals(NOW, compensation.getPgPendingSince());
+        assertFalse(compensation.isProcessable(NOW.plus(Duration.ofDays(1)), STALE_TIMEOUT));
+        assertFalse(compensation.isPgCheckable(NOW.plusSeconds(59)));
+        assertTrue(compensation.isPgCheckable(NOW.plus(Duration.ofMinutes(1))));
+    }
+
+    @Test
+    @DisplayName("점유하지 않은 보상은 PG 확인 대기로 바꿀 수 없다.")
+    void markAsPgPending_requested_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensation();
+
+        //when & then
+        assertThatThrownBy(() -> compensation.markAsPgPending("cancel-1", NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(CompensationStatus.REQUESTED, compensation.getStatus());
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기 중 취소 완료를 확인하면 DONE이 되고 처리 시각이 기록된다.")
+    void confirmPgCancelled_pgPending_Done() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant confirmedAt = NOW.plus(Duration.ofMinutes(3));
+
+        //when
+        compensation.confirmPgCancelled(confirmedAt);
+
+        //then
+        assertEquals(CompensationStatus.DONE, compensation.getStatus());
+        assertEquals(confirmedAt, compensation.getProcessedAt());
+        assertFalse(compensation.isPgCheckable(confirmedAt.plus(Duration.ofDays(1))));
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기가 아니면 조회 결과로 완료 처리할 수 없다.")
+    void confirmPgCancelled_processing_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
+
+        //when & then
+        assertThatThrownBy(() -> compensation.confirmPgCancelled(NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(CompensationStatus.PROCESSING, compensation.getStatus());
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기 중 취소 실패를 확인하면 FAILED가 되어 취소를 다시 시도할 수 있다.")
+    void confirmPgCancelFailed_pgPending_FailedAndRetry() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+
+        //when
+        compensation.confirmPgCancelFailed("PG 취소 실패 확인", NOW);
+
+        //then
+        assertEquals(CompensationStatus.FAILED, compensation.getStatus());
+        assertEquals("PG 취소 실패 확인", compensation.getLastError());
+        assertTrue(compensation.isProcessable(NOW.plus(Duration.ofMinutes(1)), STALE_TIMEOUT));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, 10L, 120L})
+    @DisplayName("다음 확인은 PG 확인 대기 후 지난 시간만큼 뒤로 예약하되 1분 이상 30분 이하로 한다.")
+    void reschedulePgCheck_pgPending_DelayByElapsedTime(long elapsedMinutes) {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant now = NOW.plus(Duration.ofMinutes(elapsedMinutes));
+        long expectedDelay = Math.min(30L, Math.max(1L, elapsedMinutes));
+
+        //when
+        compensation.reschedulePgCheck(now);
+
+        //then
+        assertEquals(CompensationStatus.PG_PENDING, compensation.getStatus());
+        assertEquals(now.plus(Duration.ofMinutes(expectedDelay)), compensation.getNextRetryAt());
+    }
+
+    @Test
+    @DisplayName("확인 기한이 지나도 확정되지 않으면 DEAD가 되고 처리 종료 시각과 사유가 기록된다.")
+    void reschedulePgCheck_afterTimeout_Dead() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant expiredAt = NOW.plus(PaymentCompensation.PG_CHECK_TIMEOUT);
+
+        //when
+        compensation.reschedulePgCheck(expiredAt);
+
+        //then
+        assertEquals(CompensationStatus.DEAD, compensation.getStatus());
+        assertEquals(expiredAt, compensation.getProcessedAt());
+        assertEquals("PG 취소 확인 기한 초과", compensation.getLastError());
+        assertFalse(compensation.isPgCheckable(expiredAt.plus(Duration.ofDays(1))));
+    }
+
+    @Test
+    @DisplayName("확인 기한 직전이면 DEAD가 되지 않고 PG 확인 대기를 유지한다.")
+    void reschedulePgCheck_justBeforeTimeout_PgPending() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant justBeforeExpiry = NOW.plus(PaymentCompensation.PG_CHECK_TIMEOUT).minusMillis(1);
+
+        //when
+        compensation.reschedulePgCheck(justBeforeExpiry);
+
+        //then
+        assertEquals(CompensationStatus.PG_PENDING, compensation.getStatus());
+        assertNull(compensation.getProcessedAt());
+    }
+
+    @Test
+    @DisplayName("점유한 처리의 시도 횟수와 같으면 결과를 기록할 수 있다.")
+    void verifyClaimedBy_sameAttempt_Pass() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
+
+        //when & then
+        assertThatCode(() -> compensation.verifyClaimedBy(1)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("다른 처리가 다시 점유해 시도 횟수가 달라졌으면 이전 처리의 결과는 거부한다.")
+    void verifyClaimedBy_reclaimedByOther_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
+        compensation.markAsProcessing(); // 멈춘 행으로 보고 다시 점유
+
+        //when & then
+        assertThatThrownBy(() -> compensation.verifyClaimedBy(1))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
+    @Test
+    @DisplayName("처리 중이 아니면 시도 횟수가 같아도 결과를 기록할 수 없다.")
+    void verifyClaimedBy_notProcessing_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+
+        //when & then
+        assertThatThrownBy(() -> compensation.verifyClaimedBy(1))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
+    @Test
+    @DisplayName("확인한 PG 확인 대기 주기와 시작 시각이 같으면 확인 결과를 기록할 수 있다.")
+    void verifyPgPendingSince_sameCycle_Pass() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+
+        //when & then
+        assertThatCode(() -> compensation.verifyPgPendingSince(NOW)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("확인한 뒤 재취소로 새 PG 확인 대기 주기가 됐으면 이전 주기의 확인 결과는 거부한다.")
+    void verifyPgPendingSince_newCycle_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant retriedAt = NOW.plus(Duration.ofMinutes(10));
+        compensation.confirmPgCancelFailed("PG 취소 실패 확인", NOW);
+        compensation.markAsProcessing();
+        compensation.markAsPgPending("cancel-2", retriedAt);
+
+        //when & then
+        assertThatThrownBy(() -> compensation.verifyPgPendingSince(NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+        compensation.verifyPgPendingSince(retriedAt);
+    }
+
+    @Test
+    @DisplayName("PG 확인 대기가 아니면 확인 결과를 기록할 수 없다.")
+    void verifyPgPendingSince_notPgPending_Fail() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        compensation.confirmPgCancelled(NOW);
+
+        //when & then
+        assertThatThrownBy(() -> compensation.verifyPgPendingSince(NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
     private PaymentCompensation createCompensation() {
         return PaymentCompensation.request("pg-id", 9999L, "결제 금액 불일치", NOW);
     }
@@ -253,6 +453,10 @@ class PaymentCompensationTest {
             case DONE -> {
                 compensation.markAsProcessing();
                 compensation.markAsDone(NOW);
+            }
+            case PG_PENDING -> {
+                compensation.markAsProcessing();
+                compensation.markAsPgPending("cancel-1", NOW);
             }
             case DEAD -> {
                 for (int i = 0; i < PaymentCompensation.MAX_ATTEMPTS; i++) {

@@ -15,6 +15,8 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -35,6 +37,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
@@ -227,6 +230,35 @@ class RefundCommandServiceTest {
         assertThat(firstStatus).isEqualTo(RefundStatus.FAILED);
         assertThat(lastStatus).isEqualTo(RefundStatus.DEAD);
         assertThat(find(refundId).getLastError()).isEqualTo("결제 취소에 실패했습니다.");
+    }
+
+    @Test
+    @DisplayName("재시도하면 안 되는 실패를 기록하면 시도 횟수와 관계없이 바로 DEAD가 된다.")
+    void recordDead_processing_DeadWithoutRetry() {
+        //given
+        Long refundId = saveRefund(RefundStatus.PROCESSING, adult, 1);
+
+        //when
+        refundCommandService.recordDead(refundId, "이미 취소된 결제입니다.");
+
+        //then
+        Refund found = find(refundId);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.DEAD);
+        assertThat(found.getLastError()).isEqualTo("이미 취소된 결제입니다.");
+        assertThat(found.getAttemptCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("이미 완료된 환불은 DEAD로 기록하지 않는다.")
+    void recordDead_completed_Fail() {
+        //given
+        Long refundId = saveRefund(RefundStatus.COMPLETED, adult, 1);
+
+        //when & then
+        assertThatThrownBy(() -> refundCommandService.recordDead(refundId, "이미 취소된 결제입니다."))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+        assertThat(find(refundId).getStatus()).isEqualTo(RefundStatus.COMPLETED);
     }
 
     @Test

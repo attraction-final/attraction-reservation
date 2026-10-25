@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.payment.service;
 
+import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.payment.entity.Payment;
@@ -24,6 +25,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -131,8 +134,8 @@ class PaymentCompensationOutboxTest {
     }
 
     @Test
-    @DisplayName("취소된 결제의 보상 요청은 커밋되고, 다시 요청해도 추가로 만들지 않는다.")
-    void requestCompensationForCancelled_cancelled_CommitOnce() {
+    @DisplayName("취소된 결제를 승인하면 보상 요청이 같은 트랜잭션에서 커밋되고, 다시 승인해도 추가로 만들지 않는다.")
+    void approvePayment_cancelled_CommitCompensationOnce() {
         //given
         transactionTemplate.executeWithoutResult(status -> entityManager
                 .createQuery("update Payment p set p.status = :cancelled where p.pgId = :pgId")
@@ -141,12 +144,12 @@ class PaymentCompensationOutboxTest {
                 .executeUpdate());
 
         //when
-        boolean first = paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제");
-        boolean second = paymentCommandService.requestCompensationForCancelled(pgId, 10000L, "취소된 주문의 결제");
+        ConfirmPaymentResponse first = paymentCommandService.approvePayment(pgId, Instant.now(), 10000L);
+        ConfirmPaymentResponse second = paymentCommandService.approvePayment(pgId, Instant.now(), 10000L);
 
         //then
-        assertThat(first).isTrue();
-        assertThat(second).isFalse();
+        assertThat(first.status()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(second.status()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(paymentCompensationRepository.count()).isEqualTo(1);
         assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
 

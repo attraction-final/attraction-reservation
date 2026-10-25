@@ -3,6 +3,7 @@ package com.example.attractionreservation.domain.payment.service;
 import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
+import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentResponse;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
@@ -85,6 +86,7 @@ class PaymentServiceConcurrencyTest {
     @AfterEach
     void tearDown() {
         transactionTemplate.executeWithoutResult(status -> {
+            entityManager.createQuery("delete from PaymentCompensation").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
             entityManager.createQuery("delete from Order").executeUpdate();
             entityManager.createQuery("delete from User").executeUpdate();
@@ -221,7 +223,7 @@ class PaymentServiceConcurrencyTest {
 
                 // 그 사이 도착한 승인(예: 웹훅)은 락 해제까지 대기한다.
                 Future<?> approveFuture = executor.submit(() ->
-                        paymentCommandService.approvePayment(pgId, secondApprovedAt));
+                        paymentCommandService.approvePayment(pgId, secondApprovedAt, 10000L));
                 approveFutures.add(approveFuture);
                 assertThatThrownBy(() -> approveFuture.get(1, TimeUnit.SECONDS))
                         .isInstanceOf(TimeoutException.class);
@@ -243,12 +245,12 @@ class PaymentServiceConcurrencyTest {
     }
 
     @Test
-    @DisplayName("사용자 취소 트랜잭션이 락을 잡고 있으면 승인은 대기하고, 취소 커밋 후 취소된 결제로 보고 승인하지 않는다.")
-    void approvePayment_waitForUserCancel_AlreadyCancelled() throws Exception {
+    @DisplayName("사용자 취소 트랜잭션이 락을 잡고 있으면 승인은 대기하고, 취소 커밋 후 취소된 결제로 보고 승인하지 않으며 보상 요청을 함께 저장한다.")
+    void approvePayment_waitForUserCancel_CancelledWithCompensation() throws Exception {
         //given
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Instant paidAt = Instant.parse("2026-10-20T01:00:00Z");
-        List<Future<?>> approveFutures = new ArrayList<>();
+        List<Future<ConfirmPaymentResponse>> approveFutures = new ArrayList<>();
 
         //when
         try {
@@ -257,8 +259,8 @@ class PaymentServiceConcurrencyTest {
                 Payment payment = paymentRepository.findWithLockByOrderId(orderId).orElseThrow();
 
                 // 그 사이 PG 결제 완료로 승인(승인 API·웹훅)이 들어오면 락 해제까지 대기한다.
-                Future<?> approveFuture = executor.submit(() ->
-                        paymentCommandService.approvePayment(pgId, paidAt));
+                Future<ConfirmPaymentResponse> approveFuture = executor.submit(() ->
+                        paymentCommandService.approvePayment(pgId, paidAt, 10000L));
                 approveFutures.add(approveFuture);
                 assertThatThrownBy(() -> approveFuture.get(1, TimeUnit.SECONDS))
                         .isInstanceOf(TimeoutException.class);
@@ -268,11 +270,8 @@ class PaymentServiceConcurrencyTest {
             });
 
             //then
-            assertThatThrownBy(() -> approveFutures.get(0).get(10, TimeUnit.SECONDS))
-                    .isInstanceOf(ExecutionException.class)
-                    .cause()
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+            ConfirmPaymentResponse response = approveFutures.get(0).get(10, TimeUnit.SECONDS);
+            assertThat(response.status()).isEqualTo(PaymentStatus.CANCELLED);
         } finally {
             executor.shutdownNow();
         }
@@ -281,6 +280,7 @@ class PaymentServiceConcurrencyTest {
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(result.getPaidAt()).isNull();
         assertThat(findOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(countCompensations()).isEqualTo(1L);
     }
 
     @Test
@@ -297,7 +297,7 @@ class PaymentServiceConcurrencyTest {
         for (int i = 0; i < threadCount; i++) {
             futures.add(executor.submit(() -> {
                 startLatch.await();
-                paymentCommandService.approvePayment(pgId, paidAt);
+                paymentCommandService.approvePayment(pgId, paidAt, 10000L);
                 return null;
             }));
         }
@@ -314,6 +314,12 @@ class PaymentServiceConcurrencyTest {
         Payment payment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(findOrderStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    private long countCompensations() {
+        return transactionTemplate.execute(status -> entityManager
+                .createQuery("select count(c) from PaymentCompensation c", Long.class)
+                .getSingleResult());
     }
 
     private OrderStatus findOrderStatus() {

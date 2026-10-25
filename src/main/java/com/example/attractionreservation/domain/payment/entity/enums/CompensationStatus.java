@@ -17,6 +17,18 @@ public enum CompensationStatus {
             return nextStatus == PROCESSING
                     || nextStatus == DONE
                     || nextStatus == FAILED
+                    || nextStatus == DEAD
+                    || nextStatus == PG_PENDING;
+        }
+    },
+    // PG가 취소를 접수했지만 끝나지 않았거나 결과를 알 수 없음. 취소를 다시 보내지 않고 조회로 확정한다
+    PG_PENDING {
+        @Override
+        public boolean canTransitTo(CompensationStatus nextStatus) {
+            // PG_PENDING → PG_PENDING은 아직 확정되지 않아 다음 확인을 예약하는 경우
+            return nextStatus == PG_PENDING
+                    || nextStatus == DONE
+                    || nextStatus == FAILED
                     || nextStatus == DEAD;
         }
     },
@@ -34,7 +46,7 @@ public enum CompensationStatus {
             return false;
         }
     },
-    // 최대 시도 횟수 초과, 수동 환불 필요
+    // 최대 시도 횟수 초과 또는 PG 취소 확인 기한 초과, 수동 환불 필요
     DEAD {
         @Override
         public boolean canTransitTo(CompensationStatus nextStatus) {

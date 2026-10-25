@@ -152,12 +152,13 @@ class RefundControllerTest {
     @ValueSource(strings = {
             "{ \"reason\": \"단순 변심\" }",
             "{ \"items\": [], \"reason\": \"단순 변심\" }",
+            "{ \"items\": [ null ], \"reason\": \"단순 변심\" }",
             "{ \"items\": [ { \"orderItemId\": 100, \"quantity\": 0 } ], \"reason\": \"단순 변심\" }",
             "{ \"items\": [ { \"orderItemId\": 100 } ], \"reason\": \"단순 변심\" }",
             "{ \"items\": [ { \"quantity\": 1 } ], \"reason\": \"단순 변심\" }",
             "{ \"items\": [ { \"orderItemId\": 100, \"quantity\": 1 } ] }"
     })
-    @DisplayName("부분 환불 항목이 없거나, 수량이 1 미만이거나, 필수값이 빠지면 400을 반환하고 환불하지 않는다.")
+    @DisplayName("부분 환불 항목이 없거나, null 항목이 있거나, 수량이 1 미만이거나, 필수값이 빠지면 400을 반환하고 환불하지 않는다.")
     void createPartialRefund_invalidRequest_BadRequest(String body) throws Exception {
         //when & then
         mockMvc.perform(post(PARTIAL_REFUND_URL, "pg-id")

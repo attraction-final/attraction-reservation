@@ -168,6 +168,23 @@ class WebhookEventCommandServiceTest {
         assertThat(find(approved).getStatus()).isEqualTo(WebhookStatus.PROCESSED);
     }
 
+    @ParameterizedTest
+    @EnumSource(value = PaymentSyncResult.class,
+            names = {"APPROVED", "ALREADY_DONE", "NOT_PAID", "PG_FAILED", "COMPENSATED"})
+    @DisplayName("처리가 끝난 결과는 모두 PROCESSED로 기록한다.")
+    void recordResult_completedResult_Processed(PaymentSyncResult result) {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        Instant now = now();
+        webhookEventCommandService.claim(id, now);
+
+        //when
+        webhookEventCommandService.recordResult(id, result, now);
+
+        //then
+        assertThat(find(id).getStatus()).isEqualTo(WebhookStatus.PROCESSED);
+    }
+
     @Test
     @DisplayName("PG 취소로 환불을 완료 처리한 결과는 PROCESSED로 기록한다.")
     void recordResult_refundSynced_Processed() {

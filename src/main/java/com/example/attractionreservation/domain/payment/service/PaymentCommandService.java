@@ -15,6 +15,8 @@ import java.time.Instant;
 @Service
 @RequiredArgsConstructor
 public class PaymentCommandService {
+    private static final String CANCELLED_PAYMENT_REASON = "취소된 주문의 결제";
+
     private final PaymentRepository paymentRepository;
     private final PaymentCompensationService paymentCompensationService;
 
@@ -27,16 +29,21 @@ public class PaymentCommandService {
      *     <li>이미 결제 완료된 결제는 예외 없이 현재 결제 정보를 반환한다.</li>
      * </ul>
      *
+     * <p>사용자가 취소한 결제가 PG에서 결제 완료된 경우(PG 결제 대기 중 취소)에는 같은 트랜잭션에서
+     * PG 보상 취소 요청을 저장하고(Outbox) CANCELLED 상태의 결제 정보를 반환한다. 원장 확인과 보상 요청이
+     * 함께 커밋되므로 그 사이에 서버가 종료돼도 보상 요청이 사라지지 않는다. 보상 요청이 이미 있으면 다시 만들지 않는다.
+     *
      * <p>PG 조회와 금액 검증은 트랜잭션 밖(호출하는 쪽)에서 수행한다.
      *
-     * @param paidAt PG 조회로 확인한 결제 완료 시각
+     * @param paidAt   PG 조회로 확인한 결제 완료 시각
+     * @param pgAmount PG가 실제 결제한 금액. 취소된 결제의 보상 금액으로 쓴다
+     * @return 결제 정보. 사용자가 취소한 결제면 status가 CANCELLED다
      * @throws BusinessException 결제가 없으면 {@code PAYMENT_NOT_FOUND},
      *                           실패 처리된 결제면 {@code PAYMENT_ALREADY_PROCESSED},
-     *                           사용자가 취소한 결제면 {@code PAYMENT_ALREADY_CANCELLED},
      *                           그 밖에 결제 완료로 전이할 수 없으면 {@code PAYMENT_INVALID_STATUS_TRANSITION}
      */
     @Transactional
-    public ConfirmPaymentResponse approvePayment(String pgId, Instant paidAt) {
+    public ConfirmPaymentResponse approvePayment(String pgId, Instant paidAt, Long pgAmount) {
         Payment payment = getPaymentByPgIdForUpdate(pgId);
 
         // 이미 결제 처리된 경우
@@ -48,9 +55,12 @@ public class PaymentCommandService {
             throw new BusinessException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
         }
 
-        // PG 결제 대기 중 사용자가 취소한 경우. 호출하는 쪽에서 requestCompensationForCancelled로 보상을 요청한다.
+        // PG 결제 대기 중 사용자가 취소한 경우. PG에서 결제된 금액을 돌려주도록 보상 요청을 함께 커밋한다.
         if (payment.getStatus() == PaymentStatus.CANCELLED) {
-            throw new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED);
+            if (isCancelledWithoutCompensation(payment)) {
+                paymentCompensationService.saveCompensatingEvent(pgId, pgAmount, CANCELLED_PAYMENT_REASON);
+            }
+            return ConfirmPaymentResponse.from(payment);
         }
 
         payment.markAsPaid(paidAt);
@@ -89,26 +99,6 @@ public class PaymentCommandService {
     public boolean failPaymentWithCompensation(String pgId, Long pgAmount, String reason) {
         Payment payment = getPaymentByPgIdForUpdate(pgId);
         if (!markAsFailedIfPending(payment) && !isCancelledWithoutCompensation(payment)) {
-            return false;
-        }
-
-        paymentCompensationService.saveCompensatingEvent(pgId, pgAmount, reason);
-        return true;
-    }
-
-    /**
-     * 사용자가 취소한 결제가 PG에서 결제 완료된 경우 PG 보상 취소 요청을 저장한다(Outbox).
-     * {@link #approvePayment}가 {@code PAYMENT_ALREADY_CANCELLED}로 끝난 뒤 호출한다.
-     *
-     * <p>결제를 비관적 락으로 조회하므로 동시에 호출돼도 보상 요청은 한 번만 저장된다.
-     *
-     * @param pgAmount PG가 실제 결제한 금액(취소할 금액)
-     * @return 이번 호출에서 보상을 요청했으면 true, 취소된 결제가 아니거나 이미 보상 요청이 있으면 false
-     * @throws BusinessException 결제가 없으면 {@code PAYMENT_NOT_FOUND}
-     */
-    @Transactional
-    public boolean requestCompensationForCancelled(String pgId, Long pgAmount, String reason) {
-        if (!isCancelledWithoutCompensation(getPaymentByPgIdForUpdate(pgId))) {
             return false;
         }
 

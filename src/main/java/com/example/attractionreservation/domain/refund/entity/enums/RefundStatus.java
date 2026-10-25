@@ -16,7 +16,19 @@ public enum RefundStatus {
             // PROCESSING → PROCESSING은 처리 중 멈춘 환불을 다시 점유하는 경우
             return nextStatus == PROCESSING
                     || nextStatus == COMPLETED
+                    || nextStatus == PG_PENDING
                     || nextStatus == FAILED
+                    || nextStatus == DEAD;
+        }
+    },
+    // PG가 취소를 접수했지만 끝나지 않았거나 응답을 해석하지 못했다. 취소를 다시 보내지 않고 PG 조회로 확정한다
+    PG_PENDING {
+        @Override
+        public boolean canTransitTo(RefundStatus nextStatus) {
+            // PG_PENDING → PG_PENDING은 아직 확정되지 않아 다음 확인을 예약하는 경우, DEAD는 확인 기한이 지난 경우
+            return nextStatus == COMPLETED
+                    || nextStatus == FAILED
+                    || nextStatus == PG_PENDING
                     || nextStatus == DEAD;
         }
     },

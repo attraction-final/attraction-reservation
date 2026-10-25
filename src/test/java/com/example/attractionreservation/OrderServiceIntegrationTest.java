@@ -1,5 +1,6 @@
 package com.example.attractionreservation;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -28,6 +29,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 import java.util.List;
 import java.util.UUID;
@@ -276,6 +279,75 @@ class OrderServiceIntegrationTest {
         );
 
         assertThat(repeatedCount).isZero();
+    }
+
+    @Test
+    @DisplayName("실제 DB의 본인 주문과 항목을 조회하고 생성 시각을 KST로 반환한다")
+    void findOrderById_savedOrder_returnsDetailFromDatabase() {
+        // given
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("조회테스트")
+                        .build()
+        );
+
+        TicketProduct product = ticketProductRepository.saveAndFlush(
+                new TicketProduct(
+                        "종일이용권",
+                        60000,
+                        "주문 조회 테스트 상품",
+                        TicketType.ALL_DAY,
+                        100,
+                        TicketProductStatus.ON_SALE
+                )
+        );
+
+        Long userId = user.getId();
+        Long productId = product.getId();
+
+        CreateOrderResponse createdOrder = orderService.createOrder(
+                userId,
+                new CreateOrderRequest(List.of(
+                        new CreateOrderRequest.Item(productId, 2)
+                ))
+        );
+
+        entityManager.flush();
+        entityManager.clear();
+
+        // DB에 저장된 실제 시각을 기준으로 기대값을 만든다.
+        Order storedOrder = orderRepository.findById(createdOrder.orderId())
+                .orElseThrow();
+
+        LocalDateTime expectedCreatedAt = LocalDateTime.ofInstant(
+                storedOrder.getCreatedAt(),
+                ZoneId.of("Asia/Seoul")
+        );
+
+        // 상세 조회가 기존 메모리 객체 대신 DB에서 데이터를 가져오도록 한다.
+        entityManager.clear();
+
+        // when
+        SearchOrderResponse response = orderService.findOrderById(
+                userId,
+                createdOrder.orderId()
+        );
+
+        // then
+        assertThat(response.orderId()).isEqualTo(createdOrder.orderId());
+        assertThat(response.totalAmount()).isEqualTo(120000);
+        assertThat(response.status()).isEqualTo("PENDING");
+        assertThat(response.createdAt()).isEqualTo(expectedCreatedAt);
+        assertThat(response.items()).containsExactly(
+                new SearchOrderResponse.Item(
+                        createdOrder.items().get(0).id(),
+                        productId,
+                        60000,
+                        2
+                )
+        );
     }
 
     private Long saveOrderForExpirationTest(

@@ -1,10 +1,11 @@
 package com.example.attractionreservation.domain.order.service;
 
-import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
+import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
@@ -18,14 +19,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -64,7 +65,8 @@ public class OrderService {
                 ));
 
         for (CreateOrderRequest.Item item : request.items()) {
-            TicketProduct ticketProduct = productsById.get(item.ticketProductId());
+            TicketProduct ticketProduct =
+                    productsById.get(item.ticketProductId());
 
             if (ticketProduct == null) {
                 throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
@@ -99,6 +101,20 @@ public class OrderService {
         return CreateOrderResponse.from(savedOrder);
     }
 
+    @Transactional(readOnly = true)
+    public SearchOrderResponse findOrderById(Long userId, Long orderId) {
+        Order order = orderRepository.findOrderById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        // 주문 ID를 알고 있어도 다른 회원의 주문은 조회할 수 없다.
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_ACCESS_DENIED);
+        }
+
+        return SearchOrderResponse.from(order);
+    }
+
     @Transactional
     public UpdateOrderResponse updateOrderByCancel(
             Long userId,
@@ -129,7 +145,7 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
         }
 
-        // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 응답에 재사용하지 않는다.
+        // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
         return UpdateOrderResponse.of(
                 orderId,
                 OrderStatus.CANCELLED

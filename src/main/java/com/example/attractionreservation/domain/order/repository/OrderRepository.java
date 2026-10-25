@@ -2,14 +2,20 @@ package com.example.attractionreservation.domain.order.repository;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
+
+    // 소유자 확인과 상세 응답에 필요한 주문자·항목을 함께 조회한다.
+    @EntityGraph(attributePaths = {"user", "orderItems"})
+    Optional<Order> findOrderById(Long id);
 
     /**
      * 본인의 결제 대기 주문만 취소한다.

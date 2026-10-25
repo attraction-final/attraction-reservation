@@ -458,9 +458,7 @@ class ReservationServiceTest {
             LocalDateTime now
     ) {
         try (MockedStatic<KstTime> mocked = mockStatic(KstTime.class)) {
-            mocked.when(() ->
-                    KstTime.toLocalDateTime(any(Instant.class))
-            ).thenReturn(now);
+            mocked.when(KstTime::now).thenReturn(now);
 
             return reservationService.createReservation(USER_ID, request);
         }

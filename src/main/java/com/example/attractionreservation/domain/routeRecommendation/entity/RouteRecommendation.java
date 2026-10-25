@@ -8,7 +8,6 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.springframework.core.annotation.Order;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -36,7 +35,7 @@ public class RouteRecommendation extends BaseTimeEntity {
     @Column(name = "start_at", nullable = false)
     private LocalDateTime startAt;
 
-    @Column(name = "End_at", nullable = false)
+    @Column(name = "end_at", nullable = false)
     private LocalDateTime endAt;
 
     @Enumerated(EnumType.STRING)

@@ -74,6 +74,10 @@ public enum ErrorCode {
     TICKET_ENTRY_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓의 방문일이 아닙니다."),
     TICKET_ENTRY_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "해당 티켓의 입장 가능 시간이 아닙니다."),
 
+    //routeRecommendation
+    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다"),
+    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
+
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),
     PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다."),

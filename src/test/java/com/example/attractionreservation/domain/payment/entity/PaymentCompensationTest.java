@@ -13,6 +13,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Duration;
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -346,13 +347,28 @@ class PaymentCompensationTest {
     }
 
     @Test
+    @DisplayName("확인 기한 직전이면 DEAD가 되지 않고 PG 확인 대기를 유지한다.")
+    void reschedulePgCheck_justBeforeTimeout_PgPending() {
+        //given
+        PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
+        Instant justBeforeExpiry = NOW.plus(PaymentCompensation.PG_CHECK_TIMEOUT).minusMillis(1);
+
+        //when
+        compensation.reschedulePgCheck(justBeforeExpiry);
+
+        //then
+        assertEquals(CompensationStatus.PG_PENDING, compensation.getStatus());
+        assertNull(compensation.getProcessedAt());
+    }
+
+    @Test
     @DisplayName("점유한 처리의 시도 횟수와 같으면 결과를 기록할 수 있다.")
     void verifyClaimedBy_sameAttempt_Pass() {
         //given
         PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PROCESSING);
 
         //when & then
-        compensation.verifyClaimedBy(1);
+        assertThatCode(() -> compensation.verifyClaimedBy(1)).doesNotThrowAnyException();
     }
 
     @Test
@@ -387,7 +403,7 @@ class PaymentCompensationTest {
         PaymentCompensation compensation = createCompensationWithStatus(CompensationStatus.PG_PENDING);
 
         //when & then
-        compensation.verifyPgPendingSince(NOW);
+        assertThatCode(() -> compensation.verifyPgPendingSince(NOW)).doesNotThrowAnyException();
     }
 
     @Test

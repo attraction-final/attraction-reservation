@@ -8,9 +8,14 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.core.annotation.Order;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 @Getter
 @Entity
@@ -67,7 +72,64 @@ public class RouteRecommendation extends BaseTimeEntity {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+   @OneToMany(mappedBy = "routeRecommendation", cascade = CascadeType.ALL, orphanRemoval = true)
+   @OrderBy("sequenceNumber ASC")
+    private List<RouteRecommendationStop> stops = new ArrayList<>();
 
+   @OneToMany(mappedBy = "routeRecommendation", cascade =  CascadeType.ALL, orphanRemoval = true)
+    private List<RouteRecommendationExclusion> exclusions = new ArrayList<>();
+
+   public boolean isOwnedBy(Long userId) {
+       return this.userId.equals(userId);
+   }
+
+   public static RouteRecommendation create(
+           Long userId,
+           Long ticketId,
+           LocalDateTime startAt,
+           LocalDateTime endAt,
+           List<RouteRecommendationStop> stops,
+           List<RouteRecommendationExclusion> exclusions
+   ) {
+       if (stops.isEmpty()) {
+           throw new IllegalArgumentException("방문지가 없는 추천은 저장하지 않습니다.");
+       }
+       RouteRecommendation recommendation = new RouteRecommendation();
+       recommendation.userId = userId;
+       recommendation.ticketId = ticketId;
+       recommendation.startAt = startAt;
+       recommendation.endAt = endAt;
+       recommendation.startLocation = StartLocation.ENTRANCE;
+       recommendation.travelTimeBasis =TravelTimeBasis.ENTRANCE_FIXED;
+
+       stops.stream()
+               .sorted(Comparator.comparing(RouteRecommendationStop::getSequenceNumber))
+               .forEach(recommendation::addStop);
+       exclusions.forEach(recommendation::addExclusion);
+
+       recommendation.summarize();
+       return recommendation;
+   }
+
+   private void addStop(RouteRecommendationStop stop) {
+       stops.add(stop);
+       stop.assignRouteRecommendation(this);
+   }
+   private void addExclusion(RouteRecommendationExclusion exclusion) {
+       exclusions.add(exclusion);
+       exclusion.assignRouteRecommendation(this);
+   }
+   private void summarize() {
+       RouteRecommendationStop lastStop = stops.get(stops.size() - 1);
+
+       this.totalSelectedAttractions = stops.size() + exclusions.size();
+       this.resultType = exclusions.isEmpty() ? RouteResultType.FULL :RouteResultType.PARTIAL;
+       this.totalMoveMinutes = stops.stream().mapToInt(RouteRecommendationStop::getEstimatedMoveMin).sum();
+       this.totalWaitMinutes = stops.stream().mapToInt(RouteRecommendationStop::getEstimatedWaitMin).sum();
+       this.totalRideMinutes = stops.stream().mapToInt(RouteRecommendationStop::getEstimatedRideMin).sum();
+       this.estimatedEndAt =lastStop.getSlotEndAt();
+       this.totalDurationMinutes = (int) Duration.between(startAt, estimatedEndAt).toMinutes();
+   }
 
 
 

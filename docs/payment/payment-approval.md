@@ -193,11 +193,11 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
   - domain은 항상 유효한 값만 받는다. `Payment.markAsPaid`의 `requireNonNull`은 정상 흐름에서는 실행되지 않는 마지막 방어선이다.
 - 반환하는 `pgId`는 응답의 `id`가 아니라 요청한 값을 그대로 쓴다.
 - PortOne 상태 문자열은 `GatewayPaymentStatus`로 변환하고, 지원하지 않는 값(예: `VIRTUAL_ACCOUNT_ISSUED`)이나 null은 `UNKNOWN`으로 바꾼다. Facade에서는 `PAYMENT_NOT_PAID`(409)가 된다.
-- 조회 시 404 응답은 모두 "PG에 결제 없음"(`Optional.empty()`)으로 처리한다.
+- 조회 시 404 응답은 오류 `type`이 `PAYMENT_NOT_FOUND`일 때만 "PG에 결제 없음"(`Optional.empty()`)으로 처리한다. 경로 오류 등 다른 404(본문 없음 포함)는 `PAYMENT_GATEWAY_ERROR`(502). 실제 PortOne에서 없는 결제는 `{"type":"PAYMENT_NOT_FOUND"}`, 잘못된 경로는 본문 없는 404임을 확인했다.
 - 취소
   - 오류 응답을 `PortOneErrorResponse`로 파싱해 `type`이 `PAYMENT_ALREADY_CANCELLED`면 성공 처리한다 (보상 목적이 이미 달성됨).
   - 통신 실패(`ResourceAccessException`)는 같은 멱등 키로 최대 3회 재시도한다. 모두 실패하면 `PAYMENT_CANCELLATION_FAILED`(502).
-  - 멱등 키는 `cancelPayment` 호출마다 새로 만든다(`UUID.randomUUID()`). 한 호출 안의 재시도에서만 같은 키를 쓴다.
+  - 멱등 키는 `cancelPayment` 호출마다 새로 만든다(`UUID.randomUUID()`). 한 호출 안의 재시도에서만 같은 키를 쓴다. 헤더 값은 RFC 8941 문자열로 쌍따옴표로 감싸 보낸다(`Idempotency-Key: "<uuid>"`).
     - PortOne은 같은 키의 응답(실패 포함)을 3시간 동안 저장해 돌려준다. 호출 간에 키를 고정하면 실패한 취소를 다시 시도해도 저장된 실패 응답만 받으므로 고정하지 않는다.
     - 호출이 겹쳐 같은 결제를 두 번 전체 취소해도 두 번째는 `PAYMENT_ALREADY_CANCELLED`로 성공 처리된다.
 - 타임아웃: 연결 5초, 읽기 10초. 조회와 취소가 같은 `RestClient`를 쓰므로 취소에도 10초가 적용된다. 취소가 읽기 타임아웃되면 같은 멱등 키로 재시도하므로 중복 취소되지 않는다.
@@ -268,7 +268,6 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 - `application-test.yml`은 H2를 사용한다. 락 동작은 DB마다 다르므로 동시성 테스트는 `@Import(TestcontainersConfiguration.class)`로 MySQL 컨테이너에서 실행한다. **Docker가 실행 중이어야 한다.**
   - test 프로필 없이 `@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")`를 사용한다. test 프로필의 H2용 init SQL이 MySQL에서 실패하기 때문.
 - `@DataJpaTest`는 `JpaConfig`(JPA Auditing)를 로드하지 않으므로 `@Import(JpaConfig.class)`가 필요하다.
-- `PortOneClientTest`의 `@Disabled` 1건은 아래 남은 작업(404 type 확인)을 구현할 때 활성화한다.
 
 ## 7. 남은 작업
 
@@ -281,7 +280,6 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 ### 개선 항목
 
-- 조회 404 응답의 `type`이 `PAYMENT_NOT_FOUND`인지 확인. 지금은 경로 오류 등 다른 404도 "결제 없음"으로 처리한다.
 - `PortOneConfig`: `RestClient`를 타입으로만 주입하고 정적 `RestClient.builder()`로 생성 → Boot의 `RestClient.Builder` 주입으로 변경 권장.
 - `io.portone:server-sdk` 의존성은 웹훅 서명 검증(`WebhookVerifier`)에만 사용한다. 결제 조회·취소는 `RestClient`로 직접 호출한다.
 - PG 연동 컨트롤러(`PortOneConfigController`, `PortOneWebhookController`)는 infra에 둔다. `architecture.md`에 이 기준을 추가할지 팀과 정한다.

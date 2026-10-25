@@ -80,7 +80,8 @@ public class PortOneClient implements PaymentGateway {
             try {
                 PortOneCancelResponse response = portOneRestClient.post()
                         .uri("/payments/{pgId}/cancel", pgId)
-                        .header("Idempotency-Key", idempotencyKey)
+                        // PortOne은 멱등 키를 RFC 8941 문자열(쌍따옴표로 감싼 값)로 받는다.
+                        .header("Idempotency-Key", "\"" + idempotencyKey + "\"")
                         .body(new PortOneCancelRequest(reason, portOneProperties.getStoreId(), amount))
                         .retrieve()
                         .body(PortOneCancelResponse.class);

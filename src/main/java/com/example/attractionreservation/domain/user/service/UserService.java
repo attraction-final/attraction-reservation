@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
 import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -71,6 +73,24 @@ public class UserService {
         }
 
         return GetUserResponse.from(user);
+    }
+
+    @Transactional
+    public UpdateUserResponse updateMe(
+            Long userId,
+            UpdateUserRequest request
+    ) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        user.updateNickname(request.nickname());
+
+        return UpdateUserResponse.from(user);
     }
 
     private boolean isDuplicateEmailViolation(DataIntegrityViolationException exception) {

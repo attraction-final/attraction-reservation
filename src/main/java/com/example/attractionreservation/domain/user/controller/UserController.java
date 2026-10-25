@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
+import org.springframework.web.bind.annotation.PatchMapping;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +45,18 @@ public class UserController {
 
         return ResponseEntity.ok(
                 ApiResponse.ok("회원 정보 조회에 성공했습니다.", response)
+        );
+    }
+
+    @PatchMapping("/me")
+    public ResponseEntity<ApiResponse<UpdateUserResponse>> updateMe(
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody UpdateUserRequest request
+    ) {
+        UpdateUserResponse response = userService.updateMe(userId, request);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("회원 정보 수정에 성공했습니다.", response)
         );
     }
 }

@@ -22,7 +22,6 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class PaymentFacade {
     private static final String AMOUNT_MISMATCH_REASON = "결제 금액 불일치";
-    private static final String CANCELLED_PAYMENT_REASON = "취소된 주문의 결제";
 
     private final PaymentService paymentService;
     private final PaymentCommandService paymentCommandService;
@@ -111,25 +110,17 @@ public class PaymentFacade {
             throw new BusinessException(ErrorCode.PAYMENT_INCORRECT_AMOUNT);
         }
 
-        try {
-            return paymentCommandService.approvePayment(payment.getPgId(), pgPayment.paidAt());
-        } catch (BusinessException e) {
-            if (e.getErrorCode() == ErrorCode.PAYMENT_ALREADY_CANCELLED) {
-                requestCancelledPaymentCompensation(payment.getPgId(), pgPayment.totalAmount());
-            }
-            throw e;
-        }
-    }
+        ConfirmPaymentResponse response =
+                paymentCommandService.approvePayment(payment.getPgId(), pgPayment.paidAt(), pgPayment.totalAmount());
 
-    // 원장은 사용자가 취소했는데 PG에서는 결제가 완료된 경우.
-    // approvePayment는 예외로 롤백되므로 보상 요청은 별도 트랜잭션에서 저장한다. CANCELLED는 종료 상태라 그 사이에 바뀌지 않는다.
-    private void requestCancelledPaymentCompensation(String pgId, Long pgAmount) {
-        if (paymentCommandService.requestCompensationForCancelled(pgId, pgAmount, CANCELLED_PAYMENT_REASON)) {
-            paymentCompensationProcessor.processByPgId(pgId);
-        } else {
-            // 다른 요청이 먼저 보상 요청을 저장한 경우
-            log.info("취소된 결제의 보상 요청이 이미 있음, 보상 요청 생략: pgId={}", pgId);
+        // 원장은 사용자가 취소했는데 PG에서는 결제가 완료된 경우. 보상 요청은 approvePayment에서 함께 커밋됐다.
+        // 즉시 1회 시도하고, 실패해도 보상 Outbox가 재시도한다. 이미 처리됐거나 처리 중인 보상은 Processor가 건너뛴다.
+        if (response.status() == PaymentStatus.CANCELLED) {
+            paymentCompensationProcessor.processByPgId(payment.getPgId());
+            throw new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED);
         }
+
+        return response;
     }
 
     private boolean amountMatches(Payment payment, PaymentGatewayResponse pgPayment) {

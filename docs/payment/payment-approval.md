@@ -37,12 +37,12 @@ PaymentController
           │    │                                        → PaymentCompensationProcessor 즉시 1회 시도 (실패해도 스케줄러 재시도)
           │    ├─ failPaymentWithCompensation이 false → 다른 요청이 이미 처리, 보상 요청 생략
           │    └─ PAYMENT_INCORRECT_AMOUNT (400)
-          └─ PaymentCommandService.approvePayment(pgId, paidAt)  ← @Transactional, 비관적 락
+          └─ PaymentCommandService.approvePayment(pgId, paidAt, pgAmount)  ← @Transactional, 비관적 락
                ├─ 이미 PAID           → 현재 결제 정보 반환 (멱등)
                ├─ FAILED              → PAYMENT_ALREADY_PROCESSED (409)
-               ├─ CANCELLED           → PAYMENT_ALREADY_CANCELLED (409)
-               │                        → requestCompensationForCancelled (보상 요청 저장, 별도 트랜잭션)
-               │                        → PaymentCompensationProcessor 즉시 1회 시도
+               ├─ CANCELLED           → 같은 트랜잭션에서 보상 요청 저장 후 CANCELLED 응답
+               │                        → (Facade) PaymentCompensationProcessor 즉시 1회 시도
+               │                        → PAYMENT_ALREADY_CANCELLED (409)
                ├─ 그 밖의 전이 불가    → PAYMENT_INVALID_STATUS_TRANSITION (409)
                └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 PAID
 
@@ -127,9 +127,10 @@ global/config/SchedulingConfig            @EnableScheduling
   - 예외: `failPaymentWithCompensation`은 원장이 `CANCELLED`이고 보상 요청이 없으면 실패 처리 없이 보상 요청만 저장하고 `true`를 반환한다.
 - 로컬 `CANCELLED` 결제가 PG에서 결제 완료되면 PG 결제를 보상 취소한다(Outbox).
   - PG 결제창이 열려 있는 동안 사용자가 취소(`cancelledByUser`)하고, 이후 PG에서 결제를 마치면 원장 CANCELLED + PG PAID 조합이 생긴다.
-  - `approvePayment`가 락 안에서 `CANCELLED`를 확인해 `PAYMENT_ALREADY_CANCELLED`를 던진다. Facade가 락 없이 `PENDING`을 읽은 직후 취소가 커밋된 경우도 락 안에서 걸러진다.
-  - 예외를 던지면 `approvePayment` 트랜잭션이 롤백되므로, Facade가 `requestCompensationForCancelled`로 보상 요청을 **별도 트랜잭션**에서 저장하고 즉시 1회 시도한다. `CANCELLED`는 종료 상태라 두 트랜잭션 사이에 바뀌지 않는다.
-    - 저장 전에 서버가 종료되면 보상 요청이 없지만, 웹훅은 `PROCESSING`으로 멈췄다가 다시 처리되고 승인 API는 재호출 시 다시 판단하므로 보상 요청이 만들어진다.
+  - `approvePayment`가 락 안에서 `CANCELLED`를 확인하면, **같은 트랜잭션에서 보상 요청을 저장**하고 `CANCELLED` 상태의 결제 정보를 반환한다. Facade가 락 없이 `PENDING`을 읽은 직후 취소가 커밋된 경우도 락 안에서 걸러진다.
+  - 원장 확인과 보상 요청이 함께 커밋되므로, 그 사이에 서버가 종료돼 보상 요청이 사라지는 경우가 없다. 보상 요청 저장에 실패하면 예외가 전파되고 트랜잭션이 롤백되어 다음 요청(승인 API 재호출·웹훅 재처리)에서 다시 판단한다.
+    - 이전에는 예외로 롤백한 뒤 별도 트랜잭션(`requestCompensationForCancelled`)에서 저장해, 두 트랜잭션 사이에 승인 API 스레드가 종료되면 결제 완료 웹훅에만 복구를 의존했다.
+  - Facade는 `CANCELLED` 응답을 받으면 보상 Processor로 즉시 1회 시도한 뒤 `PAYMENT_ALREADY_CANCELLED`를 던진다. 보상 요청이 이미 있던 경우에도 즉시 시도를 호출하지만, Processor가 점유 시 상태를 다시 확인해 완료·처리 중인 요청은 건너뛴다.
   - 결제당 보상 요청은 하나(`pg_id` UNIQUE)라, 이미 있으면 저장하지 않는다. 결제 락 안에서 확인하므로 동시에 들어와도 1건이다.
   - 웹훅 처리에서는 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다. 승인 API는 `PAYMENT_ALREADY_CANCELLED`(409)로 응답한다.
 
@@ -180,9 +181,11 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
 - PG에서는 결제됐지만 금액이 원장과 다르면 원장에 반영하지 않고 PG 결제를 취소한다. **Outbox 패턴**으로 구현했다(KAN-39, 상세는 [payment-compensation.md](payment-compensation.md)).
 - 순서: `failPaymentWithCompensation`(결제 FAILED + 주문 취소 + 보상 요청, 한 트랜잭션) → 커밋 후 `PaymentCompensationProcessor`가 즉시 1회 PG 전체 취소 → `PAYMENT_INCORRECT_AMOUNT`(400) 응답.
   - 원장이 `CANCELLED`면 결제 실패 처리 없이 보상 요청만 저장한다(사유 "결제 금액 불일치").
-- 원장 `CANCELLED` + PG `PAID`(금액 일치)는 4.3의 `requestCompensationForCancelled` 경로로 보상 요청을 저장한다(사유 "취소된 주문의 결제").
+- 원장 `CANCELLED` + PG `PAID`(금액 일치)는 4.3과 같이 `approvePayment`가 같은 트랜잭션에서 보상 요청을 저장한다(사유 "취소된 주문의 결제").
 - 즉시 시도가 실패해도 보상 요청이 남아 스케줄러가 재시도하므로, **응답은 PG 취소 결과와 무관하다.** 웹훅은 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다.
-- 재시도 한도(5회)를 넘기면 보상 요청이 `DEAD`가 되고 error 로그가 남는다 → 수동 환불.
+- 보상 요청은 아래 두 경우에 `DEAD`가 되고 error 로그가 남는다. 둘 다 수동 처리 대상이다.
+  - 5번째 취소 시도까지 실패한 경우: PG 취소가 거듭 실패한 것이므로 수동 환불한다.
+  - 취소 결과 확인 대기(`PG_PENDING`)가 24시간 안에 확정되지 않은 경우: 취소 요청은 접수됐을 수 있으므로 PG에서 취소 반영 여부를 먼저 확인한 뒤 수동 환불한다(중복 환불 방지).
 
 ### 4.9 PortOne 연동 (`PortOneClient`)
 
@@ -249,10 +252,10 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 | 테스트 | 종류 | 내용 |
 |---|---|---|
-| `PaymentFacadeTest` | Mockito | 정상 승인, 남의 결제·orderId 불일치·이미 PAID·이미 FAILED면 PG 미호출, PG 결제 없음, PG 실패 시 실패 처리, PG 미완료 상태별 `PAYMENT_NOT_PAID`, 금액 불일치 시 보상 요청·즉시 시도·이미 처리돼 생략, 원장 CANCELLED + PG PAID면 보상 요청·즉시 시도·이미 요청돼 생략, `syncPayment` 결과별(원장 CANCELLED 보상 포함)·상태 충돌 시 보상 없음·재시도 필요 오류 전파 |
-| `PaymentCommandServiceTest` | Mockito | 승인 성공·멱등·FAILED 거절·CANCELLED면 `PAYMENT_ALREADY_CANCELLED`·결제 없음, 실패 처리 성공·PENDING 아니면 건너뜀·결제 없음, 금액 불일치 시 보상 요청 저장(원장 CANCELLED면 실패 처리 없이 저장), 취소된 결제 보상 요청 저장·이미 요청됨·취소 아님 |
+| `PaymentFacadeTest` | Mockito | 정상 승인, 남의 결제·orderId 불일치·이미 PAID·이미 FAILED면 PG 미호출, PG 결제 없음, PG 실패 시 실패 처리, PG 미완료 상태별 `PAYMENT_NOT_PAID`, 금액 불일치 시 보상 요청·즉시 시도·이미 처리돼 생략, 원장 CANCELLED + PG PAID면 즉시 시도 후 `PAYMENT_ALREADY_CANCELLED`·PG 금액을 보상 금액으로 전달, `syncPayment` 결과별(원장 CANCELLED 보상 포함)·상태 충돌 시 보상 없음·재시도 필요 오류 전파 |
+| `PaymentCommandServiceTest` | Mockito | 승인 성공·멱등·FAILED 거절·결제 없음, CANCELLED면 같은 트랜잭션에서 보상 요청 저장 후 CANCELLED 반환·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파, 실패 처리 성공·PENDING 아니면 건너뜀·결제 없음, 금액 불일치 시 보상 요청 저장(원장 CANCELLED면 실패 처리 없이 저장) |
 | `PaymentServiceTest` | Mockito | 결제 생성, 사용자 취소, 소유자 결제 조회 |
-| `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 `PAYMENT_ALREADY_CANCELLED` |
+| `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 CANCELLED 응답 + 보상 요청 1건 |
 | `PaymentControllerTest` | `@WebMvcTest` | 200(응답 데이터) / 404 / 502 / userId 누락 400 / orderId 누락 400, `ApiResponse` 형식 |
 | `PaymentRepositoryTest` | `@DataJpaTest` + H2 | `findByPgIdAndUserId` 쿼리 동작 (본인·다른 사용자·없는 pgId) |
 | `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 이미 취소됨 처리(전체 취소는 성공, 부분 취소는 예외), 취소 가능 금액 전송·불일치 예외, 통신 실패 재시도 |
@@ -306,7 +309,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 ```
 failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 보상 요청(payment_compensations) INSERT → 커밋
-requestCompensationForCancelled (트랜잭션 1개): 원장 CANCELLED + PG PAID면 보상 요청만 INSERT → 커밋 (4.3)
+approvePayment (트랜잭션 1개): 원장 CANCELLED + PG PAID면 보상 요청만 INSERT → 커밋 (4.3)
   → PaymentCompensationProcessor가 즉시 1회 PG 전체 취소
   → 실패하거나 시도 전 서버 종료 시 PaymentCompensationScheduler(30초)가 재시도 (1·2·4·8분 백오프, 5회 실패 시 DEAD)
 ```

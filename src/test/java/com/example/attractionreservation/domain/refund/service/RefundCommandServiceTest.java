@@ -52,6 +52,7 @@ class RefundCommandServiceTest {
 
     private Instant now;
     private Payment payment;
+    private Payment otherPayment;
     private OrderItem adult;
     private OrderItem child;
 
@@ -270,7 +271,9 @@ class RefundCommandServiceTest {
         Long retryDue = saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
         saveRefund(RefundStatus.FAILED, child, 1, now);            // 1분 뒤 재시도
         saveRefund(RefundStatus.COMPLETED, child, 1);
-        saveRefund(RefundStatus.PROCESSING, child, 1);             // 방금 점유됨
+        // 방금 점유됨. 같은 결제에 두면 위 후보들이 같은 결제의 PG 취소 중 환불 때문에 빠지므로 다른 결제에 둔다.
+        OrderItem otherItem = createOtherPaymentItem();
+        saveRefund(otherPayment, RefundStatus.PROCESSING, otherItem, 1, now);
         flushAndClear();
 
         //when
@@ -285,6 +288,44 @@ class RefundCommandServiceTest {
     void findProcessableIds_staleProcessingAtBoundary_Included() {
         //given
         Long stale = saveRefund(RefundStatus.PROCESSING, adult, 1);
+        flushAndClear();
+        entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
+                .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
+                .setParameter("id", stale)
+                .executeUpdate();
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(stale);
+    }
+
+    @Test
+    @DisplayName("같은 결제의 다른 환불이 확정 대기 중이면 claim에서 건너뛸 후보이므로 처리 대상으로 조회하지 않는다.")
+    void findProcessableIds_otherRefundPgPending_Excluded() {
+        //given
+        saveRefund(RefundStatus.PG_PENDING, adult, 1);
+        saveRefund(RefundStatus.REQUESTED, child, 1);
+        saveRefund(RefundStatus.FAILED, child, 1, now.minus(Duration.ofMinutes(10)));
+        OrderItem otherItem = createOtherPaymentItem();
+        Long otherPaymentRefund = saveRefund(otherPayment, RefundStatus.REQUESTED, otherItem, 1, now);
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(otherPaymentRefund);
+    }
+
+    @Test
+    @DisplayName("같은 결제에 처리 중으로 멈춘 환불이 있으면 그 환불만 다시 처리 대상으로 조회하고 대기 중인 환불은 뺀다.")
+    void findProcessableIds_otherRefundStaleProcessing_OnlyStale() {
+        //given
+        Long stale = saveRefund(RefundStatus.PROCESSING, adult, 1);
+        saveRefund(RefundStatus.REQUESTED, child, 1);
         flushAndClear();
         entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
                 .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
@@ -614,7 +655,11 @@ class RefundCommandServiceTest {
     }
 
     private Long saveRefund(RefundStatus status, OrderItem orderItem, int quantity, Instant at) {
-        Refund refund = Refund.create(payment, "단순 변심", at);
+        return saveRefund(payment, status, orderItem, quantity, at);
+    }
+
+    private Long saveRefund(Payment target, RefundStatus status, OrderItem orderItem, int quantity, Instant at) {
+        Refund refund = Refund.create(target, "단순 변심", at);
         refund.addRefundItem(RefundItem.of(orderItem, quantity, orderItem.getQuantity()));
         switch (status) {
             case REQUESTED -> {
@@ -641,6 +686,26 @@ class RefundCommandServiceTest {
         entityManager.persist(refund);
         entityManager.flush();
         return refund.getId();
+    }
+
+    // 다른 사용자의 결제(성인 10,000원 × 2장)를 만들고 그 주문 상품을 반환한다. 결제는 otherPayment에 담는다.
+    private OrderItem createOtherPaymentItem() {
+        User otherUser = User.builder()
+                .email("other@email.com")
+                .password("password")
+                .nickname("other")
+                .build();
+        entityManager.persist(otherUser);
+
+        Order otherOrder = Order.create(otherUser, 20000);
+        OrderItem orderItem = addOrderItem(otherOrder, adult.getTicketProduct(), 10000, 2);
+        otherOrder.markAsPaid();
+        entityManager.persist(otherOrder);
+
+        otherPayment = Payment.create(otherOrder);
+        otherPayment.markAsPaid(now);
+        entityManager.persist(otherPayment);
+        return orderItem;
     }
 
     // 주문 생성 기능이 없어 주문 상품을 직접 만든다. 주문을 저장하면 cascade로 함께 저장된다.

@@ -52,12 +52,18 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
 
     // 처리 대상 후보. 점유는 결제와 환불 행을 잠근 뒤 상태를 다시 확인해 결정한다.
     // 조건은 Refund.isProcessable과 같다(REQUESTED는 시각과 무관하게 대상).
+    // 같은 결제의 다른 환불이 PG 취소 중이거나 확정 대기 중(inFlight)이면 claim에서 건너뛸 후보이므로 처음부터 뺀다.
+    // 그런 후보가 배치 앞쪽을 차지해 다른 결제의 환불이 밀리지 않게 하기 위해서다. 최종 판단은 claim의 락 안에서 한다.
     @Query("""
     SELECT r.id
     FROM Refund r
-    WHERE r.status = :requested
-       OR (r.status = :failed AND r.nextRetryAt <= :now)
-       OR (r.status = :processing AND r.updatedAt <= :staleBefore)
+    WHERE (r.status = :requested
+           OR (r.status = :failed AND r.nextRetryAt <= :now)
+           OR (r.status = :processing AND r.updatedAt <= :staleBefore))
+      AND NOT EXISTS (
+          SELECT other.id
+          FROM Refund other
+          WHERE other.payment = r.payment AND other.id <> r.id AND other.status IN :inFlight)
     ORDER BY r.id
     """)
     List<Long> findProcessableIds(@Param("requested") RefundStatus requested,
@@ -65,6 +71,7 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
                                   @Param("processing") RefundStatus processing,
                                   @Param("now") Instant now,
                                   @Param("staleBefore") Instant staleBefore,
+                                  @Param("inFlight") Collection<RefundStatus> inFlight,
                                   Pageable pageable);
 
     // PG 취소 금액과 맞출 미완료 환불 후보. 잠그기 전에 엔티티를 올리지 않도록 ID만 조회한다(findPaymentIdById 참고).

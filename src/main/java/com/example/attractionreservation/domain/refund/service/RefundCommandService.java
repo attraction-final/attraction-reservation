@@ -60,7 +60,7 @@ public class RefundCommandService {
     public List<Long> findProcessableIds(Instant now, int limit) {
         return refundRepository.findProcessableIds(
                 RefundStatus.REQUESTED, RefundStatus.FAILED, RefundStatus.PROCESSING,
-                now, now.minus(STALE_PROCESSING_TIMEOUT), PageRequest.of(0, limit));
+                now, now.minus(STALE_PROCESSING_TIMEOUT), IN_FLIGHT_STATUSES, PageRequest.of(0, limit));
     }
 
     /**

@@ -4,6 +4,8 @@ import com.example.attractionreservation.domain.user.entity.AuthProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.Map;
 
@@ -73,5 +75,50 @@ class SocialUserInfoMapperTest {
                                 exception.getError().getErrorCode()
                         ).isEqualTo("UNSUPPORTED_PROVIDER")
                 );
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "true, false",
+            "false, true",
+            "false, false"
+    })
+    @DisplayName("카카오 이메일은 유효성과 인증 여부가 모두 참이어야 한다")
+    void kakao_invalidOrUnverifiedEmail_returnsFalse(
+            boolean valid,
+            boolean verified
+    ) {
+        var info = mapper.map("kakao", Map.of(
+                "id", 123L,
+                "kakao_account", Map.of(
+                        "email", "user@example.com",
+                        "is_email_valid", valid,
+                        "is_email_verified", verified
+                )
+        ));
+
+        assertThat(info.emailVerified()).isFalse();
+    }
+
+    @Test
+    @DisplayName("구글의 미검증 이메일을 검증된 것으로 처리하지 않는다")
+    void google_unverifiedEmail_returnsFalse() {
+        var info = mapper.map("google", Map.of(
+                "sub", "google-123",
+                "email", "user@example.com",
+                "email_verified", false
+        ));
+
+        assertThat(info.emailVerified()).isFalse();
+    }
+
+    @Test
+    @DisplayName("카카오 회원 ID가 숫자가 아니면 유효한 식별자로 사용하지 않는다")
+    void kakao_nonNumericId_returnsNull() {
+        var info = mapper.map("kakao", Map.of(
+                "id", "unexpected-id"
+        ));
+
+        assertThat(info.providerUserId()).isNull();
     }
 }

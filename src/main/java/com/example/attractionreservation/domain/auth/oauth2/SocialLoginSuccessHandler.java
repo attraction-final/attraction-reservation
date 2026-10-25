@@ -1,7 +1,6 @@
 package com.example.attractionreservation.domain.auth.oauth2;
 
-import com.example.attractionreservation.domain.auth.repository.SocialLoginCodeRepository;
-import com.example.attractionreservation.domain.auth.service.SocialMemberResolver;
+import com.example.attractionreservation.domain.auth.service.SocialLoginService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -25,22 +24,19 @@ public class SocialLoginSuccessHandler
         implements AuthenticationSuccessHandler {
 
     private final SocialUserInfoMapper userInfoMapper;
-    private final SocialMemberResolver socialMemberResolver;
-    private final SocialLoginCodeRepository loginCodeRepository;
+    private final SocialLoginService socialLoginService;
     private final SocialLoginFailureHandler failureHandler;
     private final String successRedirectUri;
 
     public SocialLoginSuccessHandler(
             SocialUserInfoMapper userInfoMapper,
-            SocialMemberResolver socialMemberResolver,
-            SocialLoginCodeRepository loginCodeRepository,
+            SocialLoginService socialLoginService,
             SocialLoginFailureHandler failureHandler,
             @Value("${app.oauth2.success-redirect-uri}")
             String successRedirectUri
     ) {
         this.userInfoMapper = userInfoMapper;
-        this.socialMemberResolver = socialMemberResolver;
-        this.loginCodeRepository = loginCodeRepository;
+        this.socialLoginService = socialLoginService;
         this.failureHandler = failureHandler;
         this.successRedirectUri = successRedirectUri;
     }
@@ -66,10 +62,8 @@ public class SocialLoginSuccessHandler
                     token.getPrincipal().getAttributes()
             );
 
-            Long userId = socialMemberResolver.resolve(info);
-
-            // 회원 저장 트랜잭션이 완료된 뒤 일회용 코드를 발급한다.
-            code = loginCodeRepository.issue(userId);
+            // 회원 확인과 코드 발급 순서는 서비스에서 관리한다.
+            code = socialLoginService.login(info);
 
         } catch (OAuth2AuthenticationException exception) {
             failureHandler.onAuthenticationFailure(

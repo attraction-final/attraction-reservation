@@ -1,7 +1,6 @@
 package com.example.attractionreservation.domain.auth.oauth2;
 
-import com.example.attractionreservation.domain.auth.repository.SocialLoginCodeRepository;
-import com.example.attractionreservation.domain.auth.service.SocialMemberResolver;
+import com.example.attractionreservation.domain.auth.service.SocialLoginService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,10 +25,7 @@ import static org.mockito.Mockito.*;
 class SocialLoginSuccessHandlerTest {
 
     @Mock
-    private SocialMemberResolver socialMemberResolver;
-
-    @Mock
-    private SocialLoginCodeRepository loginCodeRepository;
+    private SocialLoginService socialLoginService;
 
     private SocialLoginSuccessHandler handler;
 
@@ -37,8 +33,7 @@ class SocialLoginSuccessHandlerTest {
     void setUp() {
         handler = new SocialLoginSuccessHandler(
                 new SocialUserInfoMapper(),
-                socialMemberResolver,
-                loginCodeRepository,
+                socialLoginService,
                 new SocialLoginFailureHandler(
                         "http://localhost:3000/login"
                 ),
@@ -47,10 +42,10 @@ class SocialLoginSuccessHandlerTest {
     }
 
     @Test
-    @DisplayName("회원 확인 후 일회용 코드를 전달하고 임시 세션을 제거한다")
+    @DisplayName("서비스가 발급한 코드를 전달하고 임시 세션을 제거한다")
     void success_redirectsWithCode() throws Exception {
-        when(socialMemberResolver.resolve(any())).thenReturn(1L);
-        when(loginCodeRepository.issue(1L)).thenReturn("test-login-code");
+        when(socialLoginService.login(any()))
+                .thenReturn("test-login-code");
 
         var request = new MockHttpServletRequest();
         var response = new MockHttpServletResponse();
@@ -70,16 +65,13 @@ class SocialLoginSuccessHandlerTest {
         assertThat(response.getHeader("Referrer-Policy"))
                 .isEqualTo("no-referrer");
 
-        // 회원 확인이 완료된 뒤에만 로그인 코드를 발급해야 한다.
-        var order = inOrder(socialMemberResolver, loginCodeRepository);
-        order.verify(socialMemberResolver).resolve(any());
-        order.verify(loginCodeRepository).issue(1L);
+        verify(socialLoginService).login(any());
     }
 
     @Test
-    @DisplayName("회원 검증에 실패하면 로그인 코드를 발급하지 않는다")
+    @DisplayName("서비스의 회원 검증 오류를 실패 주소로 전달한다")
     void memberRejected_redirectsToFailure() throws Exception {
-        when(socialMemberResolver.resolve(any()))
+        when(socialLoginService.login(any()))
                 .thenThrow(SocialLoginError.USER_NOT_ACTIVE.toException());
 
         var request = new MockHttpServletRequest();
@@ -89,17 +81,16 @@ class SocialLoginSuccessHandlerTest {
                 request, response, googleAuthentication()
         );
 
+        assertThat(response.getStatus()).isEqualTo(302);
         assertThat(response.getRedirectedUrl()).isEqualTo(
                 "http://localhost:3000/login?error=USER_NOT_ACTIVE"
         );
-        verifyNoInteractions(loginCodeRepository);
     }
 
     @Test
-    @DisplayName("코드 저장에 실패하면 성공 주소로 이동하지 않는다")
-    void codeStorageFailed_redirectsToFailure() throws Exception {
-        when(socialMemberResolver.resolve(any())).thenReturn(1L);
-        when(loginCodeRepository.issue(1L))
+    @DisplayName("서비스 처리 중 예외가 발생하면 공통 실패 주소로 이동한다")
+    void serviceFailed_redirectsToFailure() throws Exception {
+        when(socialLoginService.login(any()))
                 .thenThrow(new IllegalStateException("test-storage-failure"));
 
         var request = new MockHttpServletRequest();
@@ -116,7 +107,7 @@ class SocialLoginSuccessHandlerTest {
     }
 
     private OAuth2AuthenticationToken googleAuthentication() {
-        // 제공자 인증을 마친 상황을 재현하며 실제 구글 서버에는 접속하지 않는다.
+        // 제공자 인증 완료 상황을 재현하며 실제 구글 서버에는 접속하지 않는다.
         var authorities = List.of(
                 new SimpleGrantedAuthority("OAUTH2_USER")
         );

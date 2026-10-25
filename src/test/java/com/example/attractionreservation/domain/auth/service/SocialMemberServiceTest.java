@@ -15,7 +15,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
+import java.util.stream.Stream;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -232,5 +236,178 @@ class SocialMemberServiceTest {
 
         verify(userRepository, never()).existsByEmail(any());
         verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidIdentityCases")
+    @DisplayName("잘못된 소셜 식별 정보는 DB 조회 전에 거부한다")
+    void invalidIdentity_rejectedBeforeRepositoryAccess(
+            SocialUserInfo info,
+            String expectedError
+    ) {
+        assertThatThrownBy(() -> socialMemberService.findOrCreate(info))
+                .isInstanceOfSatisfying(
+                        OAuth2AuthenticationException.class,
+                        exception -> assertThat(
+                                exception.getError().getErrorCode()
+                        ).isEqualTo(expectedError)
+                );
+
+        verifyNoInteractions(userRepository);
+    }
+
+    static Stream<org.junit.jupiter.params.provider.Arguments>
+    invalidIdentityCases() {
+        return Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(
+                        null,
+                        "INVALID_USER_INFO"
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        new SocialUserInfo(
+                                AuthProvider.LOCAL,
+                                "123",
+                                "user@example.com",
+                                true,
+                                "회원"
+                        ),
+                        "UNSUPPORTED_PROVIDER"
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        new SocialUserInfo(
+                                AuthProvider.GOOGLE,
+                                "   ",
+                                "user@example.com",
+                                true,
+                                "회원"
+                        ),
+                        "INVALID_PROVIDER_USER_ID"
+                ),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        new SocialUserInfo(
+                                AuthProvider.GOOGLE,
+                                "a".repeat(256),
+                                "user@example.com",
+                                true,
+                                "회원"
+                        ),
+                        "INVALID_PROVIDER_USER_ID"
+                )
+        );
+    }
+
+    @Test
+    @DisplayName("이메일 50자와 제공자 회원 ID 255자는 저장할 수 있다")
+    void maximumLengths_allowed() {
+        String email = "a".repeat(38) + "@example.com";
+        String providerUserId = "a".repeat(255);
+
+        when(userRepository.findByProviderAndProviderUserId(
+                AuthProvider.GOOGLE, providerUserId
+        )).thenReturn(Optional.empty());
+
+        when(userRepository.existsByEmail(email)).thenReturn(false);
+
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenAnswer(invocation -> {
+                    User user = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(user, "id", 3L);
+                    return user;
+                });
+
+        var info = new SocialUserInfo(
+                AuthProvider.GOOGLE,
+                providerUserId,
+                email,
+                true,
+                "회원"
+        );
+
+        assertThat(socialMemberService.findOrCreate(info)).isEqualTo(3L);
+
+        var captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).saveAndFlush(captor.capture());
+
+        assertThat(captor.getValue().getEmail()).hasSize(50);
+        assertThat(captor.getValue().getProviderUserId()).hasSize(255);
+    }
+
+    @Test
+    @DisplayName("이메일이 51자이면 저장 전에 거부한다")
+    void emailOverMaximum_rejected() {
+        when(userRepository.findByProviderAndProviderUserId(
+                AuthProvider.GOOGLE, "google-123"
+        )).thenReturn(Optional.empty());
+
+        var info = new SocialUserInfo(
+                AuthProvider.GOOGLE,
+                "google-123",
+                "a".repeat(39) + "@example.com",
+                true,
+                "회원"
+        );
+
+        assertThatThrownBy(() -> socialMemberService.findOrCreate(info))
+                .isInstanceOfSatisfying(
+                        OAuth2AuthenticationException.class,
+                        exception -> assertThat(
+                                exception.getError().getErrorCode()
+                        ).isEqualTo("INVALID_USER_INFO")
+                );
+
+        verify(userRepository, never()).existsByEmail(any());
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {50, 51})
+    @DisplayName("이모지 닉네임은 문자를 손상시키지 않고 최대 50개까지 저장한다")
+    void emojiNickname_preservesCharacters(int length) {
+        String nickname = "🎡".repeat(length);
+
+        User savedUser = saveNewMemberWithNickname(nickname);
+
+        assertThat(savedUser.getNickname()).isEqualTo("🎡".repeat(50));
+        assertThat(savedUser.getNickname().codePointCount(
+                0, savedUser.getNickname().length()
+        )).isEqualTo(50);
+    }
+
+    @Test
+    @DisplayName("공백 닉네임이면 임시 닉네임을 생성한다")
+    void blankNickname_generatesTemporaryNickname() {
+        User savedUser = saveNewMemberWithNickname("   ");
+
+        assertThat(savedUser.getNickname())
+                .startsWith("회원_")
+                .hasSizeLessThanOrEqualTo(50);
+    }
+
+    private User saveNewMemberWithNickname(String nickname) {
+        when(userRepository.findByProviderAndProviderUserId(
+                AuthProvider.GOOGLE, "google-new"
+        )).thenReturn(Optional.empty());
+
+        when(userRepository.existsByEmail("new@example.com"))
+                .thenReturn(false);
+
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenAnswer(invocation -> {
+                    User user = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(user, "id", 4L);
+                    return user;
+                });
+
+        socialMemberService.findOrCreate(new SocialUserInfo(
+                AuthProvider.GOOGLE,
+                "google-new",
+                "new@example.com",
+                true,
+                nickname
+        ));
+
+        var captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).saveAndFlush(captor.capture());
+        return captor.getValue();
     }
 }

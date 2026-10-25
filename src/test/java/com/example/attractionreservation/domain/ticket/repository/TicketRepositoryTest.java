@@ -249,6 +249,24 @@ class TicketRepositoryTest {
         assertThat(lastPage.isLast()).isTrue();
     }
 
+    @Test
+    @DisplayName("다른 사용자의 티켓 ID로 상세 조회하면 빈 결과를 반환한다")
+    void findByIdAndUser_Id_OtherUserTicket_ReturnsEmpty() {
+        // given
+        Long requestedTicketId = otherUserTicketId;
+        Long requestingUserId = userId;
+
+        // when
+        var result = ticketRepository.findByIdAndUser_Id(
+                requestedTicketId,
+                requestingUserId
+        );
+
+        // then
+        assertThat(ticketRepository.findById(requestedTicketId)).isPresent();
+        assertThat(result).isEmpty();
+    }
+
     private Page<Ticket> search(
             Long ownerId,
             String name,

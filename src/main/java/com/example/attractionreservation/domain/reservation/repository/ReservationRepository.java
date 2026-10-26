@@ -13,22 +13,6 @@ import java.util.Optional;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long>, ReservationCustomRepository {
 
-    // 내 예약 목록 조회
-    @Query("""
-    SELECT r
-    FROM Reservation r
-    WHERE r.user.id = :userId
-      AND (:status IS NULL OR r.status = :status)
-      AND ((:startDay IS NULL OR r.attractionSlot.startsAt >= :startDay)
-        AND (:nextDay IS NULL OR r.attractionSlot.startsAt < :nextDay))
-    """)
-    Page<Reservation> findReservationAllByCondition(
-            @Param("userId") Long userId,
-            @Param("status") ReservationStatus status,
-            @Param("startDay") LocalDateTime startDay,
-            @Param("nextDay") LocalDateTime nextDay,
-            Pageable stablePageable
-    );
 
     // 내 예약 상세 조회
     @Query("SELECT r FROM Reservation r WHERE r.user.id = :userId AND r.id = :reservationId")

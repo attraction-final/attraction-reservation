@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.ticketProduct.entity.TicketProdu
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -19,6 +20,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 
+import static com.example.attractionreservation.domain.ticket.entity.QTicket.ticket;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -152,6 +154,24 @@ class TicketEntryTest {
                 ErrorCode.TICKET_ENTRY_TIME_NOT_ALLOWED
         );
         assertUnchanged(ticket, TicketStatus.UNUSED, null);
+    }
+
+    @Test
+    @DisplayName("입장 처리 시각이 없으면 예외가 발생하고 티켓 상태를 유지한다")
+    void entryTicket_nullTime() {
+        // given
+        Ticket ticket = createTicket(TicketType.ALL_DAY);
+
+        // when & then
+        assertThatThrownBy(() -> ticket.entryTicket(null))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_TICKET_ENTRY_TIME)
+                );
+
+        assertThat(ticket.getStatus()).isEqualTo(TicketStatus.UNUSED);
+        assertThat(ticket.getEnteredAt()).isNull();
     }
 
     private Ticket createTicket(TicketType type) {

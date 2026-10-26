@@ -73,6 +73,10 @@ public class Ticket extends BaseTimeEntity {
     public void entryTicket(Instant now) {
         LocalDateTime kstNow = KstTime.toLocalDateTime(now);
 
+        if (kstNow == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_ENTRY_TIME);
+        }
+
         validateEntryStatus();
         validateEntryDate(kstNow.toLocalDate());
         validateEntryTime(kstNow.toLocalTime());

@@ -45,7 +45,7 @@ public class ReservationService {
     public CreateReservationResponse createReservation(Long userId, CreateReservationRequest request) {
 
         /* 현재시간, 오늘날짜, 현재시각 */
-        LocalDateTime now = KstTime.toLocalDateTime(Instant.now());
+        LocalDateTime now = KstTime.now();
         LocalDate today = now.toLocalDate();
 
         /* 놀이공원 폐장시간 */
@@ -182,8 +182,9 @@ public class ReservationService {
         }
 
         // 현재 KST 시각이 슬롯 시작 30분 전 이내인지 확인
-        Instant now = Instant.now();
-        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime currentTime = KstTime.now();
+        Instant now = currentTime.atZone(KstTime.ZONE).toInstant();
+
         LocalDateTime deadLine = reservation.getAttractionSlot().getStartsAt().minusMinutes(30);
 
         if (currentTime.isAfter(deadLine)) {

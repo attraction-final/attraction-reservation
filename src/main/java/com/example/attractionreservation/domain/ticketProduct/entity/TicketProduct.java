@@ -79,6 +79,10 @@ public class TicketProduct extends BaseTimeEntity {
             throw new BusinessException(ErrorCode.TICKET_PRODUCT_ALREADY_DELETED);
         }
 
+        if (status == TicketProductStatus.DELETED) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
+        }
+
         if (name == null || name.isBlank()) {
             throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_NAME);
         }

@@ -1,15 +1,14 @@
 package com.example.attractionreservation.domain.ticketProduct.service;
 
-import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductRequest;
-import com.example.attractionreservation.domain.ticketProduct.dto.CreateTicketProductResponse;
-import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductRequest;
-import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductResponse;
+import com.example.attractionreservation.domain.ticketProduct.dto.*;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +20,15 @@ public class TicketProductService {
     private final TicketProductRepository ticketProductRepository;
 
     // 티켓 상품 등록
-    // TODO: 추후 관리자 인증 검증 부분 추가 예정
     @Transactional
     public CreateTicketProductResponse createTicketProduct(CreateTicketProductRequest request) {
         TicketProduct ticketProduct = new TicketProduct(
-                request.name(), request.price(), request.description(),
-                request.type(), request.stock(), request.saleStatus()
+                request.name(),
+                request.price(),
+                request.description(),
+                request.type(),
+                request.stock(),
+                request.saleStatus()
         );
 
         TicketProduct savedTicketProduct = ticketProductRepository.save(ticketProduct);
@@ -35,7 +37,6 @@ public class TicketProductService {
     }
 
     // 티켓 상품 수정
-    // TODO: 추후 관리자 인증 검증 부분 추가 예정
     @Transactional
     public UpdateTicketProductResponse updateTicketProduct(Long ticketProductId, @Valid UpdateTicketProductRequest request) {
         TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
@@ -52,11 +53,31 @@ public class TicketProductService {
         return UpdateTicketProductResponse.from(ticketProduct);
     }
 
+    // 티켓 상품 삭제
     @Transactional
     public void deleteTicketProduct(Long ticketProductId) {
         TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
 
         ticketProduct.delete();
+    }
+
+    // 티켓 상품 목록 조회
+    public Page<SearchTicketProductResponse> getTicketProductAll(SearchTicketProductCondition condition, Pageable pageable) {
+        Page<TicketProduct> ticketProducts = ticketProductRepository.findAllByCondition(
+                condition.name(),
+                condition.type(),
+                condition.status(),
+                pageable);
+
+        return ticketProducts.map(SearchTicketProductResponse::from);
+    }
+
+    // 티켓 상품 상세 조회
+    public SearchTicketProductResponse findTicketProductById(Long ticketProductId) {
+        TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        return SearchTicketProductResponse.from(ticketProduct);
     }
 }

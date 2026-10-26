@@ -23,6 +23,16 @@ spring:
       pool:
         size: 3   # 웹훅·보상·환불 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiration: 600000
+  refresh-token-expiration: 604800000
+
 # secret 값은 환경변수로만 주입한다.
 portone:
   base-url: ${PORTONE_BASE_URL:https://api.portone.io}

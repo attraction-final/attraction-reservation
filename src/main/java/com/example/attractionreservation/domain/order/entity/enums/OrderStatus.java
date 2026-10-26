@@ -12,7 +12,7 @@ public enum OrderStatus {
         }
     },
     // 결제 완료
-    PAID {
+    COMPLETED {
         @Override
         public boolean canTransitTo(OrderStatus nextStatus) {
             return nextStatus == PARTIALLY_REFUNDED || nextStatus == REFUNDED;

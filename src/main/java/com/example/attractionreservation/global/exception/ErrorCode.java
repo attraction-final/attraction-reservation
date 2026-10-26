@@ -14,6 +14,7 @@ public enum ErrorCode {
     URL_NOT_FOUND(HttpStatus.NOT_FOUND,  "요청한 주소를 찾을 수 없습니다."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 콘텐츠 형식입니다."),
+    CONCURRENT_UPDATE_CONFLICT(HttpStatus.CONFLICT, "다른 요청에 의해 데이터가 변경되었습니다. 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 에러"),
 
     // attraction
@@ -75,9 +76,16 @@ public enum ErrorCode {
     TICKET_ENTRY_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓의 방문일이 아닙니다."),
     TICKET_ENTRY_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "해당 티켓의 입장 가능 시간이 아닙니다."),
 
+    // reservation
+    INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),
+    INVALID_RESERVATION_TICKET(HttpStatus.BAD_REQUEST, "예약에 사용할 티켓 정보가 필요합니다."),
+    INVALID_RESERVATION_SLOT(HttpStatus.BAD_REQUEST, "예약할 슬롯 정보가 필요합니다."),
+
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),
-    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다.");
+    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다."),
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 내역을 찾을 수 없습니다."),
+    PAYMENT_CANCEL_PROHIBITED(HttpStatus.CONFLICT, "결제 대기 상태가 아닌 결제는 취소할 수 없습니다.");
 
     private final HttpStatus status;
     private final String message;

@@ -337,6 +337,7 @@ class WebhookEventTest {
         WebhookEvent event = createEvent();
         switch (status) {
             case RECEIVED -> {
+                // 생성 직후 상태가 RECEIVED이므로 추가 전이가 필요 없다.
             }
             case PROCESSING -> event.markAsProcessing();
             case FAILED -> {

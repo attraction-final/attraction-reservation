@@ -207,8 +207,9 @@ class WebhookEventCommandServiceTest {
         List<Long> ids = webhookEventCommandService.findProcessableIds(now, 10);
 
         //then
-        assertThat(ids).containsExactly(received, retryDue);
-        assertThat(ids).doesNotContain(ignored, processing, retryLater);
+        assertThat(ids)
+                .containsExactly(received, retryDue)
+                .doesNotContain(ignored, processing, retryLater);
     }
 
     @Test
@@ -224,7 +225,7 @@ class WebhookEventCommandServiceTest {
         List<Long> atStale = webhookEventCommandService.findProcessableIds(staleAt, 10);
 
         //then
-        assertThat(beforeStale).doesNotContain(id);
+        assertThat(beforeStale).isEmpty();
         assertThat(atStale).containsExactly(id);
     }
 

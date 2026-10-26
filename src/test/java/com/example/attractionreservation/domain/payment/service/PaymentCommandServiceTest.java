@@ -66,7 +66,7 @@ class PaymentCommandServiceTest {
         //then
         assertEquals(PaymentStatus.PAID, payment.getStatus());
         assertEquals(APPROVED_AT, payment.getPaidAt());
-        assertEquals(OrderStatus.PAID, payment.getOrder().getStatus());
+        assertEquals(OrderStatus.COMPLETED, payment.getOrder().getStatus());
         assertEquals(PaymentStatus.PAID, response.status());
     }
 

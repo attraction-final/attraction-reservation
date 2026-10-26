@@ -25,6 +25,7 @@ public class TicketProductCustomRepositoryImpl implements TicketProductCustomRep
 
     private final JPAQueryFactory queryFactory;
 
+    // 내 티켓 목록 조회
     @Override
     public Page<TicketProduct> findAllByCondition(
             String name,

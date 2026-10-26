@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.order.service;
 
+
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
@@ -16,6 +19,10 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -109,6 +116,26 @@ public class OrderService {
         }
 
         return SearchOrderResponse.from(order);
+    }
+
+    @Transactional(readOnly = true)
+    public SearchOrderListResponse findOrdersByUserId(
+            Long userId,
+            SearchOrderCondition condition
+    ) {
+        // 생성 시각이 같아도 조회 순서가 일정하도록 ID를 보조 정렬로 사용한다.
+        Pageable pageable = PageRequest.of(
+                condition.page(),
+                condition.size(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")
+                )
+        );
+
+        Page<Order> orders = orderRepository.findAllByUser_Id(userId, pageable);
+
+        return SearchOrderListResponse.from(orders);
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

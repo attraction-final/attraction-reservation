@@ -18,6 +18,11 @@ spring:
     show-sql: false
     open-in-view: false
 
+  task:
+    scheduling:
+      pool:
+        size: 2   # 웹훅·보상 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -27,3 +32,23 @@ jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: 600000
   refresh-token-expiration: 604800000
+
+# secret 값은 환경변수로만 주입한다.
+portone:
+  base-url: ${PORTONE_BASE_URL:https://api.portone.io}
+  api-secret: ${PORTONE_API_SECRET}
+  store-id: ${PORTONE_STORE_ID}
+  channel-key: ${PORTONE_CHANNEL_KEY}
+  webhook-secret: ${PORTONE_WEBHOOK_SECRET}
+
+payment:
+  webhook:
+    scheduler:
+      enabled: true
+      fixed-delay: 10s   # 이전 실행이 끝난 뒤 다음 실행까지 대기 시간
+      batch-size: 50     # 한 번에 처리할 최대 웹훅 수
+  compensation:
+    scheduler:
+      enabled: true
+      fixed-delay: 30s   # 재시도 백오프가 1분부터라 웹훅보다 길게 둔다
+      batch-size: 20     # 한 번에 처리할 최대 보상 요청 수

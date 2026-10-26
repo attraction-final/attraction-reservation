@@ -17,6 +17,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import java.sql.SQLException;
+import com.example.attractionreservation.domain.user.dto.SearchUserCondition;
+import com.example.attractionreservation.domain.user.dto.SearchUserListResponse;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+
 
 @Service
 @RequiredArgsConstructor
@@ -58,6 +64,28 @@ public class UserService {
                 savedUser.getNickname(),
                 savedUser.getRole().name(),
                 savedUser.getStatus().name()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public SearchUserListResponse findUserAll(
+            SearchUserCondition condition
+    ) {
+        // 가입 시각이 같아도 조회 순서가 일정하도록 ID를 보조 정렬 기준으로 사용한다.
+        Pageable pageable = PageRequest.of(
+                condition.page(),
+                condition.size(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")
+                )
+        );
+
+        return SearchUserListResponse.from(
+                userRepository.findAllByStatusNot(
+                        UserStatus.WITHDRAWN,
+                        pageable
+                )
         );
     }
 
@@ -137,4 +165,11 @@ public class UserService {
 
         return false;
     }
+
+    // 예약 - 회원 찾기
+    public User findByUserId(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+    }
+
 }

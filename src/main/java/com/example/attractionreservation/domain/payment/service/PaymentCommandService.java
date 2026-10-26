@@ -31,6 +31,7 @@ public class PaymentCommandService {
      * @param paidAt PG 조회로 확인한 결제 완료 시각
      * @throws BusinessException 결제가 없으면 {@code PAYMENT_NOT_FOUND},
      *                           실패 처리된 결제면 {@code PAYMENT_ALREADY_PROCESSED},
+     *                           사용자가 취소한 결제면 {@code PAYMENT_ALREADY_CANCELLED},
      *                           그 밖에 결제 완료로 전이할 수 없으면 {@code PAYMENT_INVALID_STATUS_TRANSITION}
      */
     @Transactional
@@ -44,6 +45,11 @@ public class PaymentCommandService {
 
         if (payment.getStatus() == PaymentStatus.FAILED) {
             throw new BusinessException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
+        }
+
+        // PG 결제 대기 중 사용자가 취소한 경우. 호출하는 쪽에서 PG 결제를 취소해야 한다.
+        if (payment.getStatus() == PaymentStatus.CANCELLED) {
+            throw new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED);
         }
 
         payment.markAsPaid(paidAt);

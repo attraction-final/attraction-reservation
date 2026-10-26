@@ -22,6 +22,8 @@ public interface PaymentRepository extends JpaRepository<Payment, Long>, Payment
     @EntityGraph(attributePaths = {"order"})
     Optional<Payment> findWithLockByPgId(String pgId);
 
+    Optional<Payment> findByPgId(String pgId);
+
     @Query("""
     SELECT p
     FROM Payment p

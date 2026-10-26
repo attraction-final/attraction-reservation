@@ -44,7 +44,7 @@ PaymentController
                │                        → (Facade) PaymentCompensationProcessor 즉시 1회 시도
                │                        → PAYMENT_ALREADY_CANCELLED (409)
                ├─ 그 밖의 전이 불가    → PAYMENT_INVALID_STATUS_TRANSITION (409)
-               └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 PAID
+               └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 COMPLETED
 
 [웹훅]  상세는 payment-webhook-plan.md
 POST /api/payments/webhooks/portone → 서명 검증 → webhook_events 저장 → 200
@@ -216,8 +216,10 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
   - PG에 결제가 없으면 빈 값을 반환한다.
 - `cancelPayment`
   - `amount`가 null이면 전체 취소한다.
-  - 이미 취소된 결제면 성공으로 간주한다. 같은 결제를 여러 번 전체 취소해도 한 번만 환불된다(보상 재시도의 근거).
-  - 취소 여부를 확인할 수 없으면 `PAYMENT_CANCELLATION_FAILED`를 던진다.
+  - 전체 취소에서 이미 취소된 결제면 성공으로 간주한다. 같은 결제를 여러 번 전체 취소해도 한 번만 환불된다(보상 재시도의 근거).
+  - 부분 취소(`amount`가 있음)에서 이미 취소된 결제면 성공으로 보지 않고 `PAYMENT_ALREADY_CANCELLED`를 던진다. 다른 경로로 전체 취소된 것이라 이번 취소가 반영됐다고 볼 수 없다(KAN-51).
+  - `currentCancellableAmount`(4인자 메서드, KAN-51): 이번 취소 전에 PG에 남아 있어야 할 취소 가능 금액. PG 값과 다르면 PG가 거절하고 `PAYMENT_CANCELLABLE_AMOUNT_MISMATCH`를 던진다. 앞선 취소가 이미 반영됐을 수 있어 재시도하면 안 된다. 기존 3인자 호출(보상 취소)은 이 값을 보내지 않는다.
+  - 그 밖에 취소 여부를 확인할 수 없으면 `PAYMENT_CANCELLATION_FAILED`를 던진다.
 - 금액 비교는 `int`(원장)와 `Long`(PG)의 숫자 비교다. `Objects.equals`는 타입이 달라 항상 false이므로 쓰지 않는다.
 
 ## 5. ErrorCode
@@ -229,7 +231,8 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PAYMENT_PG_PAYMENT_NOT_FOUND` | 404 | PG에 결제 없음 |
 | `PAYMENT_NOT_PAID` | 409 | PG에서 결제 완료 상태가 아님 (READY, PENDING, UNKNOWN 등) |
 | `PAYMENT_ALREADY_PROCESSED` | 409 | 이미 실패 처리된 결제 |
-| `PAYMENT_ALREADY_CANCELLED` | 409 | 사용자가 취소한 결제가 PG에서 결제 완료됨 (보상 요청 저장 후 PG 취소 시도) |
+| `PAYMENT_ALREADY_CANCELLED` | 409 | 사용자가 취소한 결제가 PG에서 결제 완료됨 (보상 요청 저장 후 PG 취소 시도). 부분 취소 대상 결제가 PG에서 이미 취소됨(환불, 내부 처리용) |
+| `PAYMENT_CANCELLABLE_AMOUNT_MISMATCH` | 409 | PG 취소 가능 금액이 요청한 값과 다름 (환불, 내부 처리용) |
 | `PAYMENT_INCORRECT_AMOUNT` | 400 | PG 금액과 원장 금액 불일치 (보상 요청 저장 후 PG 취소 시도) |
 | `PAYMENT_INVALID_STATUS_TRANSITION` | 409 | 결제 상태 전이 불가 |
 | `ORDER_INVALID_STATUS_TRANSITION` | 409 | 주문 상태 전이 불가 |
@@ -255,7 +258,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 CANCELLED 응답 + 보상 요청 1건 |
 | `PaymentControllerTest` | `@WebMvcTest` | 200(응답 데이터) / 404 / 502 / userId 누락 400 / orderId 누락 400, `ApiResponse` 형식 |
 | `PaymentRepositoryTest` | `@DataJpaTest` + H2 | `findByPgIdAndUserId` 쿼리 동작 (본인·다른 사용자·없는 pgId) |
-| `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 이미 취소됨 처리, 통신 실패 재시도 |
+| `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 이미 취소됨 처리(전체 취소는 성공, 부분 취소는 예외), 취소 가능 금액 전송·불일치 예외, 통신 실패 재시도 |
 | `OrderTest`, `PaymentTest` | 단위 | 상태 전이, `paidAt` null 검증 |
 
 웹훅 관련 테스트는 [payment-webhook-plan.md 6장](payment-webhook-plan.md#6-테스트), 보상 관련 테스트는 [payment-compensation.md 7장](payment-compensation.md#7-테스트)에 있다.
@@ -277,7 +280,6 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 ### 개선 항목
 
-- 부분 취소 시 `currentCancellableAmount`를 함께 보내 초과 환불 방지.
 - `PortOneConfig`: `RestClient`를 타입으로만 주입하고 정적 `RestClient.builder()`로 생성 → Boot의 `RestClient.Builder` 주입으로 변경 권장.
 - `io.portone:server-sdk` 의존성은 웹훅 서명 검증(`WebhookVerifier`)에만 사용한다. 결제 조회·취소는 `RestClient`로 직접 호출한다.
 - PG 연동 컨트롤러(`PortOneConfigController`, `PortOneWebhookController`)는 infra에 둔다. `architecture.md`에 이 기준을 추가할지 팀과 정한다.
@@ -289,7 +291,6 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 ### PortOne 문서로 확인 필요
 
 - `Idempotency-Key` 헤더 값 형식(따옴표로 감싸는지)
-- 이미 취소된 결제 오류의 `type` 이름(`PAYMENT_ALREADY_CANCELLED`로 구현)
 - 결제 상태 목록(`VIRTUAL_ACCOUNT_ISSUED` 등)과 각 상태에서의 승인 처리 방침
 - 같은 멱등 키로 동시에 요청했을 때의 응답(409 "처리 중" 여부)
 - 웹훅 재전송 횟수·기간
@@ -297,6 +298,8 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 ### PortOne 문서로 확인한 것
 
 - `Idempotency-Key`: 멱등성을 보장하고 같은 키의 응답을 3시간 동안 저장한다 → 호출마다 새 키를 쓴다(4.9).
+- 결제 취소 오류의 `type` 값 (server-sdk 0.24.0 직렬화 이름으로 확인): 이미 취소됨 `PAYMENT_ALREADY_CANCELLED`, 취소 가능 금액 불일치 `CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN`.
+- 부분 취소의 `currentCancellableAmount`로 중복 취소를 막는 방식은 KAN-51(환불)에서 구현했다. 상세는 [refund-requirements.md 5-2](../requirements/refund-requirements.md).
 
 ## 8. 보상 처리의 Outbox 방식 (KAN-39)
 

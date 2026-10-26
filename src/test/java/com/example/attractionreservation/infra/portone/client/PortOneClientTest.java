@@ -199,6 +199,41 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("PG 취소 가능 금액을 넘기면 취소 요청에 함께 보낸다.")
+    void cancelPayment_withCancellableAmount_SendCurrentCancellableAmount() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andExpect(jsonPath("$.amount").value(3000))
+                .andExpect(jsonPath("$.currentCancellableAmount").value(10000))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L, 10000L);
+
+        //then
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("PG 취소 가능 금액을 넘기지 않으면 취소 요청에 포함하지 않는다.")
+    void cancelPayment_withoutCancellableAmount_OmitCurrentCancellableAmount() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andExpect(jsonPath("$.currentCancellableAmount").doesNotExist())
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L);
+
+        //then
+        server.verify();
+    }
+
+    @Test
     @DisplayName("부분 취소는 같은 금액이어도 호출마다 다른 멱등 키를 보낸다.")
     void cancelPayment_partialTwice_DifferentIdempotencyKey() {
         //given
@@ -236,6 +271,42 @@ class PortOneClientTest {
         //then
         server.verify();
         assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED));
+    }
+
+    @Test
+    @DisplayName("부분 취소 대상 결제가 이미 취소됐으면 성공으로 보지 않고 재시도 없이 이미 취소됨으로 처리한다.")
+    void cancelPayment_partialAlreadyCancelled_Fail() {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.CONFLICT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PAYMENT_ALREADY_CANCELLED","message":"이미 취소된 결제입니다."}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L, 10000L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("PG 취소 가능 금액이 맞지 않아 거절되면 재시도 없이 취소 가능 금액 불일치로 처리한다.")
+    void cancelPayment_cancellableAmountMismatch_Fail() {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.CONFLICT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN","message":"취소 가능 잔액 검증에 실패했습니다."}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L, 10000L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_CANCELLABLE_AMOUNT_MISMATCH.getMessage());
+        server.verify();
     }
 
     @Test

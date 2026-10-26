@@ -31,6 +31,8 @@ import java.util.UUID;
 public class PortOneClient implements PaymentGateway {
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
+    // PortOne CancellableAmountConsistencyBrokenError의 type 값 (server-sdk 직렬화 이름 기준)
+    private static final String CANCELLABLE_AMOUNT_MISMATCH = "CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN";
     private static final String PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND";
 
     private final RestClient portOneRestClient;
@@ -58,7 +60,7 @@ public class PortOneClient implements PaymentGateway {
             throw new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR);
         } catch (RestClientException e) {
             log.warn("PortOne 결제 조회 통신 실패: pgId={}, errorType={}",
-                    pgId, e.getClass().getSimpleName());
+                    pgId, e.getClass().getSimpleName(), e);
 
             throw new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR);
         }
@@ -71,10 +73,11 @@ public class PortOneClient implements PaymentGateway {
      * 호출이 겹쳐 같은 결제를 두 번 전체 취소해도 두 번째는 PAYMENT_ALREADY_CANCELLED로 성공 처리된다.
      */
     @Override
-    public PaymentCancellationResponse cancelPayment(String pgId, String reason, Long amount) {
+    public PaymentCancellationResponse cancelPayment(
+            String pgId, String reason, Long amount, Long currentCancellableAmount) {
         String idempotencyKey = UUID.randomUUID().toString();
-        log.info("PortOne 결제 취소 요청: pgId={}, reason={}, idempotencyKey={}",
-                pgId, reason, idempotencyKey);
+        log.info("PortOne 결제 취소 요청: pgId={}, reason={}, amount={}, currentCancellableAmount={}, idempotencyKey={}",
+                pgId, reason, amount, currentCancellableAmount, idempotencyKey);
 
         for (int attempt = 1; attempt <= MAX_CANCEL_ATTEMPTS; attempt++) {
             try {
@@ -82,18 +85,32 @@ public class PortOneClient implements PaymentGateway {
                         .uri("/payments/{pgId}/cancel", pgId)
                         // PortOne은 멱등 키를 RFC 8941 문자열(쌍따옴표로 감싼 값)로 받는다.
                         .header("Idempotency-Key", "\"" + idempotencyKey + "\"")
-                        .body(new PortOneCancelRequest(reason, portOneProperties.getStoreId(), amount))
+                        .body(new PortOneCancelRequest(
+                                reason, portOneProperties.getStoreId(), amount, currentCancellableAmount))
                         .retrieve()
                         .body(PortOneCancelResponse.class);
                 return toCancellationResult(pgId, response);
             } catch (RestClientResponseException e) {
                 if (isAlreadyCancelled(e)) {
+                    // 부분 취소에서 받으면 다른 경로로 전체 취소된 것이므로 이번 부분 취소가 반영됐다고 볼 수 없다.
+                    if (amount != null) {
+                        log.warn("PortOne 부분 취소 대상 결제가 이미 취소됨: pgId={}, amount={}", pgId, amount);
+                        throw new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED);
+                    }
+
                     log.info("PortOne 결제가 이미 취소됨: pgId={}", pgId);
                     return new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED);
                 }
 
-                log.warn("PortOne 결제 취소 실패: pgId={}, httpStatus={}, responseBody={}",
-                        pgId, e.getStatusCode().value(), e.getResponseBodyAsString());
+                // 앞선 취소가 이미 반영돼 취소 가능 금액이 달라졌을 수 있으므로 재시도하면 안 된다.
+                if (isCancellableAmountMismatch(e)) {
+                    log.warn("PortOne 취소 가능 금액 불일치: pgId={}, amount={}, currentCancellableAmount={}, responseBody={}",
+                            pgId, amount, currentCancellableAmount, e.getResponseBodyAsString());
+                    throw new BusinessException(ErrorCode.PAYMENT_CANCELLABLE_AMOUNT_MISMATCH);
+                }
+
+                log.warn("PortOne 결제 취소 실패: pgId={}, amount={}, currentCancellableAmount={}, httpStatus={}, responseBody={}",
+                        pgId, amount, currentCancellableAmount, e.getStatusCode().value(), e.getResponseBodyAsString());
 
                 throw new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED);
             } catch (ResourceAccessException e) {
@@ -173,6 +190,10 @@ public class PortOneClient implements PaymentGateway {
 
     private boolean isAlreadyCancelled(RestClientResponseException exception) {
         return ALREADY_CANCELLED.equals(extractErrorType(exception));
+    }
+
+    private boolean isCancellableAmountMismatch(RestClientResponseException exception) {
+        return CANCELLABLE_AMOUNT_MISMATCH.equals(extractErrorType(exception));
     }
 
     // PortOne 오류 응답의 type 필드. 본문이 없거나 형식이 다르면 null

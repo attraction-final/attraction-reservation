@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.reservation.controller;
 
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationDetailResponse;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
 import com.example.attractionreservation.global.exception.BusinessException;

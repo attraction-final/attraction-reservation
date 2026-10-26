@@ -6,10 +6,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 public record PortOneCancelRequest(
         String reason,
         String storeId,
-        Long amount
+        Long amount,
+        Long currentCancellableAmount
 ) {
     // 전체 취소
     public PortOneCancelRequest(String reason, String storeId) {
-        this(reason, storeId, null);
+        this(reason, storeId, null, null);
     }
 }

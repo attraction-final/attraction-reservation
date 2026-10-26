@@ -106,7 +106,6 @@ public enum ErrorCode {
     PAYMENT_PG_PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PG 결제를 찾을 수 없습니다."),
     PAYMENT_ALREADY_PROCESSED(HttpStatus.CONFLICT, "이미 처리된 결제입니다."),
     PAYMENT_ALREADY_CANCELLED(HttpStatus.CONFLICT, "이미 취소된 결제입니다."),
-    PAYMENT_PG_FAILED(HttpStatus.BAD_GATEWAY, "PG 결제에 실패했습니다."),
     PAYMENT_WEBHOOK_INVALID_SIGNATURE(HttpStatus.UNAUTHORIZED, "웹훅 서명이 유효하지 않습니다."),
     PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 웹훅 처리 상태 전이입니다."),
     PAYMENT_WEBHOOK_NOT_FOUND(HttpStatus.NOT_FOUND, "웹훅 수신 기록을 찾을 수 없습니다."),

@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
 import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
@@ -51,6 +52,9 @@ class OrderServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private PaymentService paymentService;
 
     @InjectMocks
     private OrderService orderService;

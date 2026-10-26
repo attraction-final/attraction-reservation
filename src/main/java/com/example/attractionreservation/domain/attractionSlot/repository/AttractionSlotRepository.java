@@ -77,8 +77,8 @@ public interface AttractionSlotRepository extends JpaRepository<AttractionSlot, 
     @Modifying
     @Query("""
     UPDATE AttractionSlot s
-       SET s.reservedCount = s.reservedCount - 1 
-     WHERE s.id = :slotId 
+       SET s.reservedCount = s.reservedCount - 1
+     WHERE s.id = :slotId
        AND s.reservedCount > 0
     """)
     int tryReleaseCapacity(@Param("slotId") Long slotId);

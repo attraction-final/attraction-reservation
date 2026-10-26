@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
@@ -149,7 +150,7 @@ class WebhookEventCommandServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = PaymentSyncResult.class, names = {"COMPENSATION_FAILED", "STATE_CONFLICT"})
+    @EnumSource(value = PaymentSyncResult.class, names = {"STATE_CONFLICT", "REFUND_MISMATCH"})
     @DisplayName("수동 처리가 필요한 결과는 재시도 없이 DEAD로 기록한다.")
     void recordResult_manualRequired_Dead(PaymentSyncResult result) {
         //given
@@ -184,6 +185,52 @@ class WebhookEventCommandServiceTest {
         //then
         assertThat(find(notOurs).getStatus()).isEqualTo(WebhookStatus.IGNORED);
         assertThat(find(approved).getStatus()).isEqualTo(WebhookStatus.PROCESSED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentSyncResult.class,
+            names = {"APPROVED", "ALREADY_DONE", "NOT_PAID", "PG_FAILED", "COMPENSATED", "REFUND_PENDING"})
+    @DisplayName("처리가 끝난 결과는 모두 PROCESSED로 기록한다.")
+    void recordResult_completedResult_Processed(PaymentSyncResult result) {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        Instant now = now();
+        webhookEventCommandService.claim(id, now);
+
+        //when
+        webhookEventCommandService.recordResult(id, result, now);
+
+        //then
+        assertThat(find(id).getStatus()).isEqualTo(WebhookStatus.PROCESSED);
+    }
+
+    @Test
+    @DisplayName("PG 취소로 환불을 완료 처리한 결과는 PROCESSED로 기록한다.")
+    void recordResult_refundSynced_Processed() {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        Instant now = now();
+        webhookEventCommandService.claim(id, now);
+
+        //when
+        webhookEventCommandService.recordResult(id, PaymentSyncResult.REFUND_SYNCED, now);
+
+        //then
+        assertThat(find(id).getStatus()).isEqualTo(WebhookStatus.PROCESSED);
+    }
+
+    @Test
+    @DisplayName("환불 동기화 전 결과는 기록하지 않고 예외를 던진다.")
+    void recordResult_refundSyncRequired_Fail() {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        Instant now = now();
+        webhookEventCommandService.claim(id, now);
+
+        //when & then
+        assertThatThrownBy(() -> webhookEventCommandService.recordResult(id, PaymentSyncResult.REFUND_SYNC_REQUIRED, now))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(find(id).getStatus()).isEqualTo(WebhookStatus.PROCESSING);
     }
 
     @Test

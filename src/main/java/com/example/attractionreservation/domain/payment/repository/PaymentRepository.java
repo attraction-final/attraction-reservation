@@ -22,6 +22,10 @@ public interface PaymentRepository extends JpaRepository<Payment, Long>, Payment
     @EntityGraph(attributePaths = {"order"})
     Optional<Payment> findWithLockByPgId(String pgId);
 
+    // 환불 처리에서 같은 결제의 환불을 순서대로 처리하기 위해 잠근다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Payment> findWithLockById(Long id);
+
     Optional<Payment> findByPgId(String pgId);
 
     @Query("""

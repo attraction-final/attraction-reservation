@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.payment.facade;
 
 import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
 import com.example.attractionreservation.domain.payment.service.WebhookEventCommandService;
+import com.example.attractionreservation.domain.refund.facade.RefundProcessor;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import java.util.Optional;
 
 /**
  * 저장된 웹훅을 처리한다. 트랜잭션 없이 "점유(짧은 트랜잭션) → PG 재조회·원장 반영 → 결과 기록(짧은 트랜잭션)" 순서로 진행한다.
+ * 결제 완료·환불된 결제는 {@link RefundProcessor#syncWithPg(String)}로 PG 취소 금액을 환불 상태에 반영한다(취소 웹훅).
  * 스케줄러가 {@link #processPending(int)}를 주기적으로 호출한다.
  */
 @Slf4j
@@ -22,6 +24,7 @@ import java.util.Optional;
 public class WebhookEventProcessor {
     private final WebhookEventCommandService webhookEventCommandService;
     private final PaymentFacade paymentFacade;
+    private final RefundProcessor refundProcessor;
 
     public void processPending(int limit) {
         for (Long eventId: webhookEventCommandService.findProcessableIds(Instant.now(), limit)) {
@@ -49,6 +52,11 @@ public class WebhookEventProcessor {
 
         try {
             PaymentSyncResult result = paymentFacade.syncPayment(pgId.get());
+
+            if (result == PaymentSyncResult.REFUND_SYNC_REQUIRED) {
+                result = refundProcessor.syncWithPg(pgId.get());
+            }
+
             webhookEventCommandService.recordResult(eventId, result, Instant.now());
             logResult(eventId, pgId.get(), result);
         } catch (BusinessException e) {
@@ -66,8 +74,6 @@ public class WebhookEventProcessor {
 
     private void logResult(Long eventId, String pgId, PaymentSyncResult result) {
         switch (result) {
-            case COMPENSATION_FAILED ->
-                    log.error("[Webhook] PG 보상 취소 실패, 수동 환불 필요: eventId={}, pgId={}", eventId, pgId);
             case STATE_CONFLICT ->
                     log.error("[Webhook] 원장 상태와 충돌, 수동 확인 필요: eventId={}, pgId={}", eventId, pgId);
             default -> log.info("[Webhook] 처리 완료: eventId={}, pgId={}, result={}", eventId, pgId, result);

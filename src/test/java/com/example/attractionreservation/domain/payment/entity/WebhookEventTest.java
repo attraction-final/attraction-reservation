@@ -159,6 +159,7 @@ class WebhookEventTest {
         assertEquals(WebhookStatus.FAILED, event.getStatus());
         assertEquals(NOW.plus(Duration.ofMinutes(1)), event.getNextRetryAt());
         assertEquals("PG 조회 실패", event.getLastError());
+        assertNull(event.getProcessedAt());
     }
 
     @Test

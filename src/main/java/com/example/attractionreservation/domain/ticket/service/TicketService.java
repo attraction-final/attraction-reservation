@@ -62,4 +62,10 @@ public class TicketService {
 
         return CreateTicketEntryResponse.from(ticket);
     }
+
+    // 예약 - 티켓 찾기
+    public Ticket findByTicketId(Long ticketId) {
+        return ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
+    }
 }

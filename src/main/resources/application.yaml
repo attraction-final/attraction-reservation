@@ -35,3 +35,10 @@ portone:
   store-id: ${PORTONE_STORE_ID}
   channel-key: ${PORTONE_CHANNEL_KEY}
   webhook-secret: ${PORTONE_WEBHOOK_SECRET}
+
+payment:
+  webhook:
+    scheduler:
+      enabled: true
+      fixed-delay: 10s   # 이전 실행이 끝난 뒤 다음 실행까지 대기 시간
+      batch-size: 50     # 한 번에 처리할 최대 웹훅 수

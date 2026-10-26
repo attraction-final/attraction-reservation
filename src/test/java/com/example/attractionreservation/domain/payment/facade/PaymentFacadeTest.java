@@ -3,6 +3,7 @@ package com.example.attractionreservation.domain.payment.facade;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentRequest;
 import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentResponse;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.port.PaymentGateway;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -207,6 +209,7 @@ class PaymentFacadeTest {
         given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
         given(paymentCommandService.failPayment(pgId)).willReturn(false);
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(paymentWithStatus(PaymentStatus.FAILED)));
 
         //when & then
         assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
@@ -215,8 +218,252 @@ class PaymentFacadeTest {
         verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
     }
 
+    @Test
+    @DisplayName("금액 불일치 결제가 이미 취소된 결제면 PG 결제를 취소한다.")
+    void confirmPayment_amountMismatchCancelled_CancelPgPayment() {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPayment(pgId)).willReturn(false);
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(paymentWithStatus(PaymentStatus.CANCELLED)));
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
+        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+    }
+
+    @Test
+    @DisplayName("PG 결제 대기 중 원장이 취소됐는데 PG에서 결제 완료됐으면 PG 결제를 취소한다.")
+    void confirmPayment_cancelledButPgPaid_CancelPgPayment() {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_ALREADY_CANCELLED.getMessage());
+        verify(paymentGateway).cancelPayment(pgId, "취소된 주문의 결제", 10000L);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 이미 취소된 결제가 PG에서 결제 완료됐으면 PG 취소하고 COMPENSATED를 반환한다.")
+    void syncPayment_cancelledButPgPaid_Compensated() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATED, result);
+        verify(paymentGateway).cancelPayment(pgId, "취소된 주문의 결제", 10000L);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 금액 불일치 결제가 이미 취소된 결제면 PG 취소하고 COMPENSATED를 반환한다.")
+    void syncPayment_amountMismatchCancelled_Compensated() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPayment(pgId)).willReturn(false);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATED, result);
+        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+        verify(paymentCommandService, never()).approvePayment(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 취소된 결제의 PG 취소가 실패하면 COMPENSATION_FAILED를 반환한다.")
+    void syncPayment_cancelledButPgCancelFailed_CompensationFailed() {
+        //given
+        payment.markAsCancelled();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(pgId, "취소된 주문의 결제", 10000L);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATION_FAILED, result);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 원장에 없는 결제면 PG를 호출하지 않고 NOT_OUR_PAYMENT를 반환한다.")
+    void syncPayment_unknownPgId_NotOurPayment() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.empty());
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.NOT_OUR_PAYMENT, result);
+        verifyNoInteractions(paymentGateway, paymentCommandService);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 이미 결제 완료된 결제면 PG를 호출하지 않고 ALREADY_DONE을 반환한다.")
+    void syncPayment_alreadyPaid_AlreadyDone() {
+        //given
+        payment.markAsPaid(PAID_AT);
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.ALREADY_DONE, result);
+        verifyNoInteractions(paymentGateway, paymentCommandService);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: PG에서 결제 완료됐고 금액이 일치하면 결제를 승인한다.")
+    void syncPayment_paid_Approved() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.APPROVED, result);
+        verify(paymentCommandService).approvePayment(pgId, PAID_AT);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 이미 실패 처리된 결제면 ALREADY_DONE을 반환한다.")
+    void syncPayment_alreadyFailed_AlreadyDone() {
+        //given
+        payment.markAsFailed();
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.ALREADY_DONE, result);
+        verifyNoInteractions(paymentGateway);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: PG에서 아직 결제 완료가 아니면 NOT_PAID를 반환한다.")
+    void syncPayment_pgReady_NotPaid() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.READY, 10000L)));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.NOT_PAID, result);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: PG에서 결제가 실패했으면 실패 처리하고 PG_FAILED를 반환한다.")
+    void syncPayment_pgFailed_PgFailed() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.FAILED, 10000L)));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.PG_FAILED, result);
+        verify(paymentCommandService).failPayment(pgId);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 금액이 다르면 실패 처리 후 PG 취소하고 COMPENSATED를 반환한다.")
+    void syncPayment_amountMismatch_Compensated() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPayment(pgId)).willReturn(true);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATED, result);
+        verify(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: 금액 불일치 보상 취소가 실패하면 COMPENSATION_FAILED를 반환한다.")
+    void syncPayment_cancellationFailed_CompensationFailed() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPayment(pgId)).willReturn(true);
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(pgId, "결제 금액 불일치", 9999L);
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.COMPENSATION_FAILED, result);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ErrorCode.class, names = {"PAYMENT_INVALID_STATUS_TRANSITION", "ORDER_INVALID_STATUS_TRANSITION"})
+    @DisplayName("웹훅 동기화: 원장 상태 때문에 승인할 수 없으면 STATE_CONFLICT를 반환한다.")
+    void syncPayment_statusTransitionFailed_StateConflict(ErrorCode errorCode) {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 10000L)));
+        given(paymentCommandService.approvePayment(pgId, PAID_AT)).willThrow(new BusinessException(errorCode));
+
+        //when
+        PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+
+        //then
+        assertEquals(PaymentSyncResult.STATE_CONFLICT, result);
+        verify(paymentGateway, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화: PG 조회 실패처럼 재시도가 필요한 오류는 그대로 던진다.")
+    void syncPayment_gatewayError_Rethrow() {
+        //given
+        given(paymentService.findByPgId(pgId)).willReturn(Optional.of(payment));
+        given(paymentGateway.getPayment(pgId)).willThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.syncPayment(pgId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_GATEWAY_ERROR.getMessage());
+    }
+
     private PaymentGatewayResponse pgResponse(GatewayPaymentStatus status, Long amount) {
         return new PaymentGatewayResponse(pgId, status, amount, status == GatewayPaymentStatus.PAID ? PAID_AT : null);
+    }
+
+    private Payment paymentWithStatus(PaymentStatus status) {
+        Payment found = createPayment();
+        ReflectionTestUtils.setField(found, "status", status);
+        return found;
     }
 
     private Payment createPayment() {

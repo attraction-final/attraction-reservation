@@ -239,4 +239,26 @@ public class ReservationService {
 
         return SearchAdminReservationDetailResponse.from(reservation);
     }
+
+    // 관리자 예약 강제 취소
+    @Transactional
+    public UpdateAdminReservationCancelResponse adminReservationCancel(Long reservationId, UpdateAdminReservationCancelRequest request) {
+
+        // 예약 존재 여부 및 RESERVED 상태 검증
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
+
+        if (reservation.getStatus() != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        // 취소 상태·시각·사유
+        reservation.adminCancelReservation(request.cancelReason());
+
+        // 슬롯 예약 인원을 1 감소시켜 잔여 정원 복구
+        Long slotId = reservation.getAttractionSlot().getId();
+        attractionSlotService.releaseReservationCapacity(slotId);
+
+        return UpdateAdminReservationCancelResponse.from(reservation);
+    }
 }

@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.reservation.dto;
 
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 
 import java.time.Instant;
@@ -19,9 +20,14 @@ public record SearchAdminReservationDetailResponse(
         ReservationStatus status,
         Instant createdAt,
         Instant cancelledAt,
-        String cancelReason
+        ReservationCancelReason cancelReason,
+        String cancelReasonMessage
 ) {
-    public static SearchAdminReservationDetailResponse from(Reservation reservation) {
+    public static SearchAdminReservationDetailResponse from(
+            Reservation reservation
+    ) {
+        ReservationCancelReason reason = reservation.getCancelReason();
+
         return new SearchAdminReservationDetailResponse(
                 reservation.getId(),
                 reservation.getReservationNumber(),
@@ -35,7 +41,8 @@ public record SearchAdminReservationDetailResponse(
                 reservation.getStatus(),
                 reservation.getCreatedAt(),
                 reservation.getCancelledAt(),
-                reservation.getCancelReason()
+                reason,
+                reason == null ? null : reason.getMessage()
         );
     }
 }

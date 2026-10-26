@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -72,6 +73,7 @@ class AdminReservationDetailServiceTest {
                 .isEqualTo(Instant.parse("2026-10-24T01:00:00Z"));
         assertThat(response.cancelledAt()).isNull();
         assertThat(response.cancelReason()).isNull();
+        assertThat(response.cancelReasonMessage()).isNull();
 
         verify(reservationRepository).findById(RESERVATION_ID);
     }
@@ -81,7 +83,7 @@ class AdminReservationDetailServiceTest {
     void findAdminReservationById_cancelledReservation() {
         // given
         Instant cancelledAt = Instant.parse("2026-10-24T02:00:00Z");
-        String cancelReason = "어트랙션 긴급 점검";
+        ReservationCancelReason cancelReason = ReservationCancelReason.ATTRACTION_MAINTENANCE;
 
         Reservation reservation = createReservation(
                 ReservationStatus.CANCELLED,
@@ -100,6 +102,8 @@ class AdminReservationDetailServiceTest {
         assertThat(response.status()).isEqualTo(ReservationStatus.CANCELLED);
         assertThat(response.cancelledAt()).isEqualTo(cancelledAt);
         assertThat(response.cancelReason()).isEqualTo(cancelReason);
+        assertThat(response.cancelReasonMessage())
+                .isEqualTo(cancelReason.getMessage());
 
         verify(reservationRepository).findById(RESERVATION_ID);
     }
@@ -126,7 +130,7 @@ class AdminReservationDetailServiceTest {
     private Reservation createReservation(
             ReservationStatus status,
             Instant cancelledAt,
-            String cancelReason
+            ReservationCancelReason cancelReason
     ) {
         Reservation reservation = mock(Reservation.class);
         User user = mock(User.class);

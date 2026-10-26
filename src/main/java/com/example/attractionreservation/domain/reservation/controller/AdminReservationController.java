@@ -57,4 +57,14 @@ public class AdminReservationController {
         UpdateAdminReservationCancelResponse response = reservationService.adminReservationCancel(reservationId, request);
         return ResponseEntity.ok(ApiResponse.ok("예약 강제 취소에 성공했습니다.", response));
     }
+
+    // 관리자 예약 상태 변경
+    @PatchMapping("/{reservationId}/status")
+    public ResponseEntity<ApiResponse<UpdateAdminReservationStatusResponse>> updateReservationStatus(
+            @Min(1) @PathVariable Long reservationId,
+            @Valid @RequestBody UpdateAdminReservationStatusRequest request
+    ) {
+        UpdateAdminReservationStatusResponse response = reservationService.updateReservationStatus(reservationId, request);
+        return ResponseEntity.ok(ApiResponse.ok("예약 상태 변경에 성공했습니다.", response));
+    }
 }

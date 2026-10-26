@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
@@ -22,6 +23,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -238,5 +241,90 @@ class OrderServiceTest {
         );
         ReflectionTestUtils.setField(product, "id", productId);
         return product;
+    }
+
+    @Test
+    @DisplayName("본인의 주문 상세와 주문 당시 단가 및 KST 생성 시각을 반환한다")
+    void findOrderById_ownOrder_returnsDetail() {
+        // given
+        ReflectionTestUtils.setField(user, "id", 1L);
+
+        TicketProduct product =
+                createProduct(10L, 60000, TicketProductStatus.ON_SALE);
+
+        Order order = Order.create(user, 120000);
+        order.addOrderItem(product, 2);
+
+        ReflectionTestUtils.setField(order, "id", 101L);
+        ReflectionTestUtils.setField(
+                order, "createdAt", Instant.parse("2026-10-14T01:00:00Z")
+        );
+        ReflectionTestUtils.setField(
+                order.getOrderItems().get(0), "id", 201L
+        );
+
+        // 현재 상품 가격과 주문 당시 단가가 다르도록 설정한다.
+        ReflectionTestUtils.setField(product, "price", 70000);
+
+        when(orderRepository.findOrderById(101L))
+                .thenReturn(Optional.of(order));
+
+        // when
+        SearchOrderResponse response = orderService.findOrderById(1L, 101L);
+
+        // then
+        assertThat(response.orderId()).isEqualTo(101L);
+        assertThat(response.totalAmount()).isEqualTo(120000);
+        assertThat(response.status()).isEqualTo("PENDING");
+        assertThat(response.createdAt())
+                .isEqualTo(LocalDateTime.of(2026, 10, 14, 10, 0));
+        assertThat(response.items()).containsExactly(
+                new SearchOrderResponse.Item(201L, 10L, 60000, 2)
+        );
+
+        verify(orderRepository).findOrderById(101L);
+        verifyNoMoreInteractions(orderRepository);
+        verifyNoInteractions(ticketProductRepository, userRepository);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 주문을 조회하면 주문 미존재 오류를 반환한다")
+    void findOrderById_missingOrder_throwsNotFound() {
+        // given
+        when(orderRepository.findOrderById(999L))
+                .thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> orderService.findOrderById(1L, 999L))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.ORDER_NOT_FOUND)
+                );
+
+        verify(orderRepository).findOrderById(999L);
+        verifyNoMoreInteractions(orderRepository);
+    }
+
+    @Test
+    @DisplayName("다른 회원의 주문을 조회하면 접근을 거부한다")
+    void findOrderById_otherMemberOrder_throwsForbidden() {
+        // given: 주문 소유자는 2번 회원이며 요청자는 1번 회원이다.
+        ReflectionTestUtils.setField(user, "id", 2L);
+        Order order = Order.create(user, 120000);
+
+        when(orderRepository.findOrderById(101L))
+                .thenReturn(Optional.of(order));
+
+        // when & then
+        assertThatThrownBy(() -> orderService.findOrderById(1L, 101L))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.ORDER_ACCESS_DENIED)
+                );
+
+        verify(orderRepository).findOrderById(101L);
+        verifyNoMoreInteractions(orderRepository);
     }
 }

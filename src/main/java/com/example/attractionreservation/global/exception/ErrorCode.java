@@ -14,6 +14,7 @@ public enum ErrorCode {
     URL_NOT_FOUND(HttpStatus.NOT_FOUND,  "요청한 주소를 찾을 수 없습니다."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 콘텐츠 형식입니다."),
+    CONCURRENT_UPDATE_CONFLICT(HttpStatus.CONFLICT, "다른 요청에 의해 데이터가 변경되었습니다. 다시 시도해주세요."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 에러"),
 
     // attraction
@@ -67,6 +68,8 @@ public enum ErrorCode {
     // order
     ORDER_PRODUCT_NOT_ON_SALE(HttpStatus.CONFLICT, "판매 중인 티켓 상품만 주문할 수 있습니다."),
     ORDER_AMOUNT_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "주문 금액이 허용 범위를 초과했습니다."),
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
+    ORDER_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인의 주문만 조회할 수 있습니다."),
 
     // ticket
     INVALID_TICKET_VALID_DATE(HttpStatus.BAD_REQUEST, "입장권 방문일은 필수입니다."),
@@ -80,6 +83,7 @@ public enum ErrorCode {
     TICKET_RESERVATION_NOT_ALLOWED_STATUS(HttpStatus.CONFLICT, "예약에 사용할 수 없는 티켓 상태입니다."),
     TICKET_RESERVATION_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓 방문일과 슬롯 날짜가 일치하지 않습니다."),
     TICKET_RESERVATION_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "티켓 이용 가능 시간에 포함되지 않는 슬롯입니다."),
+    INVALID_TICKET_ENTRY_TIME(HttpStatus.BAD_REQUEST, "입장 처리 시각은 필수입니다."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),
@@ -91,7 +95,9 @@ public enum ErrorCode {
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),
-    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다.");
+    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다."),
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 내역을 찾을 수 없습니다."),
+    PAYMENT_CANCEL_PROHIBITED(HttpStatus.CONFLICT, "결제 대기 상태가 아닌 결제는 취소할 수 없습니다.");
 
     private final HttpStatus status;
     private final String message;

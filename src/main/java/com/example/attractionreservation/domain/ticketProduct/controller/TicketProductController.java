@@ -34,7 +34,7 @@ public class TicketProductController {
         }
 
         Pageable stablePageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
-        Page<SearchTicketProductResponse> result = ticketProductService.getTicketProductAll(condition, stablePageable);
+        Page<SearchTicketProductResponse> result = ticketProductService.findTicketProductAll(condition, stablePageable);
 
         SearchTicketProductListResponse response = SearchTicketProductListResponse.from(result);
 

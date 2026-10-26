@@ -41,29 +41,16 @@ public class TicketProduct extends BaseTimeEntity {
     private TicketProductStatus status;
 
     public TicketProduct(String name, int price, String description, TicketType type, int stock, TicketProductStatus status) {
-        if (name == null || name.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_NAME);
-        }
-
-        if (description == null || description.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
-        }
+        validateName(name);
+        validateDescription(description);
 
         if (type == null) {
             throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_TYPE);
         }
 
-        if (status == null) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
-        }
-
-        if (price < 0) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_PRICE);
-        }
-
-        if (stock < 0) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STOCK);
-        }
+        validateStatus(status);
+        validatePrice(price);
+        validateStock(stock);
 
         this.name = name;
         this.price = price;
@@ -83,25 +70,11 @@ public class TicketProduct extends BaseTimeEntity {
             throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
         }
 
-        if (name == null || name.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_NAME);
-        }
-
-        if (description == null || description.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
-        }
-
-        if (status == null) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
-        }
-
-        if (price < 0) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_PRICE);
-        }
-
-        if (stock < 0) {
-            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STOCK);
-        }
+        validateName(name);
+        validateDescription(description);
+        validateStatus(status);
+        validatePrice(price);
+        validateStock(stock);
 
         this.name = name;
         this.price = price;
@@ -112,5 +85,34 @@ public class TicketProduct extends BaseTimeEntity {
 
     public void delete() {
         this.status = TicketProductStatus.DELETED;
+    }
+
+    // 검증용 중복 코드 메서드로 분리
+    private void validateName(String name) {
+        if (name == null || name.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_NAME);
+        }
+    }
+    private void validateDescription(String description) {
+        if (description == null || description.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_DESCRIPTION);
+        }
+    }
+    private void validateStatus(TicketProductStatus status) {
+        if (status == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STATUS);
+        }
+    }
+
+    private void validatePrice(int price) {
+        if (price < 0) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_PRICE);
+        }
+    }
+
+    private void validateStock(int stock) {
+        if (stock < 0) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_PRODUCT_STOCK);
+        }
     }
 }

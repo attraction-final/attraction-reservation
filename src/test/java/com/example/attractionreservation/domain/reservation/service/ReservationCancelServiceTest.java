@@ -69,19 +69,18 @@ class ReservationCancelServiceTest {
                 USER_ID
         )).thenReturn(Optional.of(reservation));
 
-        Instant before = Instant.now();
+        LocalDateTime currentTime = DEADLINE.minusMinutes(1);
+        Instant expectedCancelledAt = currentTime.atZone(KstTime.ZONE).toInstant();
 
         // when
         UpdateReservationCancelResponse response =
-                cancelAt(DEADLINE.minusMinutes(1));
-
-        Instant after = Instant.now();
+                cancelAt(currentTime);
 
         // then
         assertThat(reservation.getStatus())
                 .isEqualTo(ReservationStatus.CANCELLED);
         assertThat(reservation.getCancelledAt())
-                .isBetween(before, after);
+                .isEqualTo(expectedCancelledAt);
 
         assertThat(response.reservationId()).isEqualTo(RESERVATION_ID);
         assertThat(response.reservationNumber())
@@ -110,20 +109,17 @@ class ReservationCancelServiceTest {
                 USER_ID
         )).thenReturn(Optional.of(reservation));
 
+        Instant expectedCancelledAt = DEADLINE.atZone(KstTime.ZONE).toInstant();
+
         try (MockedStatic<KstTime> mocked = mockStatic(KstTime.class)) {
-            mocked.when(() ->
-                    KstTime.toLocalDateTime(any(Instant.class))
-            ).thenReturn(DEADLINE);
+            mocked.when(KstTime::now).thenReturn(DEADLINE);
 
             // when
             reservationService.cancelReservation(USER_ID, RESERVATION_ID);
 
             // then
-            Instant recordedAt = reservation.getCancelledAt();
-
-            mocked.verify(() ->
-                    KstTime.toLocalDateTime(recordedAt)
-            );
+            mocked.verify(KstTime::now, times(1));
+            assertThat(reservation.getCancelledAt()).isEqualTo(expectedCancelledAt);
         }
     }
 
@@ -300,9 +296,7 @@ class ReservationCancelServiceTest {
             LocalDateTime currentTime
     ) {
         try (MockedStatic<KstTime> mocked = mockStatic(KstTime.class)) {
-            mocked.when(() ->
-                    KstTime.toLocalDateTime(any(Instant.class))
-            ).thenReturn(currentTime);
+            mocked.when(KstTime::now).thenReturn(currentTime);
 
             return reservationService.cancelReservation(
                     USER_ID,

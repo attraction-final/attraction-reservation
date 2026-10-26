@@ -1,10 +1,11 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.entity.UserStatus;
+import com.example.attractionreservation.domain.user.dto.SearchUserResponse;
 import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
-import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
@@ -87,6 +88,16 @@ public class UserService {
                         pageable
                 )
         );
+    }
+
+    @Transactional(readOnly = true)
+    public SearchUserResponse findUserById(Long userId) {
+        // 관리자 상세 조회는 관리 목적의 예외로 탈퇴·정지 회원도 조회한다.
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        return SearchUserResponse.from(user);
     }
 
     @Transactional(readOnly = true)

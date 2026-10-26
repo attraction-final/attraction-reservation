@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.SearchUserResponse;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
@@ -172,6 +175,103 @@ class AdminUserControllerTest {
                         .with(authenticatedAs("ADMIN"))
                         .param("page", page)
                         .param("size", size))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("관리자는 탈퇴 회원의 상세 정보도 조회할 수 있다")
+    void getUserById_adminRequest_returnsMemberDetail() throws Exception {
+        // given
+        SearchUserResponse response = new SearchUserResponse(
+                10L,
+                "detail@example.com",
+                "상세조회회원",
+                Role.USER,
+                UserStatus.WITHDRAWN,
+                LocalDateTime.of(2026, 10, 15, 10, 0),
+                LocalDateTime.of(2026, 10, 15, 12, 0)
+        );
+
+        when(userService.findUserById(10L)).thenReturn(response);
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L)
+                        .with(authenticatedAs("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("회원 상세 조회에 성공했습니다."))
+                .andExpect(jsonPath("$.data.id").value(10))
+                .andExpect(jsonPath("$.data.email")
+                        .value("detail@example.com"))
+                .andExpect(jsonPath("$.data.nickname").value("상세조회회원"))
+                .andExpect(jsonPath("$.data.role").value("USER"))
+                .andExpect(jsonPath("$.data.status").value("WITHDRAWN"))
+                .andExpect(jsonPath("$.data.createdAt")
+                        .value("2026-10-15T10:00:00"))
+                .andExpect(jsonPath("$.data.updatedAt")
+                        .value("2026-10-15T12:00:00"))
+                .andExpect(jsonPath("$.data.password").doesNotExist());
+
+        verify(userService).findUserById(10L);
+    }
+
+    @Test
+    @DisplayName("비로그인 사용자의 상세 조회는 HTTP 401을 반환한다")
+    void getUserById_unauthenticated_returnsUnauthorized() throws Exception {
+        // given: 인증 정보를 전달하지 않는다.
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("일반 회원의 상세 조회는 HTTP 403을 반환한다")
+    void getUserById_regularUser_returnsForbidden() throws Exception {
+        // given: 관리자 권한 없이 요청한다.
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L)
+                        .with(authenticatedAs("USER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("조회 대상 회원이 없으면 HTTP 404를 반환한다")
+    void getUserById_missingMember_returnsNotFound() throws Exception {
+        // given
+        when(userService.findUserById(10L))
+                .thenThrow(new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L)
+                        .with(authenticatedAs("ADMIN")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.USER_NOT_FOUND.getMessage()));
+
+        verify(userService).findUserById(10L);
+    }
+
+    @Test
+    @DisplayName("회원 ID가 숫자가 아니면 HTTP 400을 반환한다")
+    void getUserById_invalidIdFormat_returnsBadRequest() throws Exception {
+        // given: Long으로 변환할 수 없는 회원 ID를 전달한다.
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", "abc")
+                        .with(authenticatedAs("ADMIN")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
 

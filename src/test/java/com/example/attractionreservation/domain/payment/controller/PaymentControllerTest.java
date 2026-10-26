@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.payment.controller;
 
+import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
+import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
+import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
 import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentRequest;
 import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentResponse;
 import com.example.attractionreservation.domain.order.dto.OrderItemResponse;
@@ -11,6 +14,8 @@ import com.example.attractionreservation.domain.payment.dto.SearchPaymentConditi
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.facade.PaymentFacade;
 import com.example.attractionreservation.domain.payment.service.PaymentService;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
+import com.example.attractionreservation.global.config.SecurityConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.response.PageableDto;
@@ -19,12 +24,17 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.Instant;
 import java.util.List;
@@ -36,12 +46,19 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(PaymentController.class)
+@Import({
+        SecurityConfig.class,
+        JwtAuthenticationEntryPoint.class,
+        JwtAccessDeniedHandler.class
+})
+@EnableWebSecurity
 class PaymentControllerTest {
 
     private static final Long USER_ID = 1L;
@@ -60,6 +77,12 @@ class PaymentControllerTest {
 
     @MockitoBean
     private PaymentService paymentService;
+
+    @MockitoBean
+    private JwtProvider jwtProvider;
+
+    @MockitoBean
+    private UserRepository userRepository;
 
     @Test
     @DisplayName("결제 승인에 성공하면 200과 승인된 결제 정보를 반환한다.")
@@ -121,13 +144,13 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("userId가 없으면 400을 반환한다.")
-    void confirmPayment_missingUserId_BadRequest() throws Exception {
+    @DisplayName("인증 없이 결제 승인을 요청하면 401을 반환한다.")
+    void confirmPayment_unauthenticated_Unauthorized() throws Exception {
         //when & then
         mockMvc.perform(post(CONFIRM_URL, PG_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REQUEST_BODY))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
         verifyNoInteractions(paymentFacade);
     }
@@ -144,7 +167,7 @@ class PaymentControllerTest {
 
     private RequestBuilder confirmRequest(String body) {
         return post(CONFIRM_URL, PG_ID)
-                .param("userId", String.valueOf(USER_ID))
+                .with(authenticatedMember())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }
@@ -161,7 +184,7 @@ class PaymentControllerTest {
                 .willReturn(page);
 
         //when & then
-        mockMvc.perform(get("/api/payments").param("userId", "1"))
+        mockMvc.perform(get("/api/payments").with(authenticatedMember()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content[0].paymentId").value(1))
@@ -180,7 +203,7 @@ class PaymentControllerTest {
         ArgumentCaptor<SearchPaymentCondition> captor = ArgumentCaptor.forClass(SearchPaymentCondition.class);
 
         //when
-        mockMvc.perform(get("/api/payments").param("userId", "1"))
+        mockMvc.perform(get("/api/payments").with(authenticatedMember()))
                 .andExpect(status().isOk());
 
         //then
@@ -199,7 +222,7 @@ class PaymentControllerTest {
 
         //when
         mockMvc.perform(get("/api/payments")
-                        .param("userId", "1")
+                        .with(authenticatedMember())
                         .param("paymentStatus", "PAID")
                         .param("page", "2")
                         .param("size", "5")
@@ -215,13 +238,12 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("userId가 없으면 400을 반환한다.")
-    void getAllPayments_missingUserId_BadRequest() throws Exception {
+    @DisplayName("인증 없이 결제 목록을 조회하면 401을 반환한다.")
+    void getAllPayments_unauthenticated_Unauthorized() throws Exception {
         //when & then
         mockMvc.perform(get("/api/payments"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.message").value(ErrorCode.MISSING_REQUEST_VALUE.getMessage()));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
         verifyNoInteractions(paymentService);
     }
 
@@ -230,7 +252,7 @@ class PaymentControllerTest {
     void getAllPayments_invalidStatus_BadRequest() throws Exception {
         //when & then
         mockMvc.perform(get("/api/payments")
-                        .param("userId", "1")
+                        .with(authenticatedMember())
                         .param("paymentStatus", "WRONG"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
@@ -247,7 +269,7 @@ class PaymentControllerTest {
 
         //when & then
         mockMvc.perform(get("/api/payments")
-                        .param("userId", "1")
+                        .with(authenticatedMember())
                         .param("sort", "pgId,asc"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
@@ -262,7 +284,7 @@ class PaymentControllerTest {
                 .willReturn(paymentDetail(PaymentStatus.PAID, Instant.parse("2026-10-19T00:00:00Z")));
 
         //when & then
-        mockMvc.perform(get("/api/payments/{paymentId}", 10L).param("userId", "1"))
+        mockMvc.perform(get("/api/payments/{paymentId}", 10L).with(authenticatedMember()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.paymentId").value(10))
@@ -286,7 +308,7 @@ class PaymentControllerTest {
                 .willReturn(paymentDetail(PaymentStatus.PENDING, null));
 
         //when & then
-        mockMvc.perform(get("/api/payments/{paymentId}", 10L).param("userId", "1"))
+        mockMvc.perform(get("/api/payments/{paymentId}", 10L).with(authenticatedMember()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andExpect(jsonPath("$.data.paidAt").doesNotExist());
@@ -300,7 +322,7 @@ class PaymentControllerTest {
                 .willThrow(new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
         //when & then
-        mockMvc.perform(get("/api/payments/{paymentId}", 10L).param("userId", "1"))
+        mockMvc.perform(get("/api/payments/{paymentId}", 10L).with(authenticatedMember()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value(ErrorCode.PAYMENT_NOT_FOUND.getMessage()));
@@ -310,20 +332,28 @@ class PaymentControllerTest {
     @DisplayName("결제 id가 숫자가 아니면 400을 반환한다.")
     void getPaymentById_nonNumericId_BadRequest() throws Exception {
         //when & then
-        mockMvc.perform(get("/api/payments/{paymentId}", "abc").param("userId", "1"))
+        mockMvc.perform(get("/api/payments/{paymentId}", "abc").with(authenticatedMember()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(ErrorCode.INVALID_REQUEST.getMessage()));
         verifyNoInteractions(paymentService);
     }
 
     @Test
-    @DisplayName("단건 조회 시 userId가 없으면 400을 반환한다.")
-    void getPaymentById_missingUserId_BadRequest() throws Exception {
+    @DisplayName("인증 없이 결제 단건을 조회하면 401을 반환한다.")
+    void getPaymentById_unauthenticated_Unauthorized() throws Exception {
         //when & then
         mockMvc.perform(get("/api/payments/{paymentId}", 10L))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(ErrorCode.MISSING_REQUEST_VALUE.getMessage()));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
         verifyNoInteractions(paymentService);
+    }
+
+    private RequestPostProcessor authenticatedMember() {
+        return authentication(new UsernamePasswordAuthenticationToken(
+                USER_ID,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        ));
     }
 
     private PageableDto<PaymentResponse> emptyPage() {

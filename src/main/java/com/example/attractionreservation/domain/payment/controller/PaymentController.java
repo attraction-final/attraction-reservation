@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -24,10 +25,9 @@ public class PaymentController {
     public final PaymentService paymentService;
     private final PaymentFacade paymentFacade;
 
-    //todo: 인증 추가 시 userId를 authenticationPrincipal에서 가져와야 함
     @GetMapping
     public ResponseEntity<ApiResponse<PageableDto<PaymentResponse>>> getPaymentAll(
-            @RequestParam Long userId,
+            @AuthenticationPrincipal Long userId,
             @RequestParam(required = false) PaymentStatus paymentStatus,
             @PageableDefault Pageable pageable) {
         SearchPaymentCondition condition = new SearchPaymentCondition(paymentStatus);
@@ -37,20 +37,18 @@ public class PaymentController {
         );
     }
 
-    //todo: 인증 추가 시 userId를 authenticationPrincipal에서 가져와야 함
     @GetMapping("/{paymentId}")
     public ResponseEntity<ApiResponse<PaymentDetailResponse>> getPaymentById(
-            @PathVariable Long paymentId,
-            @RequestParam Long userId) {
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long paymentId) {
         return ResponseEntity.ok(
                 ApiResponse.ok(paymentService.findPaymentById(userId, paymentId))
         );
     }
 
-    // TODO: 인증 추가 시 userId @AuthenticationPrincipal로 변경해야 함
     @PostMapping("/{pgId}/confirm")
     public ResponseEntity<ApiResponse<ConfirmPaymentResponse>> confirmPayment(
-            @RequestParam("userId") Long userId,
+            @AuthenticationPrincipal Long userId,
             @PathVariable String pgId,
             @Valid @RequestBody ConfirmPaymentRequest request
     ) {

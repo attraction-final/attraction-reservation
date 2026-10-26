@@ -1,6 +1,11 @@
 package com.example.attractionreservation.infra.portone.webhook;
 
+import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
+import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
+import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
 import com.example.attractionreservation.domain.payment.service.WebhookEventCommandService;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
+import com.example.attractionreservation.global.config.SecurityConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.infra.portone.webhook.dto.PortOneWebhookEvent;
@@ -8,7 +13,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
@@ -21,7 +28,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+// PortOne 서버는 사용자 토큰 없이 호출하므로, 실제 보안 설정에서도 인증 없이 처리되는지 함께 검증한다.
 @WebMvcTest(PortOneWebhookController.class)
+@Import({
+        SecurityConfig.class,
+        JwtAuthenticationEntryPoint.class,
+        JwtAccessDeniedHandler.class
+})
+@EnableWebSecurity
 class PortOneWebhookControllerTest {
 
     private static final String URL = "/api/payments/webhooks/portone";
@@ -36,6 +50,12 @@ class PortOneWebhookControllerTest {
 
     @MockitoBean
     private WebhookEventCommandService webhookEventCommandService;
+
+    @MockitoBean
+    private JwtProvider jwtProvider;
+
+    @MockitoBean
+    private UserRepository userRepository;
 
     @Test
     @DisplayName("서명이 유효하면 원문 그대로 저장하고 200을 반환한다.")
@@ -77,7 +97,10 @@ class PortOneWebhookControllerTest {
         //when & then
         mockMvc.perform(webhookRequest())
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.success").value(false));
+                .andExpect(jsonPath("$.success").value(false))
+                // 보안 필터의 401이 아니라 서명 검증 실패의 401인지 메시지로 구분한다.
+                .andExpect(jsonPath("$.message").value(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.getMessage()));
+        verify(portOneWebhookVerifier).verify(any(), any(), any(), any());
         verifyNoInteractions(webhookEventCommandService);
     }
 

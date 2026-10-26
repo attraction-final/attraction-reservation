@@ -72,4 +72,5 @@ public class RouteRecommendation extends BaseTimeEntity {
 
 
 
+
 }

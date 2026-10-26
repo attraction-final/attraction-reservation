@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.payment.entity.WebhookEvent;
 import com.example.attractionreservation.domain.payment.entity.enums.WebhookStatus;
 import com.example.attractionreservation.domain.payment.repository.WebhookEventRepository;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, WebhookEventCommandService.class})
+@Import({JpaConfig.class, WebhookEventCommandService.class, QuerydslConfig.class})
 class WebhookEventCommandServiceTest {
 
     private static final String PG_ID = "pg-id";

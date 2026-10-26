@@ -21,6 +21,8 @@ import java.util.UUID;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Ticket extends BaseTimeEntity {
 
+    private static final LocalTime PARK_CLOSE_TIME = LocalTime.of(22, 0);
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -98,9 +100,8 @@ public class Ticket extends BaseTimeEntity {
     // 입장권 시간 검증
     private void validateEntryTime(LocalTime currentTime) {
         LocalTime opensAt = this.type.getAvailableFrom();
-        LocalTime closesAt = LocalTime.of(22, 0);
 
-        if (currentTime.isBefore(opensAt) || !currentTime.isBefore(closesAt)) {
+        if (currentTime.isBefore(opensAt) || !currentTime.isBefore(PARK_CLOSE_TIME)) {
             throw new BusinessException(ErrorCode.TICKET_ENTRY_TIME_NOT_ALLOWED);
         }
     }

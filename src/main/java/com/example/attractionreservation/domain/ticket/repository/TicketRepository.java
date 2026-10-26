@@ -37,5 +37,5 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     FROM Ticket t
     WHERE t.id = :ticketId AND t.orderItem.order.user.id = :userId
     """)
-    Optional<Ticket> findByIdAndUser_Id(@Param("ticketId") Long ticketId, @Param("userId") Long userId);
+    Optional<Ticket> findByIdAndOwner_Id(@Param("ticketId") Long ticketId, @Param("userId") Long userId);
 }

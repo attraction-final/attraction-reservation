@@ -113,14 +113,25 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
             Long reservationId,
             Long userId
     ) {
-        return Optional.empty();
+        Reservation result = queryFactory
+                .selectFrom(reservation)
+                .where(
+                        reservationIdEq(reservationId),
+                        ownerIdEq(userId)
+                )
+                .fetchOne();
+        return Optional.ofNullable(result);
     }
 
+    // 관리자 예약 목록 조회
     @Override
     public Page<Reservation> findAdminReservationByCondition(Long userId, Long attractionId, ReservationStatus status, LocalDateTime startDay, LocalDateTime nextDay, Pageable stablePageable) {
         return null;
     }
 
+    private BooleanExpression reservationIdEq(Long reservationId) {
+        return reservation.id.eq(reservationId);
+    }
 
     private BooleanExpression ownerIdEq(Long userId) {
         return reservation.user.id.eq(userId);

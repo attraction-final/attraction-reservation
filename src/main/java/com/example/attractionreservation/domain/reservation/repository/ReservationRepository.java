@@ -13,11 +13,6 @@ import java.util.Optional;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long>, ReservationCustomRepository {
 
-
-    // 내 예약 상세 조회
-    @Query("SELECT r FROM Reservation r WHERE r.user.id = :userId AND r.id = :reservationId")
-    Optional<Reservation> findReservationByIdAndUser_Id(@Param("reservationId") Long reservationId, @Param("userId") Long userId);
-
     // 관리자 예약 목록 조회
     @Query("""
     SELECT r

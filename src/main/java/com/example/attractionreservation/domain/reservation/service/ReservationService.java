@@ -5,6 +5,8 @@ import com.example.attractionreservation.domain.attractionSlot.entity.enums.Slot
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationResponse;
+import com.example.attractionreservation.domain.reservation.dto.SearchReservationCondition;
+import com.example.attractionreservation.domain.reservation.dto.SearchReservationResponse;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
@@ -18,6 +20,8 @@ import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -130,5 +134,30 @@ public class ReservationService {
         Reservation savedReservation = reservationRepository.save(reservation);
 
         return CreateReservationResponse.from(savedReservation);
+    }
+
+    // 내 예약 목록 조회 (예약상태 + 날짜 + 페이징)
+    public Page<SearchReservationResponse> findReservationAll(Long userId, Pageable stablePageable, SearchReservationCondition condition) {
+        LocalDateTime dayStart;
+        LocalDateTime nextDayStart;
+
+        // 날짜가 null일 경우 메서드 호출시 npe 방지
+        if (condition.date() == null) {
+            dayStart = null;
+            nextDayStart = null;
+        } else {
+            dayStart = condition.date().atStartOfDay();
+            nextDayStart = condition.date().plusDays(1).atStartOfDay();
+        }
+
+        Page<Reservation> reservations = reservationRepository.findReservationAllByCondition(
+                userId,
+                condition.status(),
+                dayStart,
+                nextDayStart,
+                stablePageable
+        );
+
+        return reservations.map(SearchReservationResponse::from);
     }
 }

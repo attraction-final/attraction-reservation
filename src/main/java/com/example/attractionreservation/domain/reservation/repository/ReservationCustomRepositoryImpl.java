@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import static com.example.attractionreservation.domain.attraction.entity.QAttraction.attraction;
+import static com.example.attractionreservation.domain.attractionSlot.entity.QAttractionSlot.attractionSlot;
 import static com.example.attractionreservation.domain.order.entity.QOrderItem.orderItem;
 import static com.example.attractionreservation.domain.reservation.entity.QReservation.reservation;
 import static com.example.attractionreservation.domain.ticket.entity.QTicket.ticket;
@@ -39,6 +41,7 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
         return queryFactory
                 .selectOne()
                 .from(reservation)
+                .join(reservation.attractionSlot, attractionSlot)
                 .where(
                         ownerIdEq(userId),
                         slotIdEq(slotId),
@@ -125,8 +128,63 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
 
     // 관리자 예약 목록 조회
     @Override
-    public Page<Reservation> findAdminReservationByCondition(Long userId, Long attractionId, ReservationStatus status, LocalDateTime startDay, LocalDateTime nextDay, Pageable stablePageable) {
-        return null;
+    public Page<Reservation> findAdminReservationByCondition(
+            Long userId,
+            Long attractionId,
+            ReservationStatus status,
+            LocalDateTime startDay,
+            LocalDateTime nextDay,
+            Pageable stablePageable
+    ) {
+        List<Reservation> content = queryFactory
+                .selectFrom(reservation)
+                .join(reservation.attractionSlot, attractionSlot)
+                .join(attractionSlot.attraction, attraction)
+                .where(
+                        userIdEq(userId),
+                        attractionIdEq(attractionId),
+                        statusEq(status),
+                        startDayGoe(startDay),
+                        nextDayLt(nextDay)
+                )
+                .orderBy(toOrderSpecifiers(stablePageable.getSort()))
+                .offset(stablePageable.getOffset())
+                .limit(stablePageable.getPageSize())
+                .fetch();
+
+        Long total = queryFactory
+                .select(reservation.count())
+                .from(reservation)
+                .join(reservation.attractionSlot, attractionSlot)
+                .join(attractionSlot.attraction, attraction)
+                .where(
+                        userIdEq(userId),
+                        attractionIdEq(attractionId),
+                        statusEq(status),
+                        startDayGoe(startDay),
+                        nextDayLt(nextDay)
+                )
+                .fetchOne();
+
+        return new PageImpl<>(
+                content,
+                stablePageable,
+                total != null ? total : 0L
+        );
+    }
+
+    private BooleanExpression userIdEq(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return reservation.user.id.eq(userId);
+    }
+
+    private BooleanExpression attractionIdEq(Long attractionId) {
+        if (attractionId == null) {
+            return null;
+        }
+        return attraction.id.eq(attractionId);
     }
 
     private BooleanExpression reservationIdEq(Long reservationId) {
@@ -138,7 +196,7 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
     }
 
     private BooleanExpression slotIdEq(Long slotId) {
-        return reservation.attractionSlot.id.eq(slotId);
+        return attractionSlot.id.eq(slotId);
     }
 
     private BooleanExpression statusEq(ReservationStatus status) {
@@ -190,11 +248,11 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
                     new OrderSpecifier<>(direction, reservation.cancelledAt);
             case "reservationNumber" ->
                     new OrderSpecifier<>(direction, reservation.reservationNumber);
-            case "userId" ->
+            case "userId", "user.id" ->
                     new OrderSpecifier<>(direction, reservation.user.id);
-            case "ticketId" ->
+            case "ticketId", "ticket.id" ->
                     new OrderSpecifier<>(direction, reservation.ticket.id);
-            case "slotId" ->
+            case "slotId", "attractionSlot.id" ->
                     new OrderSpecifier<>(direction, reservation.attractionSlot.id);
             case "createdAt" ->
                     new OrderSpecifier<>(direction, reservation.createdAt);

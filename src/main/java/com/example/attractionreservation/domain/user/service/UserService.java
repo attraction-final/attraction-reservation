@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
 import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -14,6 +16,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import java.sql.SQLException;
+import com.example.attractionreservation.domain.user.dto.SearchUserCondition;
+import com.example.attractionreservation.domain.user.dto.SearchUserListResponse;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+
 
 @Service
 @RequiredArgsConstructor
@@ -59,6 +67,28 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public SearchUserListResponse findUserAll(
+            SearchUserCondition condition
+    ) {
+        // 가입 시각이 같아도 조회 순서가 일정하도록 ID를 보조 정렬 기준으로 사용한다.
+        Pageable pageable = PageRequest.of(
+                condition.page(),
+                condition.size(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")
+                )
+        );
+
+        return SearchUserListResponse.from(
+                userRepository.findAllByStatusNot(
+                        UserStatus.WITHDRAWN,
+                        pageable
+                )
+        );
+    }
+
+    @Transactional(readOnly = true)
     public GetUserResponse getMe(Long userId) {
         // 인증된 회원 ID로 본인의 정보를 조회한다.
         User user = userRepository.findById(userId)
@@ -71,6 +101,24 @@ public class UserService {
         }
 
         return GetUserResponse.from(user);
+    }
+
+    @Transactional
+    public UpdateUserResponse updateMe(
+            Long userId,
+            UpdateUserRequest request
+    ) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        user.updateNickname(request.nickname());
+
+        return UpdateUserResponse.from(user);
     }
 
     private boolean isDuplicateEmailViolation(DataIntegrityViolationException exception) {

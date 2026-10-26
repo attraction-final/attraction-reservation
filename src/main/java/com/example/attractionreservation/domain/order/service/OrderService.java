@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
@@ -94,6 +95,20 @@ public class OrderService {
         Order savedOrder = orderRepository.saveAndFlush(order);
 
         return CreateOrderResponse.from(savedOrder);
+    }
+
+    @Transactional(readOnly = true)
+    public SearchOrderResponse findOrderById(Long userId, Long orderId) {
+        Order order = orderRepository.findOrderById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        // 주문 ID를 알고 있어도 다른 회원의 주문은 조회할 수 없다.
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_ACCESS_DENIED);
+        }
+
+        return SearchOrderResponse.from(order);
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

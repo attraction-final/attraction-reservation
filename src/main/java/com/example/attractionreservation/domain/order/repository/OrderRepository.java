@@ -7,7 +7,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -65,5 +67,20 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             @Param("cancelledStatus") OrderStatus cancelledStatus,
             @Param("cutoff") Instant cutoff,
             @Param("updatedAt") Instant updatedAt
+    );
+    // 자동 취소 대상을 오래된 주문부터 제한된 개수로 조회한다.
+// 결제 취소에 필요한 주문자 정보도 함께 가져온다.
+    @Query("""
+        SELECT o
+        FROM Order o
+        JOIN FETCH o.user
+        WHERE o.status = :pendingStatus
+            AND o.createdAt <= :cutoff
+        ORDER BY o.createdAt ASC, o.id ASC
+        """)
+    List<Order> findExpiredPendingOrders(
+            @Param("pendingStatus") OrderStatus pendingStatus,
+            @Param("cutoff") Instant cutoff,
+            Pageable pageable
     );
 }

@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
@@ -18,6 +19,7 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -35,6 +37,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final TicketProductRepository ticketProductRepository;
     private final UserRepository userRepository;
+    private final PaymentService paymentService;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -145,6 +148,9 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
         }
 
+        // 결제 취소가 실패하면 같은 트랜잭션의 주문 취소도 롤백한다.
+        paymentService.cancelPendingPaymentIfExists(userId, orderId);
+
         // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
         return UpdateOrderResponse.of(
                 orderId,
@@ -154,16 +160,41 @@ public class OrderService {
 
     @Transactional
     public int updateExpiredOrdersByCancel() {
-        // 기준 시각과 수정 시각이 일관되도록 현재 시각을 한 번만 구한다.
         Instant now = Instant.now();
         Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
 
-        return orderRepository.cancelExpiredPendingOrders(
+        // 한 번에 처리할 주문 수를 제한한다.
+        List<Order> expiredOrders = orderRepository.findExpiredPendingOrders(
                 OrderStatus.PENDING,
-                OrderStatus.CANCELLED,
                 cutoff,
-                now
+                PageRequest.of(0, 100)
         );
+
+        int cancelledCount = 0;
+
+        for (Order order : expiredOrders) {
+            // 수정 쿼리가 영속성 컨텍스트를 비우므로 필요한 값을 먼저 보관한다.
+            Long orderId = order.getId();
+            Long userId = order.getUser().getId();
+
+            // 조회 후 상태가 변경된 주문은 취소하지 않는다.
+            int updatedCount = orderRepository.cancelPendingOrder(
+                    orderId,
+                    userId,
+                    OrderStatus.PENDING,
+                    OrderStatus.CANCELLED,
+                    now
+            );
+
+            if (updatedCount == 0) {
+                continue;
+            }
+
+            paymentService.cancelPendingPaymentIfExists(userId, orderId);
+            cancelledCount++;
+        }
+
+        return cancelledCount;
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

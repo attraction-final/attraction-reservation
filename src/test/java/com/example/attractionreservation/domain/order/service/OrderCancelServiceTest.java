@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderStatus;
@@ -19,11 +20,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
-
+import org.springframework.data.domain.Pageable;
 
 import java.time.temporal.ChronoUnit;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,6 +44,9 @@ class OrderCancelServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private PaymentService paymentService;
 
     @InjectMocks
     private OrderService orderService;
@@ -78,6 +83,9 @@ class OrderCancelServiceTest {
                 any(Instant.class)
         );
         verifyNoInteractions(ticketProductRepository, userRepository);
+
+        // 주문 취소 시 연결된 결제의 취소도 요청한다.
+        verify(paymentService).cancelPendingPaymentIfExists(1L, 101L);
     }
 
     @Test
@@ -183,42 +191,61 @@ class OrderCancelServiceTest {
     }
 
     @Test
-    @DisplayName("현재 시각의 30분 전을 기준으로 자동 취소하고 처리 건수를 반환한다")
+    @DisplayName("30분 전을 기준으로 대상을 조회하고 주문과 결제를 함께 취소한다")
     void updateExpiredOrdersByCancel_calculatesThirtyMinuteCutoff_returnsCount() {
-        // given
-        when(orderRepository.cancelExpiredPendingOrders(
+        Order order = createOrder(1L);
+
+        when(orderRepository.findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                any(Instant.class),
+                any(Pageable.class)
+        )).thenReturn(List.of(order));
+
+        when(orderRepository.cancelPendingOrder(
+                eq(101L),
+                eq(1L),
                 eq(OrderStatus.PENDING),
                 eq(OrderStatus.CANCELLED),
-                any(Instant.class),
                 any(Instant.class)
-        )).thenReturn(2);
+        )).thenReturn(1);
 
         Instant beforeCall = Instant.now();
 
-        // when
         int cancelledCount = orderService.updateExpiredOrdersByCancel();
 
         Instant afterCall = Instant.now();
 
-        // then
         ArgumentCaptor<Instant> cutoffCaptor =
                 ArgumentCaptor.forClass(Instant.class);
         ArgumentCaptor<Instant> updatedAtCaptor =
                 ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(Pageable.class);
 
-        verify(orderRepository).cancelExpiredPendingOrders(
+        verify(orderRepository).findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                cutoffCaptor.capture(),
+                pageableCaptor.capture()
+        );
+
+        verify(orderRepository).cancelPendingOrder(
+                eq(101L),
+                eq(1L),
                 eq(OrderStatus.PENDING),
                 eq(OrderStatus.CANCELLED),
-                cutoffCaptor.capture(),
                 updatedAtCaptor.capture()
         );
 
+        verify(paymentService).cancelPendingPaymentIfExists(1L, 101L);
+
         Instant updatedAt = updatedAtCaptor.getValue();
 
-        assertThat(cancelledCount).isEqualTo(2);
+        assertThat(cancelledCount).isEqualTo(1);
         assertThat(updatedAt).isBetween(beforeCall, afterCall);
         assertThat(cutoffCaptor.getValue())
                 .isEqualTo(updatedAt.minus(30, ChronoUnit.MINUTES));
+        assertThat(pageableCaptor.getValue().getPageNumber()).isZero();
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(100);
 
         verifyNoInteractions(ticketProductRepository, userRepository);
     }
@@ -236,5 +263,28 @@ class OrderCancelServiceTest {
         Order order = Order.create(user, 60000);
         ReflectionTestUtils.setField(order, "id", 101L);
         return order;
+    }
+
+    @Test
+    @DisplayName("자동 취소 시 이미 상태가 변경된 주문은 건너뛴다")
+    void updateExpiredOrdersByCancel_orderChanged_skipsPaymentCancellation() {
+        when(orderRepository.findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                any(Instant.class),
+                any(Pageable.class)
+        )).thenReturn(List.of(createOrder(1L)));
+
+        when(orderRepository.cancelPendingOrder(
+                eq(101L),
+                eq(1L),
+                eq(OrderStatus.PENDING),
+                eq(OrderStatus.CANCELLED),
+                any(Instant.class)
+        )).thenReturn(0);
+
+        int cancelledCount = orderService.updateExpiredOrdersByCancel();
+
+        assertThat(cancelledCount).isZero();
+        verifyNoInteractions(paymentService);
     }
 }

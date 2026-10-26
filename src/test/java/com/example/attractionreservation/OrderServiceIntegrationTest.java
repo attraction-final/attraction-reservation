@@ -14,7 +14,7 @@ import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.order.service.OrderService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
@@ -422,7 +422,7 @@ class OrderServiceIntegrationTest {
 
             // 결제 상태 검증에서 실패하도록 완료된 결제를 연결한다.
             Payment payment = Payment.create(order);
-            payment.markAsPaid();
+            payment.markAsPaid(Instant.now());
             paymentRepository.saveAndFlush(payment);
 
             return new Long[]{user.getId(), order.getId(), payment.getId()};

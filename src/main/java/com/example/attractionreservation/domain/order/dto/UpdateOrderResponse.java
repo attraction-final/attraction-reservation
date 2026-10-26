@@ -1,6 +1,6 @@
 package com.example.attractionreservation.domain.order.dto;
 
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 
 public record UpdateOrderResponse(
         Long orderId,

@@ -1,7 +1,7 @@
 package com.example.attractionreservation.domain.order.controller;
 
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;

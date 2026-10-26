@@ -3,7 +3,7 @@ package com.example.attractionreservation.domain.order.service;
 import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
 import com.example.attractionreservation.domain.user.entity.User;

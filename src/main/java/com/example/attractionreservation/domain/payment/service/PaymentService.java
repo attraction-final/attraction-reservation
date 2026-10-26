@@ -15,13 +15,15 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
     private final PaymentRepository paymentRepository;
 
     @Transactional
-    public void createPayment(Order order) {
+    public String createPayment(Order order) {
         if (order.getTotalAmount() <= 0) {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT);
         }
@@ -29,6 +31,8 @@ public class PaymentService {
         Payment payment = Payment.create(order);
 
         paymentRepository.save(payment);
+
+        return payment.getPgId();
     }
 
     @Transactional(readOnly = true)
@@ -46,7 +50,7 @@ public class PaymentService {
     }
 
     @Transactional
-    public void cancelPayment(Long userId, Long orderId) {
+    public void cancelledByUser(Long userId, Long orderId) {
         Payment found = paymentRepository.findWithLockByOrderId(orderId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
@@ -59,6 +63,9 @@ public class PaymentService {
         }
 
         found.markAsCancelled();
+        found.getOrder().markAsCancelled();
+
+        // TODO: 재고 복구 로직 필요
         paymentRepository.save(found);
     }
 
@@ -76,11 +83,24 @@ public class PaymentService {
             throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
         }
 
-        // 결제가 완료됐거나 이미 다른 상태로 변경됐다면 취소를 중단한다.
+        // 대기 상태가 아닌 결제는 취소하지 않는다.
         if (payment.getStatus() != PaymentStatus.PENDING) {
             throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
         }
 
         payment.markAsCancelled();
+    }
+
+    // 웹훅처럼 로그인 사용자가 없는 경로에서 사용한다.
+    @Transactional(readOnly = true)
+    public Optional<Payment> findByPgId(String pgId) {
+        return paymentRepository.findByPgId(pgId);
+    }
+
+    @Transactional(readOnly = true)
+    public Payment getOwnedPayment(Long userId, String pgId) {
+        return paymentRepository.findByPgIdAndUserId(pgId, userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
 }

@@ -8,3 +8,16 @@ jwt:
   secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   access-token-expiration: 600000
   refresh-token-expiration: 604800000
+
+portone:
+  base-url: https://api.portone.test
+  api-secret: test-api-secret
+  store-id: test-store-id
+  channel-key: test-channel-key
+  webhook-secret: whsec_dGVzdC13ZWJob29rLXNlY3JldA==  # SDK가 Base64로 디코드하므로 Base64 값이어야 한다
+
+# 테스트 중 스케줄러가 웹훅 테이블을 처리하지 않도록 끈다.
+payment:
+  webhook:
+    scheduler:
+      enabled: false

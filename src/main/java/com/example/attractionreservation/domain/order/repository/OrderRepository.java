@@ -1,7 +1,7 @@
 package com.example.attractionreservation.domain.order.repository;
 
 import com.example.attractionreservation.domain.order.entity.Order;
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;

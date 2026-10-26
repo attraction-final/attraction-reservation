@@ -6,7 +6,7 @@ import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
-import com.example.attractionreservation.domain.order.entity.OrderStatus;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;

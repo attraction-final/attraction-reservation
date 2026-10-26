@@ -1,5 +1,7 @@
 package com.example.attractionreservation;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
@@ -194,4 +196,77 @@ class OrderServiceIntegrationTest {
         );
     }
 
+    @Test
+    @DisplayName("본인 주문만 최신순으로 페이지 조회하고 다른 회원 주문은 전체 개수에서도 제외한다")
+    void findOrdersByUserId_multipleMembers_returnsOwnOrdersByPage() {
+        // given
+        User member = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("목록회원")
+                        .build()
+        );
+        User otherMember = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("다른회원")
+                        .build()
+        );
+
+        TicketProduct product = ticketProductRepository.saveAndFlush(
+                new TicketProduct(
+                        "종일이용권",
+                        60000,
+                        "주문 목록 테스트 상품",
+                        TicketType.ALL_DAY,
+                        100,
+                        TicketProductStatus.ON_SALE
+                )
+        );
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(product.getId(), 1)
+        ));
+
+        Long memberId = member.getId();
+
+        CreateOrderResponse olderOrder =
+                orderService.createOrder(memberId, request);
+        CreateOrderResponse newerOrder =
+                orderService.createOrder(memberId, request);
+
+        // 가장 나중에 생성한 타인 주문도 본인 목록에는 포함되면 안 된다.
+        orderService.createOrder(otherMember.getId(), request);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        SearchOrderListResponse firstPage = orderService.findOrdersByUserId(
+                memberId,
+                new SearchOrderCondition(0, 1)
+        );
+        SearchOrderListResponse secondPage = orderService.findOrdersByUserId(
+                memberId,
+                new SearchOrderCondition(1, 1)
+        );
+
+        // then
+        assertThat(firstPage.content())
+                .extracting(SearchOrderListResponse.Item::orderId)
+                .containsExactly(newerOrder.orderId());
+        assertThat(firstPage.page()).isZero();
+        assertThat(firstPage.size()).isEqualTo(1);
+        assertThat(firstPage.totalElements()).isEqualTo(2L);
+        assertThat(firstPage.totalPages()).isEqualTo(2);
+
+        assertThat(secondPage.content())
+                .extracting(SearchOrderListResponse.Item::orderId)
+                .containsExactly(olderOrder.orderId());
+        assertThat(secondPage.page()).isEqualTo(1);
+        assertThat(secondPage.totalElements()).isEqualTo(2L);
+        assertThat(secondPage.totalPages()).isEqualTo(2);
+    }
 }

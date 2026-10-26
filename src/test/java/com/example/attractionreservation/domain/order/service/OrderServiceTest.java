@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
@@ -22,6 +24,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -325,6 +331,82 @@ class OrderServiceTest {
                 );
 
         verify(orderRepository).findOrderById(101L);
+        verifyNoMoreInteractions(orderRepository);
+    }
+
+    @Test
+    @DisplayName("본인 ID와 최신순 페이지 조건으로 조회하고 목록 응답을 반환한다")
+    void findOrdersByUserId_validCondition_returnsPage() {
+        // given
+        Order order = Order.create(user, 120000);
+        ReflectionTestUtils.setField(order, "id", 101L);
+        ReflectionTestUtils.setField(
+                order, "createdAt", Instant.parse("2026-10-14T01:00:00Z")
+        );
+
+        when(orderRepository.findAllByUser_Id(eq(1L), any(Pageable.class)))
+                .thenAnswer(invocation -> {
+                    Pageable pageable = invocation.getArgument(1);
+                    return new PageImpl<>(List.of(order), pageable, 3);
+                });
+
+        // when
+        SearchOrderListResponse response = orderService.findOrdersByUserId(
+                1L,
+                new SearchOrderCondition(1, 1)
+        );
+
+        // then
+        assertThat(response.content()).containsExactly(
+                new SearchOrderListResponse.Item(
+                        101L,
+                        120000,
+                        "PENDING",
+                        LocalDateTime.of(2026, 10, 14, 10, 0)
+                )
+        );
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(1);
+        assertThat(response.totalElements()).isEqualTo(3L);
+        assertThat(response.totalPages()).isEqualTo(3);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(orderRepository).findAllByUser_Id(eq(1L), captor.capture());
+
+        Pageable pageable = captor.getValue();
+        assertThat(pageable.getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getPageSize()).isEqualTo(1);
+        assertThat(pageable.getSort()).isEqualTo(Sort.by(
+                Sort.Order.desc("createdAt"),
+                Sort.Order.desc("id")
+        ));
+        verifyNoMoreInteractions(orderRepository);
+    }
+
+    @Test
+    @DisplayName("본인 주문이 없으면 빈 목록과 전체 개수 0을 반환한다")
+    void findOrdersByUserId_noOrders_returnsEmptyPage() {
+        // given
+        when(orderRepository.findAllByUser_Id(eq(1L), any(Pageable.class)))
+                .thenAnswer(invocation -> {
+                    Pageable pageable = invocation.getArgument(1);
+                    return Page.<Order>empty(pageable);
+                });
+
+        // when
+        SearchOrderListResponse response = orderService.findOrdersByUserId(
+                1L,
+                new SearchOrderCondition(null, null)
+        );
+
+        // then
+        assertThat(response.content()).isEmpty();
+        assertThat(response.page()).isZero();
+        assertThat(response.size()).isEqualTo(10);
+        assertThat(response.totalElements()).isZero();
+        assertThat(response.totalPages()).isZero();
+
+        verify(orderRepository).findAllByUser_Id(eq(1L), any(Pageable.class));
         verifyNoMoreInteractions(orderRepository);
     }
 }

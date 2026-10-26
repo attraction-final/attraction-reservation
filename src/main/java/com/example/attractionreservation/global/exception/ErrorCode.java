@@ -99,6 +99,9 @@ public enum ErrorCode {
     RESERVATION_CANCEL_DEADLINE_PASSED(HttpStatus.CONFLICT, "슬롯 시작 30분 전까지만 예약을 취소할 수 있습니다."),
     RESERVATION_CAPACITY_RESTORE_FAILED(HttpStatus.CONFLICT, "슬롯 예약 인원을 복구할 수 없어 예약 취소에 실패했습니다."),
     INVALID_RESERVATION_CANCEL_REASON(HttpStatus.BAD_REQUEST, "예약 취소 사유는 필수입니다."),
+    RESERVATION_STATUS_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "예약 완료 상태에서만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
+    INVALID_RESERVATION_TARGET_STATUS(HttpStatus.BAD_REQUEST, "변경할 예약 상태는 이용 완료 또는 노쇼만 가능합니다."),
+    RESERVATION_SLOT_NOT_ENDED(HttpStatus.CONFLICT, "슬롯 종료 후에만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

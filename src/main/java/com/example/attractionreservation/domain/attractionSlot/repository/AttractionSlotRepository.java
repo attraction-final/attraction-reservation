@@ -72,4 +72,14 @@ public interface AttractionSlotRepository extends JpaRepository<AttractionSlot, 
             @Param("slotId") Long slotId,
             @Param("open") SlotStatus status
     );
+
+    // 예약 취소 - reservedCount - 1
+    @Modifying
+    @Query("""
+    UPDATE AttractionSlot s
+       SET s.reservedCount = s.reservedCount - 1 
+     WHERE s.id = :slotId 
+       AND s.reservedCount > 0
+    """)
+    int tryReleaseCapacity(@Param("slotId") Long slotId);
 }

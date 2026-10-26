@@ -63,4 +63,14 @@ public class ReservationController {
         SearchReservationDetailResponse response = reservationService.findReservationById(userId, reservationId);
         return ResponseEntity.ok(ApiResponse.ok("예약 상세 조회에 성공했습니다.", response));
     }
+
+    // 내 예약 취소
+    @PatchMapping("/{reservationId}/cancel")
+    public ResponseEntity<ApiResponse<UpdateReservationCancelResponse>> cancelReservation(
+            @AuthenticationPrincipal Long userId,
+            @Min(1) @PathVariable Long reservationId
+    ) {
+        UpdateReservationCancelResponse response = reservationService.cancelReservation(userId, reservationId);
+        return ResponseEntity.ok(ApiResponse.ok("예약 취소에 성공했습니다.", response));
+    }
 }

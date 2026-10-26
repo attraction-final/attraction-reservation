@@ -11,10 +11,14 @@ import com.example.attractionreservation.domain.attractionSlot.repository.Attrac
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -40,6 +44,9 @@ class AttractionSlotServiceTest {
 
     @Mock
     private AttractionRepository attractionRepository;
+
+    @Mock
+    private EntityManager entityManager;
 
     @InjectMocks
     private AttractionSlotService attractionSlotService;
@@ -77,6 +84,165 @@ class AttractionSlotServiceTest {
         assertThatThrownBy(action::run)
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(errorCode);
+    }
+
+    @Nested
+    @DisplayName("예약용 슬롯 조회")
+    class FindForReservation {
+
+        @Test
+        @DisplayName("슬롯이 존재하면 해당 슬롯을 반환한다")
+        void findAttractionSlotById_ExistingSlot_ReturnsSlot() {
+            // given
+            AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
+            givenSlot(slot);
+
+            // when
+            AttractionSlot result = attractionSlotService.findAttractionSlotById(31L);
+
+            // then
+            assertThat(result).isSameAs(slot);
+            verify(attractionSlotRepository).findById(31L);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 슬롯을 조회하면 예외가 발생한다")
+        void findAttractionSlotById_MissingSlot_ThrowsException() {
+            // given
+            given(attractionSlotRepository.findById(31L)).willReturn(Optional.empty());
+
+            // when & then
+            assertErrorCode(() -> attractionSlotService.findAttractionSlotById(31L),
+                    ErrorCode.SLOT_NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("예약 정원 확보 및 복구")
+    class ReservationCapacity {
+
+        @Test
+        @DisplayName("마지막 자리를 확보하면 갱신된 인원을 반영하고 자동 마감한다")
+        void tryReservationCapacity_LastPlace_AutoClosesSlot() {
+            // given
+            AttractionSlot slot = createTomorrowSlot(19, SlotStatus.OPEN);
+            given(attractionSlotRepository.tryReserveCapacity(31L, SlotStatus.OPEN)).willReturn(1);
+            givenSlot(slot);
+            doAnswer(invocation -> {
+                ReflectionTestUtils.setField(slot, "reservedCount", 20);
+                return null;
+            }).when(entityManager).refresh(slot);
+
+            // when
+            attractionSlotService.tryReservationCapacity(31L);
+
+            // then
+            assertThat(slot.getReservedCount()).isEqualTo(20);
+            assertThat(slot.getStatus()).isEqualTo(SlotStatus.CLOSED);
+            assertThat(slot.isAutoClosed()).isTrue();
+            InOrder calls = inOrder(attractionSlotRepository, entityManager);
+            calls.verify(attractionSlotRepository).tryReserveCapacity(31L, SlotStatus.OPEN);
+            calls.verify(attractionSlotRepository).findById(31L);
+            calls.verify(entityManager).refresh(slot);
+        }
+
+        @Test
+        @DisplayName("정원 확보 후에도 빈자리가 있으면 OPEN 상태를 유지한다")
+        void tryReservationCapacity_RemainingPlaces_KeepsOpen() {
+            // given
+            AttractionSlot slot = createTomorrowSlot(18, SlotStatus.OPEN);
+            given(attractionSlotRepository.tryReserveCapacity(31L, SlotStatus.OPEN)).willReturn(1);
+            givenSlot(slot);
+            doAnswer(invocation -> {
+                ReflectionTestUtils.setField(slot, "reservedCount", 19);
+                return null;
+            }).when(entityManager).refresh(slot);
+
+            // when
+            attractionSlotService.tryReservationCapacity(31L);
+
+            // then
+            assertThat(slot.getReservedCount()).isEqualTo(19);
+            assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
+            assertThat(slot.isAutoClosed()).isFalse();
+            verify(entityManager).refresh(slot);
+        }
+
+        @Test
+        @DisplayName("정원 확보 UPDATE가 실패하면 슬롯 조회와 갱신 없이 예외가 발생한다")
+        void tryReservationCapacity_UpdateFailed_ThrowsException() {
+            // given
+            given(attractionSlotRepository.tryReserveCapacity(31L, SlotStatus.OPEN)).willReturn(0);
+
+            // when & then
+            assertErrorCode(() -> attractionSlotService.tryReservationCapacity(31L),
+                    ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
+            verify(attractionSlotRepository, never()).findById(any());
+            verifyNoInteractions(entityManager);
+        }
+
+        @Test
+        @DisplayName("자동 마감 슬롯의 정원을 복구하면 갱신된 인원을 반영하고 다시 연다")
+        void releaseReservationCapacity_AutoClosedSlot_ReopensSlot() {
+            // given
+            AttractionSlot slot = createTomorrowSlot(20, SlotStatus.CLOSED);
+            ReflectionTestUtils.setField(slot, "autoClosed", true);
+            given(attractionSlotRepository.tryReleaseCapacity(31L)).willReturn(1);
+            givenSlot(slot);
+            doAnswer(invocation -> {
+                ReflectionTestUtils.setField(slot, "reservedCount", 19);
+                return null;
+            }).when(entityManager).refresh(slot);
+
+            // when
+            attractionSlotService.releaseReservationCapacity(31L);
+
+            // then
+            assertThat(slot.getReservedCount()).isEqualTo(19);
+            assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
+            assertThat(slot.isAutoClosed()).isFalse();
+            InOrder calls = inOrder(attractionSlotRepository, entityManager);
+            calls.verify(attractionSlotRepository).tryReleaseCapacity(31L);
+            calls.verify(attractionSlotRepository).findById(31L);
+            calls.verify(entityManager).refresh(slot);
+        }
+
+        @ParameterizedTest
+        @EnumSource(SlotStatus.class)
+        @DisplayName("자동 마감이 아닌 슬롯은 정원을 복구해도 기존 운영 상태를 유지한다")
+        void releaseReservationCapacity_NotAutoClosed_PreservesStatus(SlotStatus status) {
+            // given
+            AttractionSlot slot = createTomorrowSlot(10, status);
+            ReflectionTestUtils.setField(slot, "autoClosed", false);
+            given(attractionSlotRepository.tryReleaseCapacity(31L)).willReturn(1);
+            givenSlot(slot);
+            doAnswer(invocation -> {
+                ReflectionTestUtils.setField(slot, "reservedCount", 9);
+                return null;
+            }).when(entityManager).refresh(slot);
+
+            // when
+            attractionSlotService.releaseReservationCapacity(31L);
+
+            // then
+            assertThat(slot.getReservedCount()).isEqualTo(9);
+            assertThat(slot.getStatus()).isEqualTo(status);
+            assertThat(slot.isAutoClosed()).isFalse();
+            verify(entityManager).refresh(slot);
+        }
+
+        @Test
+        @DisplayName("정원 복구 UPDATE가 실패하면 슬롯 조회와 갱신 없이 예외가 발생한다")
+        void releaseReservationCapacity_UpdateFailed_ThrowsException() {
+            // given
+            given(attractionSlotRepository.tryReleaseCapacity(31L)).willReturn(0);
+
+            // when & then
+            assertErrorCode(() -> attractionSlotService.releaseReservationCapacity(31L),
+                    ErrorCode.RESERVATION_CAPACITY_RESTORE_FAILED);
+            verify(attractionSlotRepository, never()).findById(any());
+            verifyNoInteractions(entityManager);
+        }
     }
 
     // 등록

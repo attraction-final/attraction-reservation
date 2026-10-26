@@ -22,7 +22,7 @@ class TicketProductDeleteControllerTest {
             mock(TicketProductService.class);
 
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new TicketProductController(ticketProductService))
+            .standaloneSetup(new AdminTicketProductController(ticketProductService))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
 
@@ -35,7 +35,7 @@ class TicketProductDeleteControllerTest {
         doNothing().when(ticketProductService).deleteTicketProduct(ticketProductId);
 
         // when & then
-        mockMvc.perform(delete("/api/ticket-products/{ticketProductId}", ticketProductId)
+        mockMvc.perform(delete("/api/admin/ticket-products/{ticketProductId}", ticketProductId)
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
@@ -57,7 +57,7 @@ class TicketProductDeleteControllerTest {
                 .when(ticketProductService).deleteTicketProduct(ticketProductId);
 
         // when & then
-        mockMvc.perform(delete("/api/ticket-products/{ticketProductId}", ticketProductId)
+        mockMvc.perform(delete("/api/admin/ticket-products/{ticketProductId}", ticketProductId)
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
@@ -75,7 +75,7 @@ class TicketProductDeleteControllerTest {
         String ticketProductId = "abc";
 
         // when & then
-        mockMvc.perform(delete("/api/ticket-products/{ticketProductId}", ticketProductId)
+        mockMvc.perform(delete("/api/admin/ticket-products/{ticketProductId}", ticketProductId)
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))

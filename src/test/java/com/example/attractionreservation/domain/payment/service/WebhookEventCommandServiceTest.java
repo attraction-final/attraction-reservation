@@ -129,6 +129,25 @@ class WebhookEventCommandServiceTest {
         assertThat(find(id).getAttemptCount()).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("처리 중에 멈춘 웹훅은 마지막 변경 후 5분이 지나기 전에는 점유하지 않고, 5분이 되면 다시 점유한다.")
+    void claim_staleProcessing_ClaimedOnlyAfterStaleTimeout() {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        webhookEventCommandService.claim(id, now());
+        Instant staleAt = find(id).getUpdatedAt().plus(Duration.ofMinutes(5));
+
+        //when
+        Optional<String> beforeStale = webhookEventCommandService.claim(id, staleAt.minusMillis(1));
+        Optional<String> atStale = webhookEventCommandService.claim(id, staleAt);
+
+        //then
+        assertThat(beforeStale).isEmpty();
+        assertThat(atStale).contains(PG_ID);
+        assertThat(find(id).getStatus()).isEqualTo(WebhookStatus.PROCESSING);
+        assertThat(find(id).getAttemptCount()).isEqualTo(2);
+    }
+
     @ParameterizedTest
     @EnumSource(value = PaymentSyncResult.class, names = "STATE_CONFLICT")
     @DisplayName("수동 처리가 필요한 결과는 재시도 없이 DEAD로 기록한다.")
@@ -188,8 +207,26 @@ class WebhookEventCommandServiceTest {
         List<Long> ids = webhookEventCommandService.findProcessableIds(now, 10);
 
         //then
-        assertThat(ids).containsExactly(received, retryDue);
-        assertThat(ids).doesNotContain(ignored, processing, retryLater);
+        assertThat(ids)
+                .containsExactly(received, retryDue)
+                .doesNotContain(ignored, processing, retryLater);
+    }
+
+    @Test
+    @DisplayName("처리 중에 멈춘 웹훅은 마지막 변경 후 5분이 지나야 처리 대상으로 조회된다.")
+    void findProcessableIds_staleProcessing_IncludedOnlyAfterStaleTimeout() {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        webhookEventCommandService.claim(id, now());
+        Instant staleAt = find(id).getUpdatedAt().plus(Duration.ofMinutes(5));
+
+        //when
+        List<Long> beforeStale = webhookEventCommandService.findProcessableIds(staleAt.minusMillis(1), 10);
+        List<Long> atStale = webhookEventCommandService.findProcessableIds(staleAt, 10);
+
+        //then
+        assertThat(beforeStale).isEmpty();
+        assertThat(atStale).containsExactly(id);
     }
 
     // DB가 Instant를 마이크로초 단위로 반올림해 저장하므로, 경계 비교가 흔들리지 않게 밀리초로 자른다.

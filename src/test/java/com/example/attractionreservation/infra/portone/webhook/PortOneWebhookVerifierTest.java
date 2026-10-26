@@ -99,9 +99,10 @@ class PortOneWebhookVerifierTest {
     void verify_oldTimestamp_Fail() {
         //given
         String timestamp = String.valueOf(Instant.now().minusSeconds(600).getEpochSecond());
+        String signature = sign(WEBHOOK_ID, timestamp, PAID_BODY);
 
         //when & then
-        assertThatThrownBy(() -> verifier.verify(PAID_BODY, WEBHOOK_ID, sign(WEBHOOK_ID, timestamp, PAID_BODY), timestamp))
+        assertThatThrownBy(() -> verifier.verify(PAID_BODY, WEBHOOK_ID, signature, timestamp))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.getMessage());
     }
@@ -109,8 +110,11 @@ class PortOneWebhookVerifierTest {
     @Test
     @DisplayName("서명 헤더가 없으면 웹훅 서명 오류가 발생한다.")
     void verify_missingHeader_Fail() {
+        //given
+        String timestamp = now();
+
         //when & then
-        assertThatThrownBy(() -> verifier.verify(PAID_BODY, WEBHOOK_ID, null, now()))
+        assertThatThrownBy(() -> verifier.verify(PAID_BODY, WEBHOOK_ID, null, timestamp))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.getMessage());
     }

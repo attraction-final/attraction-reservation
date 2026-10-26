@@ -57,10 +57,10 @@ class WebhookEventRepositoryTest {
     void save_duplicateWebhookId_Fail() {
         //given
         webhookEventRepository.saveAndFlush(WebhookEvent.receive("webhook-1", "pg-id", "WebhookTransactionPaid", "{}"));
+        WebhookEvent duplicate = WebhookEvent.receive("webhook-1", "pg-id", "WebhookTransactionPaid", "{}");
 
         //when & then
-        assertThatThrownBy(() -> webhookEventRepository.saveAndFlush(
-                WebhookEvent.receive("webhook-1", "pg-id", "WebhookTransactionPaid", "{}")))
+        assertThatThrownBy(() -> webhookEventRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

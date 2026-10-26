@@ -113,6 +113,7 @@ class WebhookEventProcessorTest {
         webhookEventProcessor.process(EVENT_ID);
 
         //then
+        verify(webhookEventCommandService).recordResult(eq(EVENT_ID), eq(PaymentSyncResult.APPROVED), any());
         verify(webhookEventCommandService, never()).recordFailure(anyLong(), any(), any());
     }
 

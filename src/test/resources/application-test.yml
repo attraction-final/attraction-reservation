@@ -1,12 +1,14 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:attraction_test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    # LOCK_TIMEOUT: H2에서 MySQL의 innodb_lock_wait_timeout(3초)에 대응하는 락 대기 타임아웃
+    url: jdbc:h2:mem:attraction_test;MODE=MySQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=3000
     driver-class-name: org.h2.Driver
     username: sa
     password:
     hikari:
-      # H2에서 MySQL의 innodb_lock_wait_timeout 설정에 대응하는 락 대기 타임아웃
-      connection-init-sql: SET LOCK_TIMEOUT 3000
+      # 기본 설정의 MySQL 전용 초기화 SQL을 덮어쓴다. 이 프로필은 H2와 Testcontainers MySQL에서 함께 쓰이므로
+      # 두 DB 모두에서 실행되는 SQL이어야 한다.
+      connection-init-sql: SELECT 1
 
   jpa:
     hibernate:
@@ -16,3 +18,10 @@ spring:
       hibernate:
         format_sql: true
     open-in-view: false
+
+# 테스트 환경에서만 사용하는 JWT 설정
+jwt:
+  # 32바이트 테스트 전용 키를 Base64로 인코딩한 값
+  secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  access-token-expiration: 600000
+  refresh-token-expiration: 604800000

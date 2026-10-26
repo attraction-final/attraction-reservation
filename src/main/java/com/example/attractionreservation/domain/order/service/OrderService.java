@@ -101,7 +101,10 @@ public class OrderService {
         // 주문 항목도 함께 저장한 뒤 DB에서 생성한 ID를 응답에 포함한다.
         Order savedOrder = orderRepository.saveAndFlush(order);
 
-        return CreateOrderResponse.from(savedOrder);
+        // 결제창 연동에 쓸 결제를 주문과 같은 트랜잭션에서 만든다. 결제 생성이 실패하면 주문도 롤백된다.
+        String pgId = paymentService.createPayment(savedOrder);
+
+        return CreateOrderResponse.from(savedOrder, pgId);
     }
 
     @Transactional(readOnly = true)

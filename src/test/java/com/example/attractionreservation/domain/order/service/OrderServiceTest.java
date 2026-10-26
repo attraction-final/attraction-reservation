@@ -82,6 +82,7 @@ class OrderServiceTest {
                     ReflectionTestUtils.setField(order, "id", 101L);
                     return order;
                 });
+        when(paymentService.createPayment(any(Order.class))).thenReturn("pg-id");
 
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(10L, 2),
@@ -97,6 +98,7 @@ class OrderServiceTest {
         assertThat(response.orderId()).isEqualTo(101L);
         assertThat(response.totalAmount()).isEqualTo(150000);
         assertThat(response.status()).isEqualTo("PENDING");
+        assertThat(response.pgId()).isEqualTo("pg-id");
         assertThat(response.items())
                 .extracting(CreateOrderResponse.Item::price)
                 .containsExactly(60000, 30000);
@@ -109,6 +111,8 @@ class OrderServiceTest {
         Order savedOrder = captor.getValue();
 
         assertThat(savedOrder.getUser()).isSameAs(user);
+        // 결제창 연동에 쓸 결제를 저장한 주문으로 함께 만든다.
+        verify(paymentService).createPayment(savedOrder);
         assertThat(savedOrder.getOrderItems()).allSatisfy(item ->
                 assertThat(item.getOrder()).isSameAs(savedOrder));
 
@@ -119,6 +123,28 @@ class OrderServiceTest {
 
         assertThat(firstProduct.getStock()).isEqualTo(100);
         assertThat(secondProduct.getStock()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("결제 생성에 실패하면 주문 생성도 같은 예외로 실패한다")
+    void createOrder_paymentCreationFailed_throwsException() {
+        // given
+        TicketProduct product = createProduct(10L, 60000, TicketProductStatus.ON_SALE);
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllById(Set.of(10L))).thenReturn(List.of(product));
+        when(orderRepository.saveAndFlush(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentService.createPayment(any(Order.class)))
+                .thenThrow(new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT));
+
+        // when & then: 예외가 전파되어야 같은 트랜잭션의 주문 저장도 롤백된다.
+        assertThatThrownBy(() -> orderService.createOrder(1L, createRequest(10L, 1)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.PAYMENT_INVALID_AMOUNT)
+                );
     }
 
     @Test

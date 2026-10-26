@@ -9,14 +9,16 @@ public record CreateOrderResponse(
         Long orderId,
         Integer totalAmount,
         String status,
+        String pgId,
         List<Item> items
 ) {
 
-    public static CreateOrderResponse from(Order order) {
+    public static CreateOrderResponse from(Order order, String pgId) {
         return new CreateOrderResponse(
                 order.getId(),
                 order.getTotalAmount(),
                 order.getStatus().name(),
+                pgId,
                 order.getOrderItems().stream()
                         .map(Item::from)
                         .toList()

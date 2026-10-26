@@ -8,3 +8,10 @@ jwt:
   secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   access-token-expiration: 600000
   refresh-token-expiration: 604800000
+
+portone:
+  base-url: https://api.portone.test
+  api-secret: test-api-secret
+  store-id: test-store-id
+  channel-key: test-channel-key
+  webhook-secret: test-webhook-secret

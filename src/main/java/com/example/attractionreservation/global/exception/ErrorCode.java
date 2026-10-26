@@ -66,6 +66,7 @@ public enum ErrorCode {
     TICKET_PRODUCT_ALREADY_DELETED(HttpStatus.CONFLICT, "삭제된 티켓 상품은 수정할 수 없습니다."),
 
     // order
+    ORDER_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 전이입니다."),
     ORDER_PRODUCT_NOT_ON_SALE(HttpStatus.CONFLICT, "판매 중인 티켓 상품만 주문할 수 있습니다."),
     ORDER_AMOUNT_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "주문 금액이 허용 범위를 초과했습니다."),
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
@@ -95,9 +96,16 @@ public enum ErrorCode {
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),
-    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "유효하지 않은 상태 전이입니다."),
+    PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 전이입니다."),
     PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 내역을 찾을 수 없습니다."),
-    PAYMENT_CANCEL_PROHIBITED(HttpStatus.CONFLICT, "결제 대기 상태가 아닌 결제는 취소할 수 없습니다.");
+    PAYMENT_NOT_PAID(HttpStatus.CONFLICT, "결제사에서 결제가 완료되지 않았습니다."),
+    PAYMENT_INCORRECT_AMOUNT(HttpStatus.BAD_REQUEST, "결제 금액이 결제 원장과 일치하지 않습니다."),
+    PAYMENT_CANCEL_PROHIBITED(HttpStatus.CONFLICT, "결제 대기 상태가 아닌 결제는 취소할 수 없습니다."),
+    PAYMENT_GATEWAY_ERROR(HttpStatus.BAD_GATEWAY, "결제사 조회에 실패했습니다."),
+    PAYMENT_CANCELLATION_FAILED(HttpStatus.BAD_GATEWAY, "결제 취소에 실패했습니다."),
+    PAYMENT_PG_PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PG 결제를 찾을 수 없습니다."),
+    PAYMENT_ALREADY_PROCESSED(HttpStatus.CONFLICT, "이미 처리된 결제입니다."),
+    PAYMENT_PG_FAILED(HttpStatus.CONFLICT, "결제가 실패했습니다. 결제 수단을 확인한 뒤 다시 결제해 주세요.");
 
     private final HttpStatus status;
     private final String message;

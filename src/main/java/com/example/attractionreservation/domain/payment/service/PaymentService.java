@@ -21,7 +21,7 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
 
     @Transactional
-    public void createPayment(Order order) {
+    public String createPayment(Order order) {
         if (order.getTotalAmount() <= 0) {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT);
         }
@@ -29,6 +29,8 @@ public class PaymentService {
         Payment payment = Payment.create(order);
 
         paymentRepository.save(payment);
+
+        return payment.getPgId();
     }
 
     @Transactional(readOnly = true)
@@ -46,7 +48,7 @@ public class PaymentService {
     }
 
     @Transactional
-    public void cancelPayment(Long userId, Long orderId) {
+    public void cancelledByUser(Long userId, Long orderId) {
         Payment found = paymentRepository.findWithLockByOrderId(orderId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
@@ -59,6 +61,15 @@ public class PaymentService {
         }
 
         found.markAsCancelled();
+        found.getOrder().markAsCancelled();
+
+        // TODO: 재고 복구 로직 필요
         paymentRepository.save(found);
+    }
+
+    @Transactional(readOnly = true)
+    public Payment getOwnedPayment(Long userId, String pgId) {
+        return paymentRepository.findByPgIdAndUserId(pgId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
 }

@@ -3,7 +3,6 @@ package com.example.attractionreservation.domain.user.controller;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
-import com.example.attractionreservation.domain.user.controller.UserController;
 import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
@@ -23,12 +22,19 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import com.example.attractionreservation.domain.user.facade.UserWithdrawalFacade;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.List;
 
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -60,6 +66,9 @@ class UserControllerTest {
 
     @MockitoBean
     private UserRepository userRepository;
+
+    @MockitoBean
+    private UserWithdrawalFacade userWithdrawalFacade;
 
     @Test
     void signup_success() throws Exception {
@@ -342,5 +351,86 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(userService);
+    }
+
+    @Test
+    void withdraw_authenticatedUser_returnsSuccessAndExpiresCookie()
+            throws Exception {
+
+        var auth = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        mockMvc.perform(delete("/api/users/me")
+                        .servletPath("/api/users/me")
+                        .with(authentication(auth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("회원 탈퇴에 성공했습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(header().string(
+                        "Set-Cookie",
+                        allOf(
+                                containsString("refreshToken="),
+                                containsString("Max-Age=0"),
+                                containsString("Path=/api/auth"),
+                                containsString("HttpOnly"),
+                                containsString("Secure"),
+                                containsString("SameSite=Lax")
+                        )
+                ));
+
+        // 요청값이 아니라 인증 정보의 회원 ID로 탈퇴하는지 확인한다.
+        verify(userWithdrawalFacade).withdraw(1L);
+    }
+
+    @Test
+    void withdraw_withoutAuthentication_returns401() throws Exception {
+        mockMvc.perform(delete("/api/users/me")
+                        .servletPath("/api/users/me"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(userWithdrawalFacade);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ErrorCode.class,
+            names = {
+                    "USER_NOT_WITHDRAWABLE",
+                    "USER_WITHDRAWAL_UNUSED_TICKET"
+            }
+    )
+    void withdraw_businessError_returnsExpectedStatus(
+            ErrorCode errorCode
+    ) throws Exception {
+        var auth = new UsernamePasswordAuthenticationToken(
+                1L,
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+        );
+
+        doThrow(new BusinessException(errorCode))
+                .when(userWithdrawalFacade).withdraw(1L);
+
+        int expectedStatus =
+                errorCode == ErrorCode.USER_NOT_WITHDRAWABLE
+                        ? 403
+                        : 409;
+
+        mockMvc.perform(delete("/api/users/me")
+                        .servletPath("/api/users/me")
+                        .with(authentication(auth)))
+                .andExpect(status().is(expectedStatus))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(errorCode.getMessage()))
+                .andExpect(header().doesNotExist("Set-Cookie"));
+
+        // 탈퇴가 실패하면 로그인 상태를 유지하도록 쿠키를 삭제하지 않는다.
+        verify(userWithdrawalFacade).withdraw(1L);
     }
 }

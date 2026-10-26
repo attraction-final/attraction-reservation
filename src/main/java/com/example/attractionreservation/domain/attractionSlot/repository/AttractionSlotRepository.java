@@ -4,7 +4,10 @@ import com.example.attractionreservation.domain.attractionSlot.entity.Attraction
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 
+import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -54,4 +57,11 @@ public interface AttractionSlotRepository extends JpaRepository<AttractionSlot, 
                                               @Param("excludeSlotId") Long excludeSlotId,
                                               @Param("startsAt") LocalDateTime startsAt,
                                               @Param("endsAt") LocalDateTime endsAt);
+
+    // 예약 인원을 복구하는 동안 같은 슬롯의 동시 변경을 보호한다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM AttractionSlot s WHERE s.id = :slotId")
+    Optional<AttractionSlot> findByIdForUpdate(
+            @Param("slotId") Long slotId
+    );
 }

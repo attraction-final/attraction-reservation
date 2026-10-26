@@ -69,4 +69,21 @@ public class Reservation extends BaseTimeEntity {
         this.attractionSlot = attractionSlot;
         this.status = ReservationStatus.RESERVED;
     }
+
+    public void cancelForWithdrawal(Instant cancelledAt) {
+        // 이미 완료·취소된 예약을 다시 변경하지 않는다.
+        if (this.status != ReservationStatus.RESERVED) {
+            throw new IllegalStateException(
+                    "예약 상태가 RESERVED인 경우에만 탈퇴로 취소할 수 있습니다."
+            );
+        }
+
+        if (cancelledAt == null) {
+            throw new IllegalArgumentException("예약 취소 일시는 필수입니다.");
+        }
+
+        this.status = ReservationStatus.CANCELLED;
+        this.cancelReason = "회원 탈퇴";
+        this.cancelledAt = cancelledAt;
+    }
 }

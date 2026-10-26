@@ -26,4 +26,10 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
 
     @Query("SELECT t FROM Ticket t WHERE t.code = :code")
     Optional<Ticket> findByCode(@Param("code") String code);
+
+    // 티켓 → 주문 항목 → 주문 → 회원을 따라 본인의 미사용 입장권을 확인한다.
+    boolean existsByOrderItem_Order_User_IdAndStatus(
+            Long userId,
+            TicketStatus status
+    );
 }

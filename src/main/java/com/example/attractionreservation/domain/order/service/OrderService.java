@@ -1,9 +1,12 @@
 package com.example.attractionreservation.domain.order.service;
 
-import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
+import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
+import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
@@ -16,14 +19,16 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
 
 @Service
 @RequiredArgsConstructor
@@ -32,6 +37,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final TicketProductRepository ticketProductRepository;
     private final UserRepository userRepository;
+    private final PaymentService paymentService;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -62,7 +68,8 @@ public class OrderService {
                 ));
 
         for (CreateOrderRequest.Item item : request.items()) {
-            TicketProduct ticketProduct = productsById.get(item.ticketProductId());
+            TicketProduct ticketProduct =
+                    productsById.get(item.ticketProductId());
 
             if (ticketProduct == null) {
                 throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
@@ -109,6 +116,85 @@ public class OrderService {
         }
 
         return SearchOrderResponse.from(order);
+    }
+
+    @Transactional
+    public UpdateOrderResponse updateOrderByCancel(
+            Long userId,
+            Long orderId
+    ) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_CANCEL_ACCESS_DENIED);
+        }
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 조회 후 상태가 바뀔 수 있으므로 실제 수정 시에도 PENDING 조건을 확인한다.
+        int updatedCount = orderRepository.cancelPendingOrder(
+                orderId,
+                userId,
+                OrderStatus.PENDING,
+                OrderStatus.CANCELLED,
+                Instant.now()
+        );
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 결제 취소가 실패하면 같은 트랜잭션의 주문 취소도 롤백한다.
+        paymentService.cancelPendingPaymentIfExists(userId, orderId);
+
+        // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
+        return UpdateOrderResponse.of(
+                orderId,
+                OrderStatus.CANCELLED
+        );
+    }
+
+    @Transactional
+    public int updateExpiredOrdersByCancel() {
+        Instant now = Instant.now();
+        Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
+
+        // 한 번에 처리할 주문 수를 제한한다.
+        List<Order> expiredOrders = orderRepository.findExpiredPendingOrders(
+                OrderStatus.PENDING,
+                cutoff,
+                PageRequest.of(0, 100)
+        );
+
+        int cancelledCount = 0;
+
+        for (Order order : expiredOrders) {
+            // 수정 쿼리가 영속성 컨텍스트를 비우므로 필요한 값을 먼저 보관한다.
+            Long orderId = order.getId();
+            Long userId = order.getUser().getId();
+
+            // 조회 후 상태가 변경된 주문은 취소하지 않는다.
+            int updatedCount = orderRepository.cancelPendingOrder(
+                    orderId,
+                    userId,
+                    OrderStatus.PENDING,
+                    OrderStatus.CANCELLED,
+                    now
+            );
+
+            if (updatedCount == 0) {
+                continue;
+            }
+
+            paymentService.cancelPendingPaymentIfExists(userId, orderId);
+            cancelledCount++;
+        }
+
+        return cancelledCount;
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

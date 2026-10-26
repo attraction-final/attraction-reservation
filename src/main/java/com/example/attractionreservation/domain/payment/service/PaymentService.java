@@ -80,4 +80,26 @@ public class PaymentService {
         return paymentRepository.findByPgIdAndUserId(pgId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
+
+    @Transactional
+    public void cancelPendingPaymentIfExists(Long userId, Long orderId) {
+        // 결제 정보가 아직 생성되지 않은 주문도 취소할 수 있다.
+        Payment payment = paymentRepository.findWithLockByOrderId(orderId)
+                .orElse(null);
+
+        if (payment == null) {
+            return;
+        }
+
+        if (!payment.getOrder().getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
+        }
+
+        // 결제가 완료됐거나 이미 다른 상태로 변경됐다면 취소를 중단한다.
+        if (payment.getStatus() != PaymentStatus.PENDING) {
+            throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
+        }
+
+        payment.markAsCancelled();
+    }
 }

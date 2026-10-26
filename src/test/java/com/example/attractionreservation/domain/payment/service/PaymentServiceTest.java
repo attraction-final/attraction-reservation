@@ -51,6 +51,74 @@ class PaymentServiceTest {
     private PaymentService paymentService;
 
     @Test
+    @DisplayName("결제 정보가 없어도 주문 취소를 위한 결제 처리는 정상 종료한다")
+    void cancelPendingPaymentIfExists_missingPayment_success() {
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID))
+                .willReturn(Optional.empty());
+
+        paymentService.cancelPendingPaymentIfExists(USER_ID, ORDER_ID);
+
+        verify(paymentRepository).findWithLockByOrderId(ORDER_ID);
+    }
+
+    @Test
+    @DisplayName("본인의 대기 중인 결제를 취소한다")
+    void cancelPendingPaymentIfExists_pending_success() {
+        Payment payment = createPayment(USER_ID);
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID))
+                .willReturn(Optional.of(payment));
+
+        paymentService.cancelPendingPaymentIfExists(USER_ID, ORDER_ID);
+
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+    }
+
+    @Test
+    @DisplayName("다른 회원의 결제는 변경하지 않고 거부한다")
+    void cancelPendingPaymentIfExists_otherUser_fail() {
+        Payment payment = createPayment(2L);
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID))
+                .willReturn(Optional.of(payment));
+
+        assertThatThrownBy(() ->
+                paymentService.cancelPendingPaymentIfExists(USER_ID, ORDER_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertEquals(
+                                ErrorCode.PAYMENT_NOT_FOUND,
+                                exception.getErrorCode()
+                        )
+                );
+
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = PaymentStatus.class,
+            mode = EnumSource.Mode.EXCLUDE,
+            names = "PENDING"
+    )
+    @DisplayName("대기 상태가 아닌 결제는 변경하지 않고 거부한다")
+    void cancelPendingPaymentIfExists_notPending_fail(PaymentStatus status) {
+        Payment payment = createPaymentWithStatus(USER_ID, status);
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID))
+                .willReturn(Optional.of(payment));
+
+        assertThatThrownBy(() ->
+                paymentService.cancelPendingPaymentIfExists(USER_ID, ORDER_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertEquals(
+                                ErrorCode.PAYMENT_CANCEL_PROHIBITED,
+                                exception.getErrorCode()
+                        )
+                );
+
+        assertEquals(status, payment.getStatus());
+    }
+
+    @Test
     @DisplayName("결제 금액이 0보다 크면 결제를 생성할 수 있다.")
     void createPayment_paymentAmountLargerThan0_Success() {
         //given

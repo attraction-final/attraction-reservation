@@ -231,4 +231,12 @@ public class ReservationService {
 
         return reservations.map(SearchAdminReservationResponse::from);
     }
+
+    // 관리자 예약 상세 조회
+    public SearchAdminReservationDetailResponse findAdminReservationById(Long reservationId) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
+
+        return SearchAdminReservationDetailResponse.from(reservation);
+    }
 }

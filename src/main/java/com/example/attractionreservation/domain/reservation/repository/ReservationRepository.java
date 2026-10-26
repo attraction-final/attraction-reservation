@@ -13,36 +13,6 @@ import java.util.Optional;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long>, ReservationCustomRepository {
 
-    // 중복 예약 확인
-    @Query("""
-    SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END
-    FROM Reservation r
-    WHERE r.user.id = :userId
-      AND r.attractionSlot.id = :slotId
-      AND r.status = :status
-    """)
-    boolean existsReservedByUser_IdAndSlot_Id(
-            @Param("userId") Long userId,
-            @Param("slotId") Long slotId,
-            @Param("status") ReservationStatus status
-    );
-
-    // 동일 시간대 예약 여부 확인
-    @Query("""
-    SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END
-    FROM Reservation r
-    WHERE r.user.id = :userId
-      AND r.status = :status
-      AND r.attractionSlot.startsAt < :endsAt
-      AND r.attractionSlot.endsAt > :startsAt
-    """)
-    boolean existsTimeConflictReservation(
-            @Param("userId") Long userId,
-            @Param("startsAt") LocalDateTime startsAt,
-            @Param("endsAt") LocalDateTime endsAt,
-            @Param("status") ReservationStatus status
-    );
-
     // 내 예약 목록 조회
     @Query("""
     SELECT r

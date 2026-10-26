@@ -11,7 +11,7 @@ PortOne 웹훅을 DB(Inbox)에 저장하고 스케줄러로 비동기 처리하�
 - 비동기를 택한 이유
   - PortOne 재전송 정책(횟수 제한)에 의존하지 않고 우리 쪽에서 재시도를 관리할 수 있다.
   - 웹훅 응답 시간이 PG 조회 시간에 묶이지 않는다.
-  - 보상 취소 Outbox(payment-approval.md 8장)와 스케줄러 구조를 공유할 수 있다.
+  - 보상 취소 Outbox([payment-compensation.md](payment-compensation.md))와 스케줄러 구조를 공유한다.
 
 ```
 [수신]  POST /api/payments/webhooks/portone        PortOneWebhookController (infra)
@@ -43,7 +43,7 @@ domain/payment
 ├── facade/WebhookEventProcessor        점유 → syncPayment → 결과 기록 (트랜잭션 없음)
 ├── facade/PaymentFacade.syncPayment    사용자 확인 없이 PG 상태를 원장에 반영, PaymentSyncResult 반환
 ├── dto/PaymentSyncResult               APPROVED, ALREADY_DONE, NOT_PAID, PG_FAILED, COMPENSATED, NOT_OUR_PAYMENT,
-│                                       COMPENSATION_FAILED, STATE_CONFLICT
+│                                       STATE_CONFLICT
 └── scheduler/WebhookEventScheduler     @Scheduled, payment.webhook.scheduler.enabled로 켜고 끔
 
 global/config/SchedulingConfig          @EnableScheduling
@@ -144,18 +144,16 @@ global/config/SchedulingConfig          @EnableScheduling
 | PG 결제 완료, 금액 일치 → 승인 | `APPROVED` | `PROCESSED` |
 | PG 미완료(`PAYMENT_NOT_PAID`) | `NOT_PAID` | `PROCESSED` |
 | PG 실패(`PAYMENT_PG_FAILED`) → 결제 실패 처리 | `PG_FAILED` | `PROCESSED` |
-| 금액 불일치(`PAYMENT_INCORRECT_AMOUNT`) → 실패 처리 + PG 보상 취소 | `COMPENSATED` | `PROCESSED` |
-| 원장 `CANCELLED` + PG 결제 완료(`PAYMENT_ALREADY_CANCELLED`) → PG 보상 취소 | `COMPENSATED` | `PROCESSED` |
-| 보상 중 PG 취소 실패(`PAYMENT_CANCELLATION_FAILED`) | `COMPENSATION_FAILED` | **즉시 `DEAD`** + error 로그 (수동 환불) |
+| 금액 불일치(`PAYMENT_INCORRECT_AMOUNT`) → 실패 처리 + 보상 요청 + 즉시 PG 취소 시도 | `COMPENSATED` | `PROCESSED` |
+| 원장 `CANCELLED` + PG 결제 완료(`PAYMENT_ALREADY_CANCELLED`) → 보상 요청 + 즉시 PG 취소 시도 | `COMPENSATED` | `PROCESSED` |
 | 원장 상태 때문에 승인 불가(`PAYMENT_INVALID_STATUS_TRANSITION`, `ORDER_INVALID_STATUS_TRANSITION`) | `STATE_CONFLICT` | **즉시 `DEAD`** + error 로그 (수동 확인) |
 | 그 밖의 예외 (PG 조회 실패, PG에 결제 없음, 락 충돌, DB 오류) | 예외 전파 | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
 
 - `NOT_PAID`를 `PROCESSED`로 두는 이유: READY 등의 웹훅은 할 일이 없고, 이후 결제 완료 시 Paid 웹훅이 따로 온다.
+- `COMPENSATED`는 PG 취소 결과와 무관하다. 보상 요청이 결제 실패와 함께 커밋되고, 즉시 시도가 실패해도 보상 Outbox가 재시도한다([payment-compensation.md](payment-compensation.md)). 웹훅 쪽에서 보상 실패를 추적하지 않는다.
 - **재시도하지 않고 바로 `DEAD`로 보내는 경우**
-  - `COMPENSATION_FAILED`: 결제 FAILED가 커밋된 뒤라, 재시도하면 `ALREADY_DONE` → `PROCESSED`로 끝나 **PG에 결제가 남은 상황이 가려진다.** 이슈 C(보상 Outbox) 전까지는 `DEAD`로 드러내고 수동 환불한다.
-    - 원장 `CANCELLED`의 PG 취소 실패도 같은 결과로 받는다. 이 경우는 재시도하면 PG 취소를 다시 시도할 수 있지만, 지금은 금액 불일치와 똑같이 `DEAD`로 드러낸다.
   - `STATE_CONFLICT`: `approvePayment`가 락 안에서 PAID·FAILED·CANCELLED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다. 정상 흐름에서는 생기지 않는다.
-    - 원장 `CANCELLED` + PG Paid는 여기에 해당하지 않는다. `COMPENSATED`로 PG 결제를 취소한다(payment-approval.md 4.3).
+    - 원장 `CANCELLED` + PG Paid는 여기에 해당하지 않는다. `COMPENSATED`로 보상 요청을 저장한다(payment-approval.md 4.3).
 - **Processor의 예외 처리**
   - 결과 기록 중 `PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION`: 멈춘 행을 다시 점유한 사이 다른 처리가 먼저 기록한 경우다. 실패로 기록하지 않고 건너뛴다.
   - 그 밖의 예외는 `recordFailure`로 재시도를 예약한다.
@@ -183,7 +181,7 @@ payment:
 | `WebhookEventCommandServiceTest` | `@DataJpaTest` + H2 | 저장·중복, 점유(대기·처리 중·IGNORED·재시도 시각 전후), 결과 기록(수동 처리 필요 결과는 DEAD), 처리 대상 조회 |
 | `WebhookEventProcessorTest` | Mockito | 처리, 점유 실패·락 충돌 시 건너뜀, 실패 기록, 다른 처리가 먼저 기록하면 건너뜀, 수동 처리 필요 결과 기록, 배치 내 예외 격리 |
 | `WebhookEventSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, `enabled` 설정에 따른 빈 등록 |
-| `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(원장 CANCELLED 보상·보상 취소 실패·상태 충돌 포함), 재시도 필요 오류 전파 |
+| `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(금액 불일치·원장 CANCELLED 시 보상 즉시 시도, 상태 충돌 포함), 재시도 필요 오류 전파 |
 
 - DB는 `Instant`를 마이크로초로 반올림해 저장한다. 시각 경계를 비교하는 테스트는 `now`를 밀리초로 잘라 쓴다.
 
@@ -192,6 +190,7 @@ payment:
 ### 배포 전 필수
 
 - [ ] **`webhook_events` 테이블 생성**: `ddl-auto: validate`이므로 테이블이 없으면 애플리케이션이 시작되지 않는다. DDL 공유·적용 방식(마이그레이션 도구 도입 여부)을 팀과 정한다.
+  - 시각 컬럼(`next_retry_at`, `processed_at`, `created_at`, `updated_at`)은 `DATETIME(6)`으로 만든다. 소수 초가 없으면 최대 0.5초 반올림되어 재시도 시각 비교가 어긋난다.
 - [ ] **PortOne 콘솔에 웹훅 URL 등록**: `POST /api/payments/webhooks/portone`
 - [ ] **인증 적용 시** `/api/payments/webhooks/**`를 인증 없이 허용(`permitAll`). 이 엔드포인트의 보안은 서명 검증이다.
 
@@ -202,11 +201,10 @@ payment:
   - 웹훅 처리와 승인 API가 동시에 들어와도 결제는 한 번만 `PAID`가 된다
 - [ ] 실제 PortOne 웹훅 본문 형식 확인 (민감 정보 포함 여부, 저장 전 점검)
 
-### 이슈 C. 보상 취소 Outbox
+### 보상 취소 Outbox (KAN-39에서 구현)
 
-- 설계는 [payment-approval.md 8장](payment-approval.md#8-다음-단계-설계-보상-처리의-outbox-방식)을 따른다. 이번 스케줄러·Processor 구조를 재사용한다.
-- 해결할 문제: 금액 불일치 보상에서 PG 취소가 실패하면 지금은 웹훅을 `DEAD`로 기록하고 수동 환불한다(5장). 승인 API 경로에서 실패한 경우는 웹훅 기록도 남지 않는다. **보상 취소를 자동으로 다시 시도하는 수단이 없다.**
-- 함께 처리: 전체 취소 멱등 키를 결제마다 고정 (`PortOneClientTest`의 `@Disabled` 1건 활성화)
+- 웹훅의 스케줄러·Processor 구조를 그대로 재사용해 구현했다. 상세는 [payment-compensation.md](payment-compensation.md).
+- 두 스케줄러가 서로의 PG 지연에 밀리지 않도록 `spring.task.scheduling.pool.size: 2`로 스레드를 나눴다.
 
 ### 운영
 

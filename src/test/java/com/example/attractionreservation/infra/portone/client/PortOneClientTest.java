@@ -198,6 +198,27 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("부분 취소는 같은 금액이어도 호출마다 다른 멱등 키를 보낸다.")
+    void cancelPayment_partialTwice_DifferentIdempotencyKey() {
+        //given
+        List<String> idempotencyKeys = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            server.expect(requestTo(CANCEL_URL))
+                    .andExpect(request -> idempotencyKeys.add(request.getHeaders().getFirst("Idempotency-Key")))
+                    .andRespond(withSuccess("""
+                            { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                            """, MediaType.APPLICATION_JSON));
+        }
+
+        //when
+        portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L);
+        portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L);
+
+        //then
+        assertThat(idempotencyKeys.get(0)).isNotEqualTo(idempotencyKeys.get(1));
+    }
+
+    @Test
     @DisplayName("이미 취소된 결제를 취소하면 성공으로 처리한다.")
     void cancelPayment_alreadyCancelled_Success() {
         //given
@@ -355,9 +376,8 @@ class PortOneClientTest {
     }
 
     @Test
-    @Disabled("리뷰 2번: 전체 취소 멱등 키를 결제당 고정으로 복구 시 활성화")
-    @DisplayName("전체 취소는 호출이 달라도 같은 결제면 같은 멱등 키를 보낸다.")
-    void cancelPayment_fullCancelTwice_SameIdempotencyKey() {
+    @DisplayName("전체 취소도 호출마다 다른 멱등 키를 보낸다. PortOne이 같은 키의 실패 응답을 저장하므로 재시도는 새 키여야 한다.")
+    void cancelPayment_fullCancelTwice_DifferentIdempotencyKey() {
         //given
         List<String> idempotencyKeys = new ArrayList<>();
         for (int i = 0; i < 2; i++) {
@@ -370,9 +390,9 @@ class PortOneClientTest {
 
         //when
         portOneClient.cancelPayment(PG_ID, "결제 금액 불일치", null);
-        portOneClient.cancelPayment(PG_ID, "결제 승인 불가 상태", null);
+        portOneClient.cancelPayment(PG_ID, "결제 금액 불일치", null);
 
         //then
-        assertThat(idempotencyKeys.get(0)).isEqualTo(idempotencyKeys.get(1));
+        assertThat(idempotencyKeys.get(0)).isNotEqualTo(idempotencyKeys.get(1));
     }
 }

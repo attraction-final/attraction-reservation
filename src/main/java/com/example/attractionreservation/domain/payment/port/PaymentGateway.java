@@ -24,6 +24,10 @@ public interface PaymentGateway {
     /**
      * PG 결제를 취소한다. 이미 취소된 결제면 성공으로 간주한다.
      *
+     * <p>같은 결제를 여러 번 전체 취소해도 한 번만 환불되어야 한다. 두 번째 이후 호출은
+     * "이미 취소됨"을 성공으로 처리해 보장한다. 보상 취소의 즉시 시도와 스케줄러 재시도가 겹쳐도
+     * 중복 환불되지 않는 근거다.
+     *
      * @param amount 취소 금액. null이면 전체 취소
      * @throws com.example.attractionreservation.global.exception.BusinessException
      *         취소 여부를 확인할 수 없으면 {@code PAYMENT_CANCELLATION_FAILED}

@@ -27,7 +27,7 @@ public class RouteRecommendationStop {
     private Long attractionId;
 
     //방문 일정에서 선택한 탑승 슬롯의 식별자
-    @Column(name = "attraction_slot_id", nullable = false) 
+    @Column(name = "attraction_slot_id", nullable = false)
     private Long attractionSlotId;
 
     //추천 경로 안에서의 방문 순서

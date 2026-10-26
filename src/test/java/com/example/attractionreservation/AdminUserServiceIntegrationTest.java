@@ -16,7 +16,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
+import com.example.attractionreservation.domain.user.dto.SearchUserResponse;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -126,6 +129,62 @@ class AdminUserServiceIntegrationTest {
         assertThat(response.size()).isEqualTo(10);
         assertThat(response.totalElements()).isZero();
         assertThat(response.totalPages()).isZero();
+    }
+
+    @Test
+    @DisplayName("목록에서 제외된 탈퇴 회원도 상세 조회할 수 있고 정지 회원도 조회한다")
+    void findUserById_withdrawnAndSuspendedMembers_returnsStoredDetails() {
+        // given
+        Instant createdAt = Instant.parse("2026-10-15T01:00:00Z");
+
+        Long withdrawnId = saveUser(
+                Role.USER,
+                UserStatus.WITHDRAWN,
+                createdAt
+        );
+        Long suspendedId = saveUser(
+                Role.USER,
+                UserStatus.SUSPENDED,
+                createdAt
+        );
+
+        entityManager.clear();
+
+        User storedUser = userRepository.findById(withdrawnId)
+                .orElseThrow();
+        Instant storedUpdatedAt = storedUser.getUpdatedAt();
+
+        // 앞서 조회한 엔티티를 재사용하지 않고 DB에서 다시 조회하게 한다.
+        entityManager.clear();
+
+        // when
+        SearchUserResponse withdrawn =
+                userService.findUserById(withdrawnId);
+        SearchUserResponse suspended =
+                userService.findUserById(suspendedId);
+        SearchUserListResponse list =
+                userService.findUserAll(new SearchUserCondition(0, 10));
+
+        // then
+        assertThat(withdrawn.id()).isEqualTo(withdrawnId);
+        assertThat(withdrawn.role()).isEqualTo(Role.USER);
+        assertThat(withdrawn.status()).isEqualTo(UserStatus.WITHDRAWN);
+        assertThat(withdrawn.createdAt())
+                .isEqualTo(LocalDateTime.of(2026, 10, 15, 10, 0));
+        assertThat(withdrawn.updatedAt())
+                .isEqualTo(LocalDateTime.ofInstant(
+                        storedUpdatedAt,
+                        ZoneId.of("Asia/Seoul")
+                ));
+
+        assertThat(suspended.id()).isEqualTo(suspendedId);
+        assertThat(suspended.status()).isEqualTo(UserStatus.SUSPENDED);
+
+        // 상세 조회의 예외 정책이 목록 조회의 탈퇴 회원 제외 정책을 바꾸지 않는다.
+        assertThat(list.content())
+                .extracting(SearchUserListResponse.Item::id)
+                .containsExactly(suspendedId);
+        assertThat(list.totalElements()).isEqualTo(1);
     }
 
     private Long saveUser(

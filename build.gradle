@@ -39,6 +39,8 @@ dependencies {
     implementation "io.github.openfeign.querydsl:querydsl-jpa:${querydslVersion}"
     annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${querydslVersion}:jpa"
 
+    // 카카오·구글의 OAuth2 로그인 흐름을 Spring Security로 처리한다.
+    implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
 
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'

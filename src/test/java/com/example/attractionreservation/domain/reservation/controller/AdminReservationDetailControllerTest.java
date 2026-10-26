@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.reservation.controller;
 
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationDetailResponse;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
@@ -63,7 +64,7 @@ class AdminReservationDetailControllerTest {
                         Instant.parse("2026-10-24T01:00:00Z"),
                         Instant.parse("2026-10-24T02:00:00Z"),
                         ReservationCancelReason.ATTRACTION_MAINTENANCE,
-                        "어트랙션 긴급 점검"
+                        ReservationCancelReason.ATTRACTION_MAINTENANCE.getMessage()
                 );
 
         when(reservationService.findAdminReservationById(RESERVATION_ID))
@@ -90,8 +91,10 @@ class AdminReservationDetailControllerTest {
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"))
                 .andExpect(jsonPath("$.data.createdAt").exists())
                 .andExpect(jsonPath("$.data.cancelledAt").exists())
+                .andExpect(jsonPath("$.data.cancelReason")
+                        .value("ATTRACTION_MAINTENANCE"))
                 .andExpect(jsonPath("$.data.cancelReasonMessage")
-                        .value("어트랙션 긴급 점검"));
+                        .value(ReservationCancelReason.ATTRACTION_MAINTENANCE.getMessage()));
 
         verify(reservationService).findAdminReservationById(RESERVATION_ID);
     }

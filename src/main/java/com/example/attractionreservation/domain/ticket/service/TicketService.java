@@ -38,8 +38,8 @@ public class TicketService {
     }
 
     // 내 티켓 상세 조회
-    public SearchTicketDetailResponse findTicketById(Long ticketId) {
-        Ticket ticket = ticketRepository.findById(ticketId)
+    public SearchTicketDetailResponse findTicketById(Long userId, Long ticketId) {
+        Ticket ticket = ticketRepository.findByIdAndUser_Id(ticketId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
 
         return SearchTicketDetailResponse.from(ticket);

@@ -37,7 +37,6 @@ public class TicketProductService {
     }
 
     // 티켓 상품 수정
-    // TODO: 추후 관리자 인증 검증 부분 추가 예정
     @Transactional
     public UpdateTicketProductResponse updateTicketProduct(Long ticketProductId, @Valid UpdateTicketProductRequest request) {
         TicketProduct ticketProduct = ticketProductRepository.findById(ticketProductId)

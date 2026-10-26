@@ -96,4 +96,16 @@ public class Reservation extends BaseTimeEntity {
         this.cancelledAt = Instant.now();
         this.cancelReason = reason;
     }
+
+    // 관리자 예약 상태 변경
+    public void updateReservationStatus(ReservationStatus status) {
+        if (this.status != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_STATUS_CHANGE_NOT_ALLOWED);
+        }
+
+        if (status != ReservationStatus.NO_SHOW && status != ReservationStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.INVALID_RESERVATION_TARGET_STATUS);
+        }
+        this.status = status;
+    }
 }

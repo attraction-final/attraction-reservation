@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.entity;
 
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
@@ -42,5 +43,11 @@ public class Order extends BaseTimeEntity {
 
     public static Order create(User user, int totalAmount) {
         return new Order(user, totalAmount);
+    }
+
+    public void addOrderItem(TicketProduct ticketProduct, int quantity) {
+        // 주문 항목의 부모 참조와 주문의 항목 목록을 함께 설정한다.
+        OrderItem orderItem = OrderItem.create(this, ticketProduct, quantity);
+        this.orderItems.add(orderItem);
     }
 }

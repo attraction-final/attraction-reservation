@@ -77,10 +77,12 @@ class PaymentTest {
 
         //when
         payment.markAsPaid();
+        Instant after = Instant.now();
 
         //then
         assertNotNull(payment.getPaidAt());
         assertFalse(payment.getPaidAt().isBefore(before));
+        assertFalse(payment.getPaidAt().isAfter(after));
     }
 
     @Test

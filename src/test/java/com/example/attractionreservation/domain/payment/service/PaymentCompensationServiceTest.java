@@ -7,6 +7,7 @@ import com.example.attractionreservation.domain.payment.repository.PaymentCompen
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, PaymentCompensationService.class})
+@Import({JpaConfig.class, PaymentCompensationService.class, QuerydslConfig.class})
 class PaymentCompensationServiceTest {
 
     @Autowired

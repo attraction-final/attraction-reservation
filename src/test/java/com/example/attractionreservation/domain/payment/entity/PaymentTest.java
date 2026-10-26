@@ -85,6 +85,23 @@ class PaymentTest {
     }
 
     @Test
+    @DisplayName("결제 완료로 변경하면 결제 완료 시각이 기록된다.")
+    void markAsPaid_pending_PaidAtRecorded() {
+        //given
+        Payment payment = createPayment();
+        Instant before = Instant.now();
+
+        //when
+        payment.markAsPaid(Instant.now());
+        Instant after = Instant.now();
+
+        //then
+        assertNotNull(payment.getPaidAt());
+        assertFalse(payment.getPaidAt().isBefore(before));
+        assertFalse(payment.getPaidAt().isAfter(after));
+    }
+
+    @Test
     @DisplayName("이미 결제 완료 상태면 다시 결제 완료로 변경할 수 없다.")
     void markAsPaid_alreadyPaid_Fail() {
         //given

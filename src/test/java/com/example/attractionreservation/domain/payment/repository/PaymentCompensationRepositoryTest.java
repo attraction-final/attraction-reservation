@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.payment.entity.PaymentCompensati
 import com.example.attractionreservation.domain.payment.entity.enums.CompensationStatus;
 import com.example.attractionreservation.global.config.JpaConfig;
 import jakarta.persistence.EntityManager;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(JpaConfig.class)
+@Import({JpaConfig.class, QuerydslConfig.class})
 class PaymentCompensationRepositoryTest {
 
     @Autowired

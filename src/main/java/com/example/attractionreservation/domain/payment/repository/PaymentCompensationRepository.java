@@ -31,4 +31,13 @@ public interface PaymentCompensationRepository extends JpaRepository<PaymentComp
     List<Long> findProcessableIds(CompensationStatus requested, CompensationStatus failed,
                                   CompensationStatus processing, Instant now, Instant staleBefore,
                                   Pageable pageable);
+
+    // PG 취소 결과를 조회로 확인할 차례인 요청. 조건은 PaymentCompensation.isPgCheckable과 같다.
+    @Query("""
+    SELECT c.id
+    FROM PaymentCompensation c
+    WHERE c.status = :pgPending AND c.nextRetryAt <= :now
+    ORDER BY c.id
+    """)
+    List<Long> findPgCheckableIds(CompensationStatus pgPending, Instant now, Pageable pageable);
 }

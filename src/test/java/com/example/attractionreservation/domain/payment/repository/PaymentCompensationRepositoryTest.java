@@ -3,6 +3,7 @@ package com.example.attractionreservation.domain.payment.repository;
 import com.example.attractionreservation.domain.payment.entity.PaymentCompensation;
 import com.example.attractionreservation.domain.payment.entity.enums.CompensationStatus;
 import com.example.attractionreservation.global.config.JpaConfig;
+import jakarta.persistence.EntityManager;
 import com.example.attractionreservation.global.config.QuerydslConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,9 @@ class PaymentCompensationRepositoryTest {
     @Autowired
     private PaymentCompensationRepository paymentCompensationRepository;
 
+    @Autowired
+    private EntityManager entityManager;
+
     @Test
     @DisplayName("결제 pgId(UUID 36자)와 PG 결제 금액으로 보상 요청을 저장하고 pgId로 조회할 수 있다.")
     void save_compensation_Success() {
@@ -37,6 +41,7 @@ class PaymentCompensationRepositoryTest {
         //when
         paymentCompensationRepository.saveAndFlush(
                 PaymentCompensation.request(pgId, 3_000_000_000L, "결제 금액 불일치", now));
+        entityManager.clear();
 
         //then
         PaymentCompensation found = paymentCompensationRepository.findByPgId(pgId).orElseThrow();

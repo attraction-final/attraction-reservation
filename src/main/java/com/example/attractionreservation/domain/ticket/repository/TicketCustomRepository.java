@@ -6,6 +6,8 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.Optional;
+
 public interface TicketCustomRepository {
 
     Page<Ticket> findAllByUserIdWithCondition(
@@ -15,4 +17,8 @@ public interface TicketCustomRepository {
             TicketStatus status,
             Pageable stablePageable
     );
+
+    Optional<Ticket> findByIdAndOwner_Id(
+            Long ticketId,
+            Long userId);
 }

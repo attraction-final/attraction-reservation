@@ -17,6 +17,7 @@ import org.springframework.data.domain.Sort;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static com.example.attractionreservation.domain.order.entity.QOrder.order;
 import static com.example.attractionreservation.domain.order.entity.QOrderItem.orderItem;
@@ -67,6 +68,25 @@ public class TicketCustomRepositoryImpl implements TicketCustomRepository{
                 stablePageable,
                 total != null ? total : 0L
         );
+    }
+
+    // 내 티켓 상세 조회
+    @Override
+    public Optional<Ticket> findByIdAndOwner_Id(Long ticketId, Long userId) {
+        Ticket result = queryFactory
+                .selectFrom(ticket)
+                .join(ticket.orderItem, orderItem)
+                .join(orderItem.order, order)
+                .where(
+                        ticketIdEq(ticketId),
+                        ownerIdEq(userId)
+                )
+                .fetchOne();
+        return Optional.ofNullable(result);
+    }
+
+    private BooleanExpression ticketIdEq(Long ticketId) {
+        return ticket.id.eq(ticketId);
     }
 
     private BooleanExpression ownerIdEq(Long userId) {

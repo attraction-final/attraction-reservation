@@ -5,9 +5,14 @@ import com.example.attractionreservation.domain.ticketProduct.entity.TicketProdu
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Import;
@@ -18,10 +23,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(JpaConfig.class)
+@Import({JpaConfig.class, QuerydslConfig.class})
 class TicketProductRepositoryTest {
 
     @Autowired
@@ -230,6 +236,117 @@ class TicketProductRepositoryTest {
         assertThat(result.getTotalPages()).isEqualTo(2);
         assertThat(result.getNumber()).isZero();
         assertThat(result.hasNext()).isTrue();
+    }
+
+    @ParameterizedTest
+    @EnumSource(Sort.Direction.class)
+    @DisplayName("요청한 방향에 따라 상품명을 정렬한다")
+    void findAllByCondition_NameSort_AppliesDirection(Sort.Direction direction) {
+        // given
+        ticketProductRepository.save(
+                createProduct("sort-test-B", firstType, TicketProductStatus.ON_SALE)
+        );
+        ticketProductRepository.save(
+                createProduct("sort-test-A", firstType, TicketProductStatus.ON_SALE)
+        );
+        ticketProductRepository.flush();
+
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, "name"));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "sort-test-", null, null, pageable
+        );
+
+        // then
+        String[] expectedNames = direction.isAscending()
+                ? new String[]{"sort-test-A", "sort-test-B"}
+                : new String[]{"sort-test-B", "sort-test-A"};
+
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getName)
+                .containsExactly(expectedNames);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("이름 오름차순 정렬 후 같은 이름은 ID 내림차순으로 정렬한다")
+    void findAllByCondition_MultipleSorts_AppliesPriority() {
+        // given
+        TicketProduct firstB = ticketProductRepository.save(
+                createProduct("multi-sort-B", firstType, TicketProductStatus.ON_SALE)
+        );
+        TicketProduct productA = ticketProductRepository.save(
+                createProduct("multi-sort-A", firstType, TicketProductStatus.ON_SALE)
+        );
+        TicketProduct secondB = ticketProductRepository.save(
+                createProduct("multi-sort-B", firstType, TicketProductStatus.ON_SALE)
+        );
+        ticketProductRepository.flush();
+
+        Pageable pageable = PageRequest.of(
+                0,
+                10,
+                Sort.by(Sort.Order.asc("name"), Sort.Order.desc("id"))
+        );
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "multi-sort-", null, null, pageable
+        );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getId)
+                .containsExactly(
+                        productA.getId(),
+                        secondB.getId(),
+                        firstB.getId()
+                );
+    }
+
+    @Test
+    @DisplayName("검색 조건으로 페이징해도 전체 건수는 검색에 일치하는 상품 수를 반환한다")
+    void findAllByCondition_FilteredPagination_ReturnsFilteredTotal() {
+        // given
+        Pageable pageable = PageRequest.of(1, 1, Sort.by(Sort.Direction.ASC, "id"));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                null,
+                firstType,
+                TicketProductStatus.ON_SALE,
+                pageable
+        );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getName)
+                .containsExactly("롯데월드 종일권");
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(1);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+        assertThat(result.isLast()).isTrue();
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 정렬 필드를 요청하면 예외가 발생한다")
+    void findAllByCondition_InvalidSortProperty_ThrowsException() {
+        // given
+        Pageable pageable = PageRequest.of(
+                0, 10, Sort.by(Sort.Direction.ASC, "unknownField")
+        );
+
+        // when & then
+        assertThatThrownBy(() -> ticketProductRepository.findAllByCondition(
+                null, null, null, pageable
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_SORT_PROPERTY)
+                );
     }
 
     private TicketProduct createProduct(

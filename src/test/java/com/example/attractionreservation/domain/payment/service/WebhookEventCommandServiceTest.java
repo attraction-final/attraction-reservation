@@ -149,7 +149,7 @@ class WebhookEventCommandServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = PaymentSyncResult.class, names = {"COMPENSATION_FAILED", "STATE_CONFLICT"})
+    @EnumSource(value = PaymentSyncResult.class, names = "STATE_CONFLICT")
     @DisplayName("수동 처리가 필요한 결과는 재시도 없이 DEAD로 기록한다.")
     void recordResult_manualRequired_Dead(PaymentSyncResult result) {
         //given

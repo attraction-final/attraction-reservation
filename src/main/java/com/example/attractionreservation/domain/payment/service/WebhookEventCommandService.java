@@ -85,7 +85,6 @@ public class WebhookEventCommandService {
 
         switch (result) {
             case NOT_OUR_PAYMENT -> event.markAsIgnored(now);
-            case COMPENSATION_FAILED -> event.markAsDead("PG 보상 취소 실패: 수동 환불 필요", now);
             case STATE_CONFLICT -> event.markAsDead("원장 상태와 충돌: 수동 확인 필요", now);
             case APPROVED, ALREADY_DONE, NOT_PAID, PG_FAILED, COMPENSATED -> event.markAsProcessed(now);
         }

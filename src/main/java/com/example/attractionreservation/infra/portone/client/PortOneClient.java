@@ -56,6 +56,12 @@ public class PortOneClient implements PaymentGateway {
         }
     }
 
+    /**
+     * 멱등 키는 호출마다 새로 만들고, 한 호출 안의 통신 재시도에서만 같은 키를 쓴다.
+     * PortOne은 같은 키의 응답(실패 포함)을 3시간 동안 저장해 돌려주므로, 호출 간에 키를 고정하면
+     * 한 번 실패한 취소를 다시 시도해도 저장된 실패 응답만 받게 된다.
+     * 호출이 겹쳐 같은 결제를 두 번 전체 취소해도 두 번째는 PAYMENT_ALREADY_CANCELLED로 성공 처리된다.
+     */
     @Override
     public void cancelPayment(String pgId, String reason, Long amount) {
         String idempotencyKey = UUID.randomUUID().toString();

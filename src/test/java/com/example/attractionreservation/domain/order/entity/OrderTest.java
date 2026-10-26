@@ -72,7 +72,7 @@ class OrderTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = OrderStatus.class, names = {"PAID", "PARTIALLY_REFUNDED"})
+    @EnumSource(value = OrderStatus.class, names = {"COMPLETED", "PARTIALLY_REFUNDED"})
     @DisplayName("결제 완료·부분 환불 상태의 주문은 부분 환불로 변경할 수 있다.")
     void markAsPartiallyRefunded_refundable_Success(OrderStatus status) {
         //given
@@ -87,7 +87,7 @@ class OrderTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PAID", "PARTIALLY_REFUNDED"})
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"COMPLETED", "PARTIALLY_REFUNDED"})
     @DisplayName("결제 완료·부분 환불 상태가 아닌 주문은 부분 환불로 변경할 수 없다.")
     void markAsPartiallyRefunded_notRefundable_Fail(OrderStatus status) {
         //given
@@ -102,7 +102,7 @@ class OrderTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = OrderStatus.class, names = {"PAID", "PARTIALLY_REFUNDED"})
+    @EnumSource(value = OrderStatus.class, names = {"COMPLETED", "PARTIALLY_REFUNDED"})
     @DisplayName("결제 완료·부분 환불 상태의 주문은 전체 환불로 변경할 수 있다.")
     void markAsRefunded_refundable_Success(OrderStatus status) {
         //given
@@ -117,7 +117,7 @@ class OrderTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PAID", "PARTIALLY_REFUNDED"})
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"COMPLETED", "PARTIALLY_REFUNDED"})
     @DisplayName("결제 완료·부분 환불 상태가 아닌 주문은 전체 환불로 변경할 수 없다.")
     void markAsRefunded_notRefundable_Fail(OrderStatus status) {
         //given

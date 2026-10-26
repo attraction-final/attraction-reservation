@@ -239,7 +239,7 @@ class PaymentServiceConcurrencyTest {
         Payment result = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(result.getPaidAt()).isEqualTo(firstApprovedAt);
-        assertThat(findOrderStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.COMPLETED);
     }
 
     @Test
@@ -313,7 +313,7 @@ class PaymentServiceConcurrencyTest {
         //then
         Payment payment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
-        assertThat(findOrderStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.COMPLETED);
     }
 
     private OrderStatus findOrderStatus() {

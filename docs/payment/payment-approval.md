@@ -225,7 +225,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PAYMENT_INCORRECT_AMOUNT` | 400 | PG 금액과 원장 금액 불일치 (PG 보상 취소 수행) |
 | `PAYMENT_INVALID_STATUS_TRANSITION` | 409 | 결제 상태 전이 불가 |
 | `ORDER_INVALID_STATUS_TRANSITION` | 409 | 주문 상태 전이 불가 |
-| `PAYMENT_PG_FAILED` | 502 | PG에서 결제 실패 |
+| `PAYMENT_PG_FAILED` | 409 | PG에서 결제 실패 (카드 거절·잔액 부족·결제 중단 등). 결제사 장애가 아니므로 5xx가 아니며, 결제가 실패 상태가 되어 승인할 수 없다. PG 실패 사유는 응답에 넣지 않는다 |
 | `PAYMENT_GATEWAY_ERROR` | 502 | PortOne 조회 실패, 응답 필수값 누락 |
 | `PAYMENT_CANCELLATION_FAILED` | 502 | PortOne 취소 실패 |
 | `CONCURRENT_UPDATE_CONFLICT` | 409 | 비관적 락 획득 실패 |
@@ -276,7 +276,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 - `io.portone:server-sdk` 의존성은 웹훅 서명 검증(`WebhookVerifier`)에만 사용한다. 결제 조회·취소는 `RestClient`로 직접 호출한다.
 - PG 연동 컨트롤러(`PortOneConfigController`, `PortOneWebhookController`)는 infra에 둔다. `architecture.md`에 이 기준을 추가할지 팀과 정한다.
 - `PAYMENT_INVALID_STATUS_TRANSITION`과 `ORDER_INVALID_STATUS_TRANSITION` 메시지가 같아 구분 불가.
-- 오류 코드 검토: `PAYMENT_INCORRECT_AMOUNT`(400 → 409?), `PAYMENT_PG_FAILED`(사용자 사유 실패도 502).
+- 오류 코드 검토: `PAYMENT_INCORRECT_AMOUNT`(400 → 409?). (`PAYMENT_PG_FAILED`는 502 → 409로 변경함)
 - 이름 규칙: `cancelledByUser` → `cancelPaymentByUser`, `getOwnedPayment` → `findOwnedPayment`, `findByPgIdAndUserId` → 파생 쿼리 `findByPgIdAndOrderUserId`.
 - 결제 준비 API 또는 주문 생성 응답에 `paymentId`, `amount`, `orderName` 포함 (`createPayment` 호출처 미정).
 

@@ -1,17 +1,21 @@
 package com.example.attractionreservation.domain.ticket.service;
 
-import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition;
-import com.example.attractionreservation.domain.ticket.dto.SearchTicketDetailResponse;
-import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
+import com.example.attractionreservation.domain.ticket.dto.*;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
+import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.*;
 
 @Service
 @RequiredArgsConstructor
@@ -39,5 +43,29 @@ public class TicketService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
 
         return SearchTicketDetailResponse.from(ticket);
+    }
+
+    // 티켓 입장 처리
+    // TODO: 동시성 처리 필요
+    @Transactional
+    public CreateTicketEntryResponse createTicketEntry(CreateTicketEntryRequest request) {
+
+        // 티켓 코드로 입장권을 조회
+        Ticket ticket = ticketRepository.findByCode(request.ticketCode())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
+
+        // 현재 순간을 저장
+        Instant now = Instant.now();
+
+        // 검증에 성공하면 UNUSED에서 IN_USE로 변경하고 서버 시각을 enteredAt에 기록한다.
+        ticket.entryTicket(now);
+
+        return CreateTicketEntryResponse.from(ticket);
+    }
+
+    // 예약 - 티켓 찾기
+    public Ticket findByTicketId(Long ticketId) {
+        return ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
     }
 }

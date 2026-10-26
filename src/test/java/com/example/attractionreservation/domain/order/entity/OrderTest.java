@@ -25,7 +25,7 @@ class OrderTest {
         order.markAsPaid();
 
         //then
-        assertEquals(OrderStatus.PAID, order.getStatus());
+        assertEquals(OrderStatus.COMPLETED, order.getStatus());
     }
 
     @ParameterizedTest

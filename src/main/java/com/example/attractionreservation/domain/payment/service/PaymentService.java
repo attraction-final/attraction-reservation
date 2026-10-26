@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.payment.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.payment.dto.PaymentDetailResponse;
 import com.example.attractionreservation.domain.payment.dto.PaymentResponse;
 import com.example.attractionreservation.domain.payment.dto.SearchPaymentCondition;
 import com.example.attractionreservation.domain.payment.entity.Payment;
@@ -38,6 +39,14 @@ public class PaymentService {
     public PageableDto<PaymentResponse> findAllPaymentsByUserId(Long userId, SearchPaymentCondition condition,
                                                                 Pageable pageable) {
         return PageableDto.from(paymentRepository.searchAllByUserId(userId, pageable, condition));
+    }
+
+    // 다른 사용자의 결제는 존재 여부를 노출하지 않도록 동일하게 PAYMENT_NOT_FOUND 처리
+    @Transactional(readOnly = true)
+    public PaymentDetailResponse findPaymentById(Long userId, Long paymentId) {
+        return paymentRepository.findByIdAndOrderUserId(paymentId, userId)
+                .map(PaymentDetailResponse::from)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
 
     @Transactional

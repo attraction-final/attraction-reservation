@@ -10,12 +10,13 @@ import com.querydsl.core.types.Order;
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.Projections;
 import com.querydsl.core.types.dsl.BooleanExpression;
+import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManager;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.support.PageableExecutionUtils;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
@@ -50,16 +51,15 @@ public class PaymentCustomRepositoryImpl implements PaymentCustomRepository {
                 .limit(pageable.getPageSize())
                 .fetch();
 
-        Long total = queryFactory.select(payment.count())
+        JPAQuery<Long> countQuery = queryFactory.select(payment.count())
                 .from(payment)
-                .where(allConditions(userId, condition))
-                .fetchOne();
+                .where(allConditions(userId, condition));
 
-        return new PageImpl<>(
-                list,
-                pageable,
-                total != null ? total : 0
-        );
+        return PageableExecutionUtils.getPage(list, pageable, () -> {
+            Long total = countQuery.fetchOne();
+
+            return total != null ? total : 0L;
+        });
     }
 
     private BooleanBuilder allConditions(Long userId, SearchPaymentCondition condition) {

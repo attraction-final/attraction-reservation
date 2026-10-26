@@ -6,13 +6,13 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
-import java.time.LocalDate;
+import java.time.*;
 import java.util.UUID;
 
 @Getter
@@ -67,5 +67,45 @@ public class Ticket extends BaseTimeEntity {
         this.name = orderItem.getTicketProduct().getName();
         this.type = orderItem.getTicketProduct().getType();
         this.orderItem = orderItem;
+    }
+
+    // 티켓 입장 처리
+    public void entryTicket(Instant now) {
+        LocalDateTime kstNow = KstTime.toLocalDateTime(now);
+
+        if (kstNow == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_ENTRY_TIME);
+        }
+
+        validateEntryStatus();
+        validateEntryDate(kstNow.toLocalDate());
+        validateEntryTime(kstNow.toLocalTime());
+
+        this.status = TicketStatus.IN_USE;
+        this.enteredAt = now;
+    }
+
+    // 입장 상태 검증
+    private void validateEntryStatus() {
+        if (this.status != TicketStatus.UNUSED) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_NOT_ALLOWED_STATUS);
+        }
+    }
+
+    // 입장권 날짜 검증
+    private void validateEntryDate(LocalDate today) {
+        if (!this.validDate.equals(today)) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_DATE_MISMATCH);
+        }
+    }
+
+    // 입장권 시간 검증
+    private void validateEntryTime(LocalTime currentTime) {
+        LocalTime opensAt = this.type.getAvailableFrom();
+        LocalTime closesAt = LocalTime.of(22, 0);
+
+        if (currentTime.isBefore(opensAt) || !currentTime.isBefore(closesAt)) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_TIME_NOT_ALLOWED);
+        }
     }
 }

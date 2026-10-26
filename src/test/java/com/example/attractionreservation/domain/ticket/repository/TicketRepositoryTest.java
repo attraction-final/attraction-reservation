@@ -2,8 +2,11 @@ package com.example.attractionreservation.domain.ticket.repository;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition;
+import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
@@ -266,6 +269,39 @@ class TicketRepositoryTest {
         // then
         assertThat(ticketRepository.findById(requestedTicketId)).isPresent();
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("실제 Repository로 내 티켓을 조회하고 응답 DTO로 변환한다")
+    void findTicketAll_RealRepository_ReturnsResponseDtos() {
+        // given
+        TicketService ticketService = new TicketService(ticketRepository);
+        SearchTicketCondition condition =
+                new SearchTicketCondition(null, null, null);
+        Pageable pageable = PageRequest.of(
+                0, 10, Sort.by(Sort.Direction.ASC, "id")
+        );
+
+        // when
+        Page<SearchTicketResponse> result =
+                ticketService.findTicketAll(userId, condition, pageable);
+
+        // then
+        assertThat(result.getTotalElements()).isEqualTo(3);
+        assertThat(result.getContent())
+                .extracting(SearchTicketResponse::ticketId)
+                .containsExactly(
+                        firstTicketId,
+                        secondTicketId,
+                        thirdTicketId
+                );
+        assertThat(result.getContent())
+                .extracting(SearchTicketResponse::name)
+                .containsExactly(
+                        "종일 기본 이용권",
+                        "종일 특별 이용권",
+                        "오후 이용권"
+                );
     }
 
     private Page<Ticket> search(

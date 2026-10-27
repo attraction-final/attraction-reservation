@@ -70,7 +70,7 @@ class PaymentCustomRepositoryImplTest {
     void searchAllByUserId_statusCondition_ReturnsMatchingOnly() {
         //given
         Payment paid = savePayment(user);
-        paid.markAsPaid();
+        paid.markAsPaid(Instant.parse("2026-01-01T00:00:00Z"));
         savePayment(user);
         em.flush();
 
@@ -89,7 +89,7 @@ class PaymentCustomRepositoryImplTest {
     void searchAllByUserId_nullStatus_ReturnsAll() {
         //given
         Payment paid = savePayment(user);
-        paid.markAsPaid();
+        paid.markAsPaid(Instant.parse("2026-01-01T00:00:00Z"));
         savePayment(user);
         em.flush();
 
@@ -365,10 +365,10 @@ class PaymentCustomRepositoryImplTest {
         return em.persist(Payment.create(order));
     }
 
-    // paidAt은 markAsPaid 호출 시점으로 채워지므로, 정렬 검증을 위해 DB 값을 직접 변경
+    // 정렬 검증을 위해 DB의 paid_at도 같은 값으로 직접 맞춘다
     private Payment savePaidPayment(User owner, Instant paidAt) {
         Payment payment = savePayment(owner);
-        payment.markAsPaid();
+        payment.markAsPaid(paidAt);
         em.flush();
         em.getEntityManager()
                 .createNativeQuery("update payments set paid_at = :paidAt where id = :id")

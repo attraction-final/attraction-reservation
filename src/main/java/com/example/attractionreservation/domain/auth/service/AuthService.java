@@ -1,6 +1,7 @@
 
 package com.example.attractionreservation.domain.auth.service;
 
+import com.example.attractionreservation.domain.user.entity.AuthProvider;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
@@ -112,7 +113,13 @@ public class AuthService {
         User user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_LOGIN_CREDENTIALS));
 
-        if (!passwordEncoder.matches(request.password(), user.getPassword())) {
+        // 소셜 회원은 비밀번호가 없으므로 이메일·비밀번호 로그인을 허용하지 않는다.
+        if (user.getProvider() != AuthProvider.LOCAL
+                || user.getPassword() == null
+                || !passwordEncoder.matches(
+                request.password(),
+                user.getPassword()
+        )) {
             throw new BusinessException(ErrorCode.INVALID_LOGIN_CREDENTIALS);
         }
 

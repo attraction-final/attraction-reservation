@@ -35,6 +35,7 @@ class TicketDetailServiceTest {
     private static final Long PRODUCT_ID = 10L;
     private static final LocalDate VALID_DATE =
             LocalDate.of(2026, 10, 25);
+    private static final Long USER_ID = 100L;
 
     @Mock
     private TicketRepository ticketRepository;
@@ -49,12 +50,12 @@ class TicketDetailServiceTest {
         // given
         Ticket ticket = createTicket(status, null);
 
-        when(ticketRepository.findById(TICKET_ID))
+        when(ticketRepository.findByIdAndOwner_Id(TICKET_ID, USER_ID))
                 .thenReturn(Optional.of(ticket));
 
         // when
         SearchTicketDetailResponse response =
-                ticketService.findTicketById(TICKET_ID);
+                ticketService.findTicketById(USER_ID, TICKET_ID);
 
         // then
         assertThat(response).isEqualTo(
@@ -70,7 +71,7 @@ class TicketDetailServiceTest {
                 )
         );
 
-        verify(ticketRepository).findById(TICKET_ID);
+        verify(ticketRepository).findByIdAndOwner_Id(TICKET_ID, USER_ID);
     }
 
     @Test
@@ -80,38 +81,38 @@ class TicketDetailServiceTest {
         Instant enteredAt = Instant.parse("2026-10-25T01:00:00Z");
         Ticket ticket = createTicket(TicketStatus.IN_USE, enteredAt);
 
-        when(ticketRepository.findById(TICKET_ID))
+        when(ticketRepository.findByIdAndOwner_Id(TICKET_ID, USER_ID))
                 .thenReturn(Optional.of(ticket));
 
         // when
         SearchTicketDetailResponse response =
-                ticketService.findTicketById(TICKET_ID);
+                ticketService.findTicketById(USER_ID, TICKET_ID);
 
         // then
         assertThat(response.enteredAt()).isEqualTo(enteredAt);
         assertThat(response.status()).isEqualTo(TicketStatus.IN_USE);
 
-        verify(ticketRepository).findById(TICKET_ID);
+        verify(ticketRepository).findByIdAndOwner_Id(TICKET_ID, USER_ID);
     }
 
     @Test
-    @DisplayName("존재하지 않는 티켓은 TICKET_NOT_FOUND 예외를 발생시킨다")
+    @DisplayName("조회 가능한 본인 티켓이 없으면 TICKET_NOT_FOUND 예외를 발생시킨다")
     void findTicketById_NotFound_ThrowsException() {
         // given
         Long ticketId = 999L;
 
-        when(ticketRepository.findById(ticketId))
+        when(ticketRepository.findByIdAndOwner_Id(ticketId, USER_ID))
                 .thenReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> ticketService.findTicketById(ticketId))
+        assertThatThrownBy(() -> ticketService.findTicketById(USER_ID, ticketId))
                 .isInstanceOfSatisfying(
                         BusinessException.class,
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.TICKET_NOT_FOUND)
                 );
 
-        verify(ticketRepository).findById(ticketId);
+        verify(ticketRepository).findByIdAndOwner_Id(ticketId, USER_ID);
     }
 
     private Ticket createTicket(TicketStatus status, Instant enteredAt) {

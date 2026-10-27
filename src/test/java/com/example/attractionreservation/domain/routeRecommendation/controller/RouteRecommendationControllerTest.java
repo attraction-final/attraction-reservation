@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.TravelTimeBasis;
@@ -12,9 +13,11 @@ import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.config.SecurityConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.response.PageableDto;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -144,6 +147,79 @@ public class RouteRecommendationControllerTest {
         mockMvc.perform(get("/api/route-recommendations/abc")
                         .with(authenticatedMember()))
                 .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(routeRecommendationService);
+    }
+
+
+
+    //목록 조회
+    private PageableDto<SearchRouteRecommendationSummaryResponse> summaryPage() {
+        SearchRouteRecommendationSummaryResponse summary = new SearchRouteRecommendationSummaryResponse(
+                1L, 5001L, at("13:00"), at("18:00"),
+                StartLocation.ENTRANCE, TravelTimeBasis.ENTRANCE_FIXED, RouteResultType.PARTIAL,
+                5, 3, 37, 83, 40, 160, at("15:40"), at("12:00"));
+        return new PageableDto<>(List.of(summary), 0, 10, 1, 1, false);
+    }
+
+    @Test
+    @DisplayName("인증된 회원의 추천 경로 목록을 HTTP 200으로 반환한다")
+    void getRouteRecommendationAll_authenticated_returnsOk() throws Exception {
+        // given
+        when(routeRecommendationService.findRouteRecommendations(1L, 0, 10)).thenReturn(summaryPage());
+
+        // when & then
+        mockMvc.perform(get("/api/route-recommendations")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .with(authenticatedMember()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("추천 경로 목록 조회에 성공했습니다."))
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].recommendationId").value(1))
+                .andExpect(jsonPath("$.data.content[0].totalRecommendedAttractions").value(3))
+                .andExpect(jsonPath("$.data.content[0].createdAt").value("2026-10-20T12:00:00"))
+                .andExpect(jsonPath("$.data.content[0].visits").doesNotExist())   // 목록에는 방문 일정 없음
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("page, size 를 생략하면 0페이지 10개로 조회한다")
+    void getRouteRecommendationAll_noParams_usesDefaults() throws Exception {
+        // given
+        when(routeRecommendationService.findRouteRecommendations(1L, 0, 10)).thenReturn(summaryPage());
+
+        // when & then
+        mockMvc.perform(get("/api/route-recommendations")
+                        .with(authenticatedMember()))
+                .andExpect(status().isOk());
+
+        verify(routeRecommendationService).findRouteRecommendations(1L, 0, 10);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"page, -1", "size, 0", "size, 101", "size, abc"})
+    @DisplayName("page 가 0 미만이거나 size 가 1~100 밖이거나 숫자가 아니면 HTTP 400을 반환한다")
+    void getRouteRecommendationAll_invalidPaging_returnsBadRequest(String name, String value) throws Exception {
+        // when & then
+        mockMvc.perform(get("/api/route-recommendations")
+                        .param(name, value)
+                        .with(authenticatedMember()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(routeRecommendationService);
+    }
+
+    @Test
+    @DisplayName("인증 없이 추천 경로 목록을 조회하면 HTTP 401을 반환한다")
+    void getRouteRecommendationAll_unauthenticated_returnsUnauthorized() throws Exception {
+        // when & then
+        mockMvc.perform(get("/api/route-recommendations"))
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(routeRecommendationService);
     }

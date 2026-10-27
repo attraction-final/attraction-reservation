@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.enums
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.TravelTimeBasis;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -127,7 +128,7 @@ public class RouteRecommendation extends BaseTimeEntity {
        this.totalWaitMinutes = stops.stream().mapToInt(RouteRecommendationStop::getEstimatedWaitMin).sum();
        this.totalRideMinutes = stops.stream().mapToInt(RouteRecommendationStop::getEstimatedRideMin).sum();
        this.estimatedEndAt =lastStop.getSlotEndAt();
-       this.totalDurationMinutes = (int) Duration.between(startAt, estimatedEndAt).toMinutes();
+       this.totalDurationMinutes = (int) Duration.between(startAt.atZone(KstTime.ZONE), estimatedEndAt.atZone(KstTime.ZONE)).toMinutes();
    }
     public boolean isDeleted() {
         return deletedAt != null;

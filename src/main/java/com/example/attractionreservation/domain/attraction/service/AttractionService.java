@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -28,6 +29,7 @@ public class AttractionService {
 
     private final AttractionRepository attractionRepository;
     private final UpcomingReservationReader upcomingReservationReader;
+    private final AttractionSlotRepository attractionSlotRepository; // nextSlot 조회용
 
     // 어트랙션 등록
     @Transactional
@@ -95,12 +97,12 @@ public class AttractionService {
 
         // 같은 어트랙션의 슬롯이 여러 개면 시작 시각이 가장 빠른 슬롯을 남긴다.
         // (쿼리의 정렬 순서에 의존하지 않도록 직접 비교)
-        return attractionRepository.findReservableSlots(operatingAttractionIds, reservableFrom, todayEnd)
+        return attractionSlotRepository.findReservableSlots(operatingAttractionIds, reservableFrom, todayEnd)
                 .stream()
                 .collect(Collectors.toMap(
-                        ReservableSlotView::getAttractionId,
+                        ReservableSlotView::attractionId,   // getAttractionId → attractionId
                         Function.identity(),
-                        BinaryOperator.minBy(Comparator.comparing(ReservableSlotView::getStartsAt))
+                        BinaryOperator.minBy(Comparator.comparing(ReservableSlotView::startsAt)) // getStartsAt → startsAt
                 ));
     }
 

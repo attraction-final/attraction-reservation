@@ -71,7 +71,7 @@ class TicketProductSearchServiceTest {
 
         // when
         Page<SearchTicketProductResponse> result =
-                ticketProductService.getTicketProductAll(condition, pageable);
+                ticketProductService.findTicketProductAll(condition, pageable);
 
         // then
         assertThat(result.getContent()).containsExactly(
@@ -112,7 +112,7 @@ class TicketProductSearchServiceTest {
 
         // when
         Page<SearchTicketProductResponse> result =
-                ticketProductService.getTicketProductAll(condition, pageable);
+                ticketProductService.findTicketProductAll(condition, pageable);
 
         // then
         assertThat(result.getContent()).isEmpty();

@@ -66,9 +66,9 @@ public record SearchAttractionListResponse(
 
         public static NextSlot from(ReservableSlotView slotView) {
             return new NextSlot(
-                    slotView.getSlotId(),
-                    slotView.getStartsAt(),
-                    slotView.getRemainingCount()
+                    slotView.slotId(),          // getSlotId()         → slotId()
+                    slotView.startsAt(),        // getStartsAt()       → startsAt()
+                    slotView.remainingCount()   // getRemainingCount() → remainingCount()
             );
         }
     }

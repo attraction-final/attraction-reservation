@@ -44,6 +44,9 @@ public enum ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "유저를 찾을 수 없습니다."),
+    USER_STATUS_SAME(HttpStatus.CONFLICT, "현재 회원 상태와 동일합니다."),
+    USER_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "허용되지 않는 회원 상태 변경입니다."),
+
     // auth
     INVALID_LOGIN_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
     USER_NOT_ACTIVE(HttpStatus.FORBIDDEN, "이용할 수 없는 회원 상태입니다."),

@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepository;
 import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
@@ -35,6 +36,9 @@ class UserServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
     private PasswordEncoder passwordEncoder;
     private UserService userService;
 
@@ -42,7 +46,11 @@ class UserServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         passwordEncoder = new BCryptPasswordEncoder();
-        userService = new UserService(userRepository, passwordEncoder);
+        userService = new UserService(
+                userRepository,
+                passwordEncoder,
+                refreshTokenRepository
+        );
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.entity;
 
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -50,6 +52,30 @@ public class User extends BaseTimeEntity {
         this.role = (role != null) ? role : Role.USER;
         this.status = UserStatus.ACTIVE;
     }
+    public void updateStatus(UserStatus newStatus) {
+        if (this.status == newStatus) {
+            throw new BusinessException(ErrorCode.USER_STATUS_SAME);
+        }
+
+        // 관리자 상태 변경에서는 본인 탈퇴 절차를 우회할 수 없도록 전이를 제한한다.
+        boolean canChange = switch (this.status) {
+            case ACTIVE ->
+                    newStatus == UserStatus.INACTIVE
+                            || newStatus == UserStatus.SUSPENDED;
+            case INACTIVE, SUSPENDED ->
+                    newStatus == UserStatus.ACTIVE;
+            case WITHDRAWN -> false;
+        };
+
+        if (!canChange) {
+            throw new BusinessException(
+                    ErrorCode.USER_INVALID_STATUS_TRANSITION
+            );
+        }
+
+        this.status = newStatus;
+    }
+
     public void updateNickname(String nickname) {
         this.nickname = nickname;
     }

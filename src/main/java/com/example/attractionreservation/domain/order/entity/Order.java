@@ -79,7 +79,7 @@ public class Order extends BaseTimeEntity {
 
         this.status = OrderStatus.REFUNDED;
     }
-  
+
     public void addOrderItem(TicketProduct ticketProduct, int quantity) {
         // 주문 항목의 부모 참조와 주문의 항목 목록을 함께 설정한다.
         OrderItem orderItem = OrderItem.create(this, ticketProduct, quantity);

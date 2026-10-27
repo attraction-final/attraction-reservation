@@ -195,6 +195,49 @@ class WebhookEventTest {
     }
 
     @Test
+    @DisplayName("네 번째 실패까지는 DEAD가 아니라 FAILED가 되고 8분 뒤 재시도로 예약된다.")
+    void markAsFailed_fourthAttempt_RetryAfterEightMinutes() {
+        //given
+        WebhookEvent event = createEvent();
+        for (int i = 0; i < 3; i++) {
+            event.markAsProcessing();
+            event.markAsFailed("error", NOW);
+        }
+        event.markAsProcessing();
+
+        //when
+        event.markAsFailed("error", NOW);
+
+        //then
+        assertEquals(WebhookStatus.FAILED, event.getStatus());
+        assertEquals(4, event.getAttemptCount());
+        assertEquals(NOW.plus(Duration.ofMinutes(8)), event.getNextRetryAt());
+        assertNull(event.getProcessedAt());
+    }
+
+    @Test
+    @DisplayName("다섯 번째 실패에서 DEAD가 되고 재시도 예약 없이 처리 종료 시각이 기록된다.")
+    void markAsFailed_fifthAttempt_Dead() {
+        //given
+        WebhookEvent event = createEvent();
+        for (int i = 0; i < 4; i++) {
+            event.markAsProcessing();
+            event.markAsFailed("error", NOW);
+        }
+        event.markAsProcessing();
+
+        //when
+        event.markAsFailed("마지막 실패", NOW);
+
+        //then
+        assertEquals(WebhookStatus.DEAD, event.getStatus());
+        assertEquals(5, event.getAttemptCount());
+        assertNull(event.getNextRetryAt());
+        assertEquals(NOW, event.getProcessedAt());
+        assertEquals("마지막 실패", event.getLastError());
+    }
+
+    @Test
     @DisplayName("실패 사유가 500자를 넘으면 500자로 잘라 저장한다.")
     void markAsFailed_longError_Truncated() {
         //given
@@ -295,6 +338,7 @@ class WebhookEventTest {
         WebhookEvent event = createEvent();
         switch (status) {
             case RECEIVED -> {
+                // 생성 직후 상태가 RECEIVED이므로 추가 전이가 필요 없다.
             }
             case PROCESSING -> event.markAsProcessing();
             case FAILED -> {

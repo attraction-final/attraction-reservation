@@ -10,6 +10,7 @@ import com.example.attractionreservation.domain.payment.entity.enums.PaymentStat
 import com.example.attractionreservation.domain.payment.repository.PaymentCompensationRepository;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
@@ -37,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class})
+@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, QuerydslConfig.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PaymentCompensationOutboxTest {
 

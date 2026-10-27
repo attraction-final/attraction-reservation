@@ -3,6 +3,7 @@ package com.example.attractionreservation.domain.payment.repository;
 import com.example.attractionreservation.domain.payment.entity.WebhookEvent;
 import com.example.attractionreservation.domain.payment.entity.enums.WebhookStatus;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(JpaConfig.class)
+@Import({JpaConfig.class, QuerydslConfig.class})
 class WebhookEventRepositoryTest {
 
     @Autowired
@@ -57,10 +58,10 @@ class WebhookEventRepositoryTest {
     void save_duplicateWebhookId_Fail() {
         //given
         webhookEventRepository.saveAndFlush(WebhookEvent.receive("webhook-1", "pg-id", "WebhookTransactionPaid", "{}"));
+        WebhookEvent duplicate = WebhookEvent.receive("webhook-1", "pg-id", "WebhookTransactionPaid", "{}");
 
         //when & then
-        assertThatThrownBy(() -> webhookEventRepository.saveAndFlush(
-                WebhookEvent.receive("webhook-1", "pg-id", "WebhookTransactionPaid", "{}")))
+        assertThatThrownBy(() -> webhookEventRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

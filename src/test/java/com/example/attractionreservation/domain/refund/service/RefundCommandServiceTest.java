@@ -15,6 +15,7 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
@@ -41,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, RefundCommandService.class})
+@Import({JpaConfig.class, RefundCommandService.class, QuerydslConfig.class})
 class RefundCommandServiceTest {
 
     @Autowired

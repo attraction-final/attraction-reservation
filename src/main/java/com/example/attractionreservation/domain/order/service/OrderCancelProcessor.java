@@ -1,7 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
-import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.payment.service.PaymentService;
@@ -15,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor

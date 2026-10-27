@@ -2,7 +2,6 @@ package com.example.attractionreservation.domain.order.service;
 
 import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
-import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.payment.entity.Payment;
@@ -29,7 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -86,6 +85,8 @@ class OrderStockConcurrencyTest {
     @AfterEach
     void tearDown() {
         transactionTemplate.executeWithoutResult(status -> {
+            // 결제 승인과 취소가 경쟁하면 보상 요청이 저장될 수 있으므로 함께 정리한다.
+            entityManager.createQuery("delete from PaymentCompensation").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
             entityManager.createQuery("delete from OrderItem").executeUpdate();
             entityManager.createQuery("delete from Order").executeUpdate();
@@ -111,9 +112,9 @@ class OrderStockConcurrencyTest {
         List<Throwable> failures = runConcurrently(tasks);
 
         // then: 재고 수만큼만 성공하고 나머지는 재고 부족으로 거절된다.
-        long successCount = failures.stream().filter(failure -> failure == null).count();
+        long successCount = failures.stream().filter(Objects::isNull).count();
         assertThat(successCount).isEqualTo(stock);
-        assertThat(failures.stream().filter(failure -> failure != null))
+        assertThat(actualFailures(failures)).isNotEmpty()
                 .allSatisfy(failure -> assertThat(failure)
                         .isInstanceOfSatisfying(BusinessException.class, exception ->
                                 assertThat(exception.getErrorCode())
@@ -152,7 +153,7 @@ class OrderStockConcurrencyTest {
         List<Throwable> failures = runConcurrently(tasks);
 
         // then
-        assertThat(failures).allMatch(failure -> failure == null);
+        assertThat(failures).hasSize(20).containsOnlyNulls();
         assertThat(ticketProductRepository.findById(firstProductId).orElseThrow().getStock())
                 .isEqualTo(980);
         assertThat(ticketProductRepository.findById(secondProductId).orElseThrow().getStock())
@@ -201,7 +202,7 @@ class OrderStockConcurrencyTest {
         List<Throwable> failures = runConcurrently(tasks);
 
         // then: 먼저 처리한 하나만 복구하고, 나머지는 취소할 수 없는 주문으로 거절되거나 건너뛴다.
-        assertThat(failures.stream().filter(failure -> failure != null))
+        assertThat(actualFailures(failures)).isNotEmpty()
                 .allSatisfy(failure -> assertThat(failure)
                         .isInstanceOfSatisfying(BusinessException.class, exception ->
                                 assertThat(exception.getErrorCode())
@@ -235,7 +236,7 @@ class OrderStockConcurrencyTest {
         List<Throwable> failures = runConcurrently(tasks);
 
         // then: 먼저 처리한 쪽만 복구하고, 나머지는 취소할 수 없는 주문으로 거절되거나 건너뛴다.
-        assertThat(failures.stream().filter(failure -> failure != null))
+        assertThat(actualFailures(failures)).isNotEmpty()
                 .allSatisfy(failure -> assertThat(failure)
                         .isInstanceOfSatisfying(BusinessException.class, exception ->
                                 assertThat(exception.getErrorCode())
@@ -267,7 +268,7 @@ class OrderStockConcurrencyTest {
         List<Throwable> failures = runConcurrently(tasks);
 
         // then: 결제 승인은 예외 없이 끝나고, 취소는 이긴 한 번을 빼면 취소할 수 없는 주문으로 거절된다.
-        assertThat(failures.stream().filter(failure -> failure != null))
+        assertThat(actualFailures(failures)).isNotEmpty()
                 .allSatisfy(failure -> assertThat(failure)
                         .isInstanceOfSatisfying(BusinessException.class, exception ->
                                 assertThat(exception.getErrorCode())
@@ -299,6 +300,11 @@ class OrderStockConcurrencyTest {
         return new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(productId, quantity)
         ));
+    }
+
+    // 작업 결과에서 실제 실패(예외)만 골라낸다. 성공한 작업의 결과는 null이다.
+    private List<Throwable> actualFailures(List<Throwable> results) {
+        return results.stream().filter(Objects::nonNull).toList();
     }
 
     // 모든 작업을 같은 시점에 시작시키고, 작업별 실패(성공이면 null)를 모아 반환한다.

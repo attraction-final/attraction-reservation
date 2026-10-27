@@ -4,9 +4,9 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
-import com.example.attractionreservation.domain.reservation.entity.Reservation;                 
-import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     
-import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   
+import com.example.attractionreservation.domain.reservation.entity.Reservation;                 // ★ 추가
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     // ★ 추가
+import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   // ★ 추가
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.AttractionView;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelection;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
@@ -43,6 +43,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
+import com.example.attractionreservation.domain.routeRecommendation.repository.StopCount;
+import com.example.attractionreservation.global.response.PageableDto;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 @Service
 @RequiredArgsConstructor
@@ -90,7 +97,6 @@ public class RouteRecommendationService {
         return SearchRouteRecommendationResponse.from(routeRecommendationRepository.save(recommendation));
     }
 
-
     @Transactional(readOnly = true)
     public SearchRouteRecommendationResponse findRouteRecommendationById(Long userId, Long recommendationId) {
         RouteRecommendation recommendation = routeRecommendationRepository.findDetailById(recommendationId)
@@ -98,6 +104,19 @@ public class RouteRecommendationService {
 
         validateOwner(recommendation, userId);
         return SearchRouteRecommendationResponse.from(recommendation);
+    }
+
+    @Transactional(readOnly = true)
+    public PageableDto<SearchRouteRecommendationSummaryResponse> findRouteRecommendations(Long userId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size,
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        Page<RouteRecommendation> recommendations =
+                routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(userId, pageable);
+
+        Map<Long, Long> stopCounts = countStops(recommendations.getContent());
+        return PageableDto.from(recommendations.map(recommendation ->
+                SearchRouteRecommendationSummaryResponse.of(
+                        recommendation, stopCounts.getOrDefault(recommendation.getId(), 0L).intValue())));
     }
 
     @Transactional
@@ -258,29 +277,11 @@ public class RouteRecommendationService {
                         exclusion.attractionId(), exclusion.attractionName(), exclusion.reason()))
                 .toList();
     }
-}
-        if (!recommendation.isOwnedBy(userId)) {
-            throw new BusinessException(ErrorCode.NOT_ROUTE_OWNER);
-        }
-        recommendation.delete(clock.instant());
-    }
 
-    @Transactional(readOnly = true)
-    public PageableDto<SearchRouteRecommendationSummaryResponse> findRouteRecommendations(
-            Long userId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
-        Page<RouteRecommendation> recommendations =
-                routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(userId, pageable);
-
-        Map<Long, Long> stopCounts = countStops(recommendations.getContent());
-        return PageableDto.from(recommendations.map(recommendation ->
-                SearchRouteRecommendationSummaryResponse.of(
-                        recommendation, stopCounts.getOrDefault(recommendation.getId(), 0L).intValue())));
-    }
+    /** 목록의 추천들의 방문지 개수를 쿼리 1번으로 센다. 빈 IN 절 쿼리는 보내지 않는다 */
     private Map<Long, Long> countStops(List<RouteRecommendation> recommendations) {
         if (recommendations.isEmpty()) {
-            return Map.of();   // 빈 IN 절 쿼리를 보내지 않는다
+            return Map.of();
         }
         List<Long> ids = recommendations.stream()
                 .map(RouteRecommendation::getId)

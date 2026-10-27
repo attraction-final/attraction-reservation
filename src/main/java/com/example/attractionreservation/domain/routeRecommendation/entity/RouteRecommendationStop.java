@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import com.example.attractionreservation.global.util.KstTime;
 
 @Getter
 @Entity
@@ -80,8 +81,8 @@ public class RouteRecommendationStop {
         stop.estimatedArrivalAt = arrivalAt;
         stop.slotStartAt = slotStartAt;
         stop.slotEndAt = slotEndAt;
-        stop.estimatedWaitMin = (int) Duration.between(arrivalAt, slotStartAt).toMinutes();
-        stop.estimatedRideMin = (int) Duration.between(slotStartAt, slotEndAt).toMinutes();
+        stop.estimatedWaitMin = (int) Duration.between(arrivalAt.atZone(KstTime.ZONE), slotStartAt.atZone(KstTime.ZONE)).toMinutes();
+        stop.estimatedRideMin = (int) Duration.between(slotStartAt.atZone(KstTime.ZONE), slotEndAt.atZone(KstTime.ZONE)).toMinutes();
         return stop;
     }
     void assignRouteRecommendation(RouteRecommendation recommendation) {

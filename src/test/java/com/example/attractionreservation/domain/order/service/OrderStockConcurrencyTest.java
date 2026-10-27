@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
+import com.example.attractionreservation.domain.payment.repository.PaymentCompensationRepository;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
 import com.example.attractionreservation.domain.payment.service.PaymentCommandService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
@@ -51,6 +52,9 @@ class OrderStockConcurrencyTest {
 
     @Autowired
     private PaymentCommandService paymentCommandService;
+
+    @Autowired
+    private PaymentCompensationRepository paymentCompensationRepository;
 
     @Autowired
     private OrderRepository orderRepository;
@@ -192,21 +196,24 @@ class OrderStockConcurrencyTest {
         assertThat(ticketProductRepository.findById(productId).orElseThrow().getStock())
                 .isEqualTo(initialStock - 2);
 
+        int taskCount = 5;
         List<Callable<?>> tasks = new ArrayList<>();
-        for (int count = 0; count < 5; count++) {
+        for (int count = 0; count < taskCount; count++) {
             tasks.add(() -> orderService.updateOrderByCancel(userId, orderId));
+        }
+        for (int count = 0; count < taskCount; count++) {
             tasks.add(() -> orderCancelProcessor.cancelExpiredOrder(orderId, userId, Instant.now()));
         }
 
         // when
-        List<Throwable> failures = runConcurrently(tasks);
+        List<Throwable> results = runConcurrently(tasks);
+        List<Throwable> userCancelResults = results.subList(0, taskCount);
+        List<Throwable> expiredCancelResults = results.subList(taskCount, 2 * taskCount);
 
-        // then: 먼저 처리한 하나만 복구하고, 나머지는 취소할 수 없는 주문으로 거절되거나 건너뛴다.
-        assertThat(actualFailures(failures)).isNotEmpty()
-                .allSatisfy(failure -> assertThat(failure)
-                        .isInstanceOfSatisfying(BusinessException.class, exception ->
-                                assertThat(exception.getErrorCode())
-                                        .isEqualTo(ErrorCode.ORDER_NOT_CANCELLABLE)));
+        // then: 만료 취소는 이기든 지든 예외 없이 끝난다(이미 취소됐으면 false를 반환한다).
+        assertThat(expiredCancelResults).hasSize(taskCount).containsOnlyNulls();
+        // 사용자 취소는 이긴 한 번을 빼면 취소할 수 없는 주문으로 거절된다.
+        assertOnlyNotCancellable(userCancelResults, taskCount - 1);
 
         assertThat(ticketProductRepository.findById(productId).orElseThrow().getStock())
                 .isEqualTo(initialStock);
@@ -226,21 +233,24 @@ class OrderStockConcurrencyTest {
         Long orderId = orderService.createOrder(userId, createRequest(productId, 2)).orderId();
         String pgId = paymentRepository.findAll().get(0).getPgId();
 
+        int taskCount = 5;
         List<Callable<?>> tasks = new ArrayList<>();
-        for (int count = 0; count < 5; count++) {
+        for (int count = 0; count < taskCount; count++) {
             tasks.add(() -> orderService.updateOrderByCancel(userId, orderId));
+        }
+        for (int count = 0; count < taskCount; count++) {
             tasks.add(() -> paymentCommandService.failPayment(pgId));
         }
 
         // when
-        List<Throwable> failures = runConcurrently(tasks);
+        List<Throwable> results = runConcurrently(tasks);
+        List<Throwable> userCancelResults = results.subList(0, taskCount);
+        List<Throwable> failPaymentResults = results.subList(taskCount, 2 * taskCount);
 
-        // then: 먼저 처리한 쪽만 복구하고, 나머지는 취소할 수 없는 주문으로 거절되거나 건너뛴다.
-        assertThat(actualFailures(failures)).isNotEmpty()
-                .allSatisfy(failure -> assertThat(failure)
-                        .isInstanceOfSatisfying(BusinessException.class, exception ->
-                                assertThat(exception.getErrorCode())
-                                        .isEqualTo(ErrorCode.ORDER_NOT_CANCELLABLE)));
+        // then: 결제 실패 처리는 이기든 지든 예외 없이 끝난다(이미 처리됐으면 false를 반환한다).
+        assertThat(failPaymentResults).hasSize(taskCount).containsOnlyNulls();
+        // 사용자 취소는 이긴 한 번을 빼면 취소할 수 없는 주문으로 거절된다.
+        assertOnlyNotCancellable(userCancelResults, taskCount - 1);
 
         assertThat(ticketProductRepository.findById(productId).orElseThrow().getStock())
                 .isEqualTo(initialStock);
@@ -258,30 +268,35 @@ class OrderStockConcurrencyTest {
         String pgId = paymentRepository.findAll().get(0).getPgId();
         long amount = orderRepository.findById(orderId).orElseThrow().getTotalAmount();
 
+        int taskCount = 3;
         List<Callable<?>> tasks = new ArrayList<>();
-        for (int count = 0; count < 3; count++) {
+        for (int count = 0; count < taskCount; count++) {
             tasks.add(() -> orderService.updateOrderByCancel(userId, orderId));
+        }
+        for (int count = 0; count < taskCount; count++) {
             tasks.add(() -> paymentCommandService.approvePayment(pgId, Instant.now(), amount));
         }
 
         // when
-        List<Throwable> failures = runConcurrently(tasks);
+        List<Throwable> results = runConcurrently(tasks);
+        List<Throwable> userCancelResults = results.subList(0, taskCount);
+        List<Throwable> approveResults = results.subList(taskCount, 2 * taskCount);
 
-        // then: 결제 승인은 예외 없이 끝나고, 취소는 이긴 한 번을 빼면 취소할 수 없는 주문으로 거절된다.
-        assertThat(actualFailures(failures)).isNotEmpty()
-                .allSatisfy(failure -> assertThat(failure)
-                        .isInstanceOfSatisfying(BusinessException.class, exception ->
-                                assertThat(exception.getErrorCode())
-                                        .isEqualTo(ErrorCode.ORDER_NOT_CANCELLABLE)));
+        // then: 결제 승인은 이기든 지든 예외 없이 끝나고, 취소는 이긴 한 번을 빼면 거절된다.
+        assertThat(approveResults).hasSize(taskCount).containsOnlyNulls();
+        assertOnlyNotCancellable(userCancelResults, taskCount - 1);
 
         OrderStatus orderStatus = orderRepository.findById(orderId).orElseThrow().getStatus();
         int stock = ticketProductRepository.findById(productId).orElseThrow().getStock();
         if (orderStatus == OrderStatus.CANCELLED) {
             assertThat(stock).isEqualTo(initialStock);
+            // 취소된 결제를 승인한 요청이 PG 결제를 되돌릴 보상 요청을 한 번만 저장한다.
+            assertThat(paymentCompensationRepository.count()).isEqualTo(1);
         } else {
-            // 승인이 이기면 주문이 완료되고 재고는 차감된 채로 남는다.
+            // 승인이 이기면 주문이 완료되고 재고는 차감된 채로 남으며 보상 요청은 없다.
             assertThat(orderStatus).isEqualTo(OrderStatus.COMPLETED);
             assertThat(stock).isEqualTo(initialStock - 2);
+            assertThat(paymentCompensationRepository.count()).isZero();
         }
     }
 
@@ -300,6 +315,15 @@ class OrderStockConcurrencyTest {
         return new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(productId, quantity)
         ));
+    }
+
+    // 취소 작업 중 이긴 쪽(최대 1건)을 뺀 나머지는 모두 ORDER_NOT_CANCELLABLE로 거절돼야 한다.
+    private void assertOnlyNotCancellable(List<Throwable> cancelResults, int minFailures) {
+        assertThat(actualFailures(cancelResults)).hasSizeGreaterThanOrEqualTo(minFailures)
+                .allSatisfy(failure -> assertThat(failure)
+                        .isInstanceOfSatisfying(BusinessException.class, exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.ORDER_NOT_CANCELLABLE)));
     }
 
     // 작업 결과에서 실제 실패(예외)만 골라낸다. 성공한 작업의 결과는 null이다.

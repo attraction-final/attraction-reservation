@@ -5,7 +5,9 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import com.example.attractionreservation.global.util.KstTime;
 //추천 경로에 포함된 방문 일정 한 건을 저장한다
 @Getter
 @Entity
@@ -62,5 +64,39 @@ public class RouteRecommendationStop {
     @Column(name = "slot_end_at", nullable = false)
     private LocalDateTime slotEndAt;
 
-
+    public static RouteRecommendationStop of(
+            int sequenceNumber,
+            Long attractionId,
+            Long attractionSlotId,
+            String attractionName,
+            int moveMinutes,
+            LocalDateTime arrivalAt,
+            LocalDateTime slotStartAt,
+            LocalDateTime slotEndAt
+    ) {
+        if (sequenceNumber < 1) {
+            throw new IllegalStateException("방문 순서는 1부터 시작합니다.");
+        }
+        if (arrivalAt.isAfter(slotStartAt)) {
+            throw new IllegalStateException("슬롯 시작 후에 도착하는 방문은 만들 수 없습니다.");
+        }
+        if (!slotStartAt.isBefore(slotEndAt)) {
+            throw new IllegalStateException("슬롯 종료는 시작보다 뒤어야 합니다");
+        }
+        RouteRecommendationStop stop = new RouteRecommendationStop();
+        stop.sequenceNumber = sequenceNumber;
+        stop.attractionId = attractionId;
+        stop.attractionSlotId = attractionSlotId;
+        stop.attractionNameSnapshot = attractionName;
+        stop.estimatedMoveMin = moveMinutes;
+        stop.estimatedArrivalAt = arrivalAt;
+        stop.slotStartAt = slotStartAt;
+        stop.slotEndAt = slotEndAt;
+        stop.estimatedWaitMin = (int) Duration.between(arrivalAt.atZone(KstTime.ZONE), slotStartAt.atZone(KstTime.ZONE)).toMinutes();
+        stop.estimatedRideMin = (int) Duration.between(slotStartAt.atZone(KstTime.ZONE), slotEndAt.atZone(KstTime.ZONE)).toMinutes();
+        return stop;
+    }
+    void assignRouteRecommendation(RouteRecommendation recommendation) {
+        this.routeRecommendation = recommendation;
+    }
 }

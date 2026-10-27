@@ -56,6 +56,7 @@ public enum ErrorCode {
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 Refresh Token입니다."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
 
+    SOCIAL_LOGIN_CODE_INVALID(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료되었거나 이미 사용된 로그인 코드입니다."),
 
     // ticketProduct
     INVALID_TICKET_PRODUCT_PRICE(HttpStatus.BAD_REQUEST, "티켓 상품 가격은 0원 이상이어야 합니다."),

@@ -11,6 +11,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
@@ -50,6 +51,41 @@ public class SocialLoginCodeRepository {
         }
 
         return code;
+    }
+
+    public Optional<Long> consume(String code) {
+        // 서버가 발급하는 코드는 URL-safe Base64 형식의 43글자다.
+        if (code == null || !code.matches("[A-Za-z0-9_-]{43}")) {
+            return Optional.empty();
+        }
+
+        // 읽기와 삭제를 하나의 Redis 연산으로 수행한다.
+        // 동시에 요청해도 저장된 회원 ID는 한 요청만 가져갈 수 있다.
+        String value = redisTemplate.opsForValue()
+                .getAndDelete(createKey(code));
+
+        // 미존재·만료·이미 사용된 코드는 모두 동일하게 처리한다.
+        if (value == null) {
+            return Optional.empty();
+        }
+
+        try {
+            long userId = Long.parseLong(value);
+
+            if (userId <= 0) {
+                throw new IllegalStateException(
+                        "로그인 코드에 저장된 회원 ID가 유효하지 않습니다."
+                );
+            }
+
+            return Optional.of(userId);
+        } catch (NumberFormatException exception) {
+            // 저장 데이터 오류는 잘못된 사용자 요청과 구분한다.
+            throw new IllegalStateException(
+                    "로그인 코드에 저장된 회원 ID 형식이 올바르지 않습니다.",
+                    exception
+            );
+        }
     }
 
     private String createKey(String code) {

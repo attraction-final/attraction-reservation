@@ -56,6 +56,7 @@ public enum ErrorCode {
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료된 Refresh Token입니다."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
 
+    SOCIAL_LOGIN_CODE_INVALID(HttpStatus.UNAUTHORIZED, "유효하지 않거나 만료되었거나 이미 사용된 로그인 코드입니다."),
 
     // ticketProduct
     INVALID_TICKET_PRODUCT_PRICE(HttpStatus.BAD_REQUEST, "티켓 상품 가격은 0원 이상이어야 합니다."),
@@ -90,6 +91,15 @@ public enum ErrorCode {
     TICKET_RESERVATION_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "티켓 이용 가능 시간에 포함되지 않는 슬롯입니다."),
     INVALID_TICKET_ENTRY_TIME(HttpStatus.BAD_REQUEST, "입장 처리 시각은 필수입니다."),
 
+    // routeRecommendation
+    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다."),
+    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
+    INVALID_ATTRACTION_SELECTION(HttpStatus.BAD_REQUEST, "어트랙션은 중복 없이 1~5개 선택해야 합니다."),
+    INVALID_TIME_RANGE(HttpStatus.BAD_REQUEST, "이용 시작 시각은 종료 시각보다 이전이어야 하며 입장권 이용 시간 안이어야 합니다."),
+    TICKET_NOT_OWNED(HttpStatus.FORBIDDEN, "본인 소유의 입장권이 아닙니다."),
+    TICKET_NOT_AVAILABLE(HttpStatus.CONFLICT, "사용 중인 입장권으로만 추천받을 수 있습니다."),
+    ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "기존 예약의 취소 가능 시간이 지나 새로운 추천 경로를 생성할 수 없습니다."),
+
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),
     INVALID_RESERVATION_TICKET(HttpStatus.BAD_REQUEST, "예약에 사용할 티켓 정보가 필요합니다."),
@@ -105,10 +115,6 @@ public enum ErrorCode {
     RESERVATION_STATUS_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "예약 완료 상태에서만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
     INVALID_RESERVATION_TARGET_STATUS(HttpStatus.BAD_REQUEST, "변경할 예약 상태는 이용 완료 또는 노쇼만 가능합니다."),
     RESERVATION_SLOT_NOT_ENDED(HttpStatus.CONFLICT, "슬롯 종료 후에만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
-
-    //routeRecommendation
-    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다"),
-    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

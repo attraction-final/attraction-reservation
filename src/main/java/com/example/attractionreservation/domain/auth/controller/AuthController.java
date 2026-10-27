@@ -1,6 +1,7 @@
 
 package com.example.attractionreservation.domain.auth.controller;
 
+import com.example.attractionreservation.domain.auth.dto.CreateSocialLoginExchangeRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
@@ -50,6 +51,39 @@ public class AuthController {
                 .body(ApiResponse.ok("로그인에 성공했습니다.", result.response()));
     }
 
+
+    @PostMapping("/oauth2/exchange")
+    public ResponseEntity<ApiResponse<CreateAuthLoginResponse>>
+    exchangeSocialLoginCode(
+            @Valid @RequestBody CreateSocialLoginExchangeRequest request
+    ) {
+        CreateAuthLoginServiceResponse result =
+                authService.exchangeSocialLoginCode(request.code());
+
+        // 일반 로그인과 동일한 Refresh Token 쿠키 정책을 적용한다.
+        ResponseCookie refreshTokenCookie = ResponseCookie
+                .from("refreshToken", result.refreshToken())
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/api/auth")
+                .maxAge(Duration.ofSeconds(
+                        jwtProvider.getRefreshTokenExpirationSeconds()
+                ))
+                .build();
+
+        // 일회용 코드와 Refresh Token은 응답 본문에 포함하지 않는다.
+        return ResponseEntity.ok()
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        refreshTokenCookie.toString()
+                )
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(ApiResponse.ok(
+                        "소셜 로그인에 성공했습니다.",
+                        result.response()
+                ));
+    }
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<CreateAuthRefreshResponse>> refresh(

@@ -76,7 +76,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/auth/login",
-                                "/api/auth/refresh"
+                                "/api/auth/refresh",
+                                "/api/auth/oauth2/exchange"
                         ).permitAll()
 
                         // PortOne 웹훅은 사용자 토큰 없이 호출되며, 요청 서명으로 검증한다.

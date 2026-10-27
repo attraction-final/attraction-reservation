@@ -21,6 +21,7 @@ public interface RouteRecommendationRepository extends JpaRepository<RouteRecomm
 
     Page<RouteRecommendation> findAllByUserIdAndDeletedAtIsNull(Long userId, Pageable pageable);
 
+    Optional<RouteRecommendation> findByIdAndDeletedAtIsNull(Long id);
 
     @Query("""
           select new com.example.attractionreservation.domain.routeRecommendation.repository.StopCount(
@@ -31,3 +32,4 @@ public interface RouteRecommendationRepository extends JpaRepository<RouteRecomm
         """)
     List<StopCount> countStopsByRecommendationIds(@Param("ids") Collection<Long> ids);
 }
+

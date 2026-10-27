@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -81,5 +82,58 @@ class SocialLoginCodeRepositoryTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(redisTemplate);
+    }
+
+    @Test
+    @DisplayName("저장된 코드를 소비하면 연결된 회원 ID를 반환한다")
+    void consume_existingCode_returnsUserId() {
+        String code = "a".repeat(43);
+
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.getAndDelete(anyString())).thenReturn("1");
+
+        Optional<Long> result = repository.consume(code);
+
+        assertThat(result).contains(1L);
+
+        var keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(valueOperations).getAndDelete(keyCaptor.capture());
+
+        assertThat(keyCaptor.getValue())
+                .matches("auth:social-code:[0-9a-f]{64}")
+                .doesNotContain(code);
+    }
+
+    @Test
+    @DisplayName("존재하지 않거나 만료·사용된 코드는 빈 결과를 반환한다")
+    void consume_missingCode_returnsEmpty() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.getAndDelete(anyString())).thenReturn(null);
+
+        assertThat(repository.consume("a".repeat(43))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("형식이 잘못된 코드는 Redis에 접근하지 않는다")
+    void consume_invalidFormat_returnsEmpty() {
+        assertThat(repository.consume(null)).isEmpty();
+        assertThat(repository.consume("")).isEmpty();
+        assertThat(repository.consume(" ")).isEmpty();
+        assertThat(repository.consume("a".repeat(42))).isEmpty();
+        assertThat(repository.consume("a".repeat(44))).isEmpty();
+        assertThat(repository.consume("!".repeat(43))).isEmpty();
+
+        verifyNoInteractions(redisTemplate);
+    }
+
+    @Test
+    @DisplayName("저장된 회원 ID가 손상됐으면 서버 오류로 처리한다")
+    void consume_corruptedUserId_throwsException() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.getAndDelete(anyString()))
+                .thenReturn("not-a-number");
+
+        assertThatThrownBy(() -> repository.consume("a".repeat(43)))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

@@ -2,17 +2,25 @@ package com.example.attractionreservation.domain.ticket.repository;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition;
+import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -27,10 +35,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(JpaConfig.class)
+@Import({JpaConfig.class, QuerydslConfig.class})
 class TicketRepositoryTest {
 
     @Autowired
@@ -247,6 +256,160 @@ class TicketRepositoryTest {
         assertThat(lastPage.getTotalPages()).isEqualTo(2);
         assertThat(lastPage.hasNext()).isFalse();
         assertThat(lastPage.isLast()).isTrue();
+    }
+
+    @Test
+    @DisplayName("다른 사용자의 티켓 ID로 상세 조회하면 빈 결과를 반환한다")
+    void findByIdAndOwnerId_OtherUserTicket_ReturnsEmpty() {
+        // given
+        Long requestedTicketId = otherUserTicketId;
+        Long requestingUserId = userId;
+
+        // when
+        var result = ticketRepository.findByIdAndOwner_Id(
+                requestedTicketId,
+                requestingUserId
+        );
+
+        // then
+        assertThat(ticketRepository.findById(requestedTicketId)).isPresent();
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("실제 Repository로 내 티켓을 조회하고 응답 DTO로 변환한다")
+    void findTicketAll_RealRepository_ReturnsResponseDtos() {
+        // given
+        TicketService ticketService = new TicketService(ticketRepository);
+        SearchTicketCondition condition =
+                new SearchTicketCondition(null, null, null);
+        Pageable pageable = PageRequest.of(
+                0, 10, Sort.by(Sort.Direction.ASC, "id")
+        );
+
+        // when
+        Page<SearchTicketResponse> result =
+                ticketService.findTicketAll(userId, condition, pageable);
+
+        // then
+        assertThat(result.getTotalElements()).isEqualTo(3);
+        assertThat(result.getContent())
+                .extracting(SearchTicketResponse::ticketId)
+                .containsExactly(
+                        firstTicketId,
+                        secondTicketId,
+                        thirdTicketId
+                );
+        assertThat(result.getContent())
+                .extracting(SearchTicketResponse::name)
+                .containsExactly(
+                        "종일 기본 이용권",
+                        "종일 특별 이용권",
+                        "오후 이용권"
+                );
+    }
+
+    @ParameterizedTest
+    @EnumSource(Sort.Direction.class)
+    @DisplayName("요청한 방향에 따라 본인 티켓 ID를 정렬한다")
+    void findAllByUserIdWithCondition_IdSort_AppliesDirection(Sort.Direction direction) {
+        // given
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, "id"));
+
+        // when
+        Page<Ticket> result = search(userId, null, null, null, pageable);
+
+        // then
+        Long[] expectedIds = direction.isAscending()
+                ? new Long[]{firstTicketId, secondTicketId, thirdTicketId}
+                : new Long[]{thirdTicketId, secondTicketId, firstTicketId};
+
+        assertThat(result.getContent())
+                .extracting(Ticket::getId)
+                .containsExactly(expectedIds);
+    }
+
+    @Test
+    @DisplayName("상태 오름차순 정렬 후 같은 상태는 ID 내림차순으로 정렬한다")
+    void findAllByUserIdWithCondition_MultipleSorts_AppliesPriority() {
+        // given
+        Pageable pageable = PageRequest.of(
+                0, 10, Sort.by(Sort.Order.asc("status"), Sort.Order.desc("id"))
+        );
+
+        // when
+        Page<Ticket> result = search(userId, null, null, null, pageable);
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Ticket::getId)
+                .containsExactly(thirdTicketId, firstTicketId, secondTicketId);
+    }
+
+    @Test
+    @DisplayName("검색 조건으로 페이징하면 본인 티켓 중 조건에 일치하는 전체 건수를 반환한다")
+    void findAllByUserIdWithCondition_FilteredPagination_ReturnsFilteredTotal() {
+        // given
+        Pageable pageable = PageRequest.of(1, 1, Sort.by(Sort.Direction.ASC, "id"));
+
+        // when
+        Page<Ticket> result = search(userId, "종일", TicketType.ALL_DAY, null, pageable);
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Ticket::getId)
+                .containsExactly(secondTicketId);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.isLast()).isTrue();
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 정렬 필드로 티켓을 조회하면 예외가 발생한다")
+    void findAllByUserIdWithCondition_InvalidSortProperty_ThrowsException() {
+        // given
+        Pageable pageable = PageRequest.of(
+                0, 10, Sort.by(Sort.Direction.ASC, "unknownField")
+        );
+
+        // when & then
+        assertThatThrownBy(() -> search(userId, null, null, null, pageable))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_SORT_PROPERTY)
+                );
+    }
+
+    @Test
+    @DisplayName("본인 티켓 ID로 상세 조회하면 해당 티켓을 반환한다")
+    void findByIdAndOwnerId_OwnTicket_ReturnsTicket() {
+        // given
+        Long requestedTicketId = secondTicketId;
+
+        // when
+        var result = ticketRepository.findByIdAndOwner_Id(requestedTicketId, userId);
+
+        // then
+        assertThat(result).isPresent();
+        Ticket foundTicket = result.orElseThrow();
+        assertThat(foundTicket.getId()).isEqualTo(requestedTicketId);
+        assertThat(foundTicket.getName()).isEqualTo("종일 특별 이용권");
+        assertThat(foundTicket.getStatus()).isEqualTo(TicketStatus.USED);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 티켓 ID로 상세 조회하면 빈 결과를 반환한다")
+    void findByIdAndOwnerId_NonexistentTicket_ReturnsEmpty() {
+        // given
+        Long nonexistentTicketId = Long.MAX_VALUE;
+
+        // when
+        var result = ticketRepository.findByIdAndOwner_Id(nonexistentTicketId, userId);
+
+        // then
+        assertThat(result).isEmpty();
     }
 
     private Page<Ticket> search(

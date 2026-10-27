@@ -8,13 +8,5 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
-public interface ReservationRepository extends JpaRepository<Reservation, Long> {
-    @Query("""
-        select r from Reservation r
-        join fetch r.attractionSlot
-        where r.ticket.id = :ticketId
-          and r.status = :status
-        """)
-    List<Reservation> findAllWithSlotByTicketIdAndStatus(@Param("ticketId") Long ticketId,
-                                                         @Param("status") ReservationStatus status);
+public interface ReservationRepository extends JpaRepository<Reservation, Long>, ReservationCustomRepository {
 }

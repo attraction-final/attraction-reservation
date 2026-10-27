@@ -1,9 +1,14 @@
 package com.example.attractionreservation.domain.order.service;
 
-import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
+import com.example.attractionreservation.domain.payment.service.PaymentService;
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
+import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
@@ -16,7 +21,16 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Propagation;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +38,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -32,6 +46,9 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final TicketProductRepository ticketProductRepository;
     private final UserRepository userRepository;
+    private final PaymentService paymentService;
+    private final OrderCancelProcessor orderCancelProcessor;
+    private final Clock clock;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -62,7 +79,8 @@ public class OrderService {
                 ));
 
         for (CreateOrderRequest.Item item : request.items()) {
-            TicketProduct ticketProduct = productsById.get(item.ticketProductId());
+            TicketProduct ticketProduct =
+                    productsById.get(item.ticketProductId());
 
             if (ticketProduct == null) {
                 throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
@@ -109,6 +127,107 @@ public class OrderService {
         }
 
         return SearchOrderResponse.from(order);
+    }
+
+    @Transactional
+    public UpdateOrderResponse updateOrderByCancel(
+            Long userId,
+            Long orderId
+    ) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_CANCEL_ACCESS_DENIED);
+        }
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 결제 → 주문 순서로 잠금을 획득한다.
+        paymentService.lockPaymentByOrderIdIfExists(orderId);
+
+        // 조회 후 상태가 바뀔 수 있으므로 실제 수정 시에도 PENDING 조건을 확인한다.
+        int updatedCount = orderRepository.cancelPendingOrder(
+                orderId,
+                userId,
+                OrderStatus.PENDING,
+                OrderStatus.CANCELLED,
+                Instant.now()
+        );
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 결제 취소가 실패하면 같은 트랜잭션의 주문 취소도 롤백한다.
+        paymentService.cancelPendingPaymentIfExists(userId, orderId);
+
+        // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
+        return UpdateOrderResponse.of(
+                orderId,
+                OrderStatus.CANCELLED
+        );
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public int updateExpiredOrdersByCancel() {
+        Instant now = clock.instant();
+        Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
+
+        List<Order> expiredOrders = orderRepository.findExpiredPendingOrders(
+                OrderStatus.PENDING,
+                cutoff,
+                PageRequest.of(0, 100)
+        );
+
+        int cancelledCount = 0;
+
+        for (Order order : expiredOrders) {
+            Long orderId = order.getId();
+            Long userId = order.getUser().getId();
+
+            try {
+                if (orderCancelProcessor.cancelExpiredOrder(
+                        orderId,
+                        userId,
+                        now
+                )) {
+                    cancelledCount++;
+                }
+            } catch (BusinessException exception) {
+                // 실패한 주문은 해당 트랜잭션에서 롤백하고 다음 주문을 처리한다.
+                log.warn(
+                        "만료 주문 자동 취소 실패: orderId={}, errorCode={}",
+                        orderId,
+                        exception.getErrorCode()
+                );
+            }
+        }
+
+        return cancelledCount;
+    }
+
+    @Transactional(readOnly = true)
+    public SearchOrderListResponse findOrdersByUserId(
+            Long userId,
+            SearchOrderCondition condition
+    ) {
+        // 생성 시각이 같아도 조회 순서가 일정하도록 ID를 보조 정렬로 사용한다.
+        Pageable pageable = PageRequest.of(
+                condition.page(),
+                condition.size(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")
+                )
+        );
+
+        Page<Order> orders = orderRepository.findAllByUser_Id(userId, pageable);
+
+        return SearchOrderListResponse.from(orders);
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

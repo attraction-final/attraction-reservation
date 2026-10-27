@@ -1,5 +1,9 @@
 package com.example.attractionreservation.domain.order.controller;
 
+import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
@@ -26,6 +30,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -174,6 +179,73 @@ class OrderControllerTest {
                         .value(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE.getMessage()));
     }
 
+    @Test
+    @DisplayName("인증된 회원의 주문을 취소하고 HTTP 200을 반환한다")
+    void updateOrderByCancel_ownedOrder_returnsOk() throws Exception {
+        // given
+        when(orderService.updateOrderByCancel(1L, 101L))
+                .thenReturn(UpdateOrderResponse.of(
+                        101L,
+                        OrderStatus.CANCELLED
+                ));
+
+        // when & then: 별도 회원 ID가 전달돼도 인증된 회원 ID를 사용한다.
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", 101L)
+                        .with(authenticatedMember())
+                        .param("userId", "999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("주문 취소에 성공했습니다."))
+                .andExpect(jsonPath("$.data.orderId").value(101))
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+        verify(orderService).updateOrderByCancel(1L, 101L);
+        verifyNoMoreInteractions(orderService);
+    }
+
+    @Test
+    @DisplayName("인증 없이 주문을 취소하면 HTTP 401을 반환한다")
+    void updateOrderByCancel_unauthenticated_returnsUnauthorized()
+            throws Exception {
+        // given: 인증 정보를 전달하지 않는다.
+
+        // when & then
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", 101L))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(orderService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ErrorCode.class,
+            names = {
+                    "ORDER_NOT_FOUND",
+                    "ORDER_CANCEL_ACCESS_DENIED",
+                    "ORDER_NOT_CANCELLABLE"
+            }
+    )
+    @DisplayName("주문 취소 예외를 해당 HTTP 상태와 공통 오류 응답으로 반환한다")
+    void updateOrderByCancel_rejected_returnsExpectedError(
+            ErrorCode errorCode
+    ) throws Exception {
+        // given
+        when(orderService.updateOrderByCancel(1L, 101L))
+                .thenThrow(new BusinessException(errorCode));
+
+        // when & then
+        mockMvc.perform(post("/api/orders/{orderId}/cancel", 101L)
+                        .with(authenticatedMember()))
+                .andExpect(status().is(errorCode.getStatus().value()))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(errorCode.getMessage()));
+
+        verify(orderService).updateOrderByCancel(1L, 101L);
+    }
+
     private RequestPostProcessor authenticatedMember() {
         return authentication(new UsernamePasswordAuthenticationToken(
                 1L,
@@ -268,5 +340,112 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.message").value(errorCode.getMessage()));
 
         verify(orderService).findOrderById(1L, 101L);
+    }
+
+    @Test
+    @DisplayName("조회 조건을 생략하면 기본 페이지로 본인 주문 목록을 반환한다")
+    void getOrderAll_noCondition_returnsDefaultPage() throws Exception {
+        // given
+        SearchOrderCondition condition = new SearchOrderCondition(0, 10);
+        SearchOrderListResponse response = new SearchOrderListResponse(
+                List.of(new SearchOrderListResponse.Item(
+                        101L,
+                        120000,
+                        "PENDING",
+                        LocalDateTime.of(2026, 10, 14, 10, 0)
+                )),
+                0,
+                10,
+                1L,
+                1
+        );
+
+        when(orderService.findOrdersByUserId(1L, condition))
+                .thenReturn(response);
+
+        // when & then: 요청한 회원 ID가 아닌 인증된 회원 ID를 사용한다.
+        mockMvc.perform(get("/api/orders/me")
+                        .with(authenticatedMember())
+                        .param("userId", "999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("주문 목록 조회에 성공했습니다."))
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].orderId").value(101))
+                .andExpect(jsonPath("$.data.content[0].totalAmount").value(120000))
+                .andExpect(jsonPath("$.data.content[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.data.content[0].createdAt")
+                        .value("2026-10-14T10:00:00"))
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(10))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.totalPages").value(1));
+
+        verify(orderService).findOrdersByUserId(1L, condition);
+        verifyNoMoreInteractions(orderService);
+    }
+
+    @Test
+    @DisplayName("지정한 페이지 조건을 전달하고 빈 주문 목록도 정상 반환한다")
+    void getOrderAll_explicitCondition_returnsEmptyPage() throws Exception {
+        // given
+        SearchOrderCondition condition = new SearchOrderCondition(2, 5);
+
+        when(orderService.findOrdersByUserId(1L, condition))
+                .thenReturn(new SearchOrderListResponse(
+                        List.of(), 2, 5, 0L, 0
+                ));
+
+        // when & then
+        mockMvc.perform(get("/api/orders/me")
+                        .with(authenticatedMember())
+                        .param("page", "2")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").isEmpty())
+                .andExpect(jsonPath("$.data.page").value(2))
+                .andExpect(jsonPath("$.data.size").value(5))
+                .andExpect(jsonPath("$.data.totalElements").value(0))
+                .andExpect(jsonPath("$.data.totalPages").value(0));
+
+        verify(orderService).findOrdersByUserId(1L, condition);
+        verifyNoMoreInteractions(orderService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "page=-1",
+            "size=0",
+            "size=-1",
+            "page=abc",
+            "size=abc"
+    })
+    @DisplayName("페이지 조건이 범위나 숫자 형식에 맞지 않으면 HTTP 400을 반환한다")
+    void getOrderAll_invalidCondition_returnsBadRequest(String query)
+            throws Exception {
+        // given
+        String[] parameter = query.split("=");
+
+        // when & then
+        mockMvc.perform(get("/api/orders/me")
+                        .with(authenticatedMember())
+                        .param(parameter[0], parameter[1]))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(orderService);
+    }
+
+    @Test
+    @DisplayName("인증 없이 주문 목록을 조회하면 HTTP 401을 반환한다")
+    void getOrderAll_unauthenticated_returnsUnauthorized() throws Exception {
+        // given: 인증 정보를 전달하지 않는다.
+
+        // when & then
+        mockMvc.perform(get("/api/orders/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(orderService);
     }
 }

@@ -19,6 +19,7 @@ import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.core.annotation.Order;
 
 @Configuration
 @RequiredArgsConstructor
@@ -33,6 +34,7 @@ public class SecurityConfig {
     private static final String ADMIN_ROLE = "ADMIN";
 
     @Bean
+    @Order(2)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         var paths = PathPatternRequestMatcher.withDefaults();
@@ -74,7 +76,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/auth/login",
-                                "/api/auth/refresh"
+                                "/api/auth/refresh",
+                                "/api/auth/oauth2/exchange"
                         ).permitAll()
 
                         // 관리자 전용 API는 ADMIN 권한이 있는 회원만 접근할 수 있다.

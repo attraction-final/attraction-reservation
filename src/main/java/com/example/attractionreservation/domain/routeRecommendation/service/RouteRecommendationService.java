@@ -4,9 +4,9 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
-import com.example.attractionreservation.domain.reservation.entity.Reservation;                 // ★ 추가
-import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     // ★ 추가
-import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   // ★ 추가
+import com.example.attractionreservation.domain.reservation.entity.Reservation;                 
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     
+import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.AttractionView;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelection;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
@@ -89,6 +89,7 @@ public class RouteRecommendationService {
                 userId, ticket.getId(), startAt, endAt, toStops(route), toExclusionEntities(exclusions));
         return SearchRouteRecommendationResponse.from(routeRecommendationRepository.save(recommendation));
     }
+
 
     @Transactional(readOnly = true)
     public SearchRouteRecommendationResponse findRouteRecommendationById(Long userId, Long recommendationId) {
@@ -256,5 +257,35 @@ public class RouteRecommendationService {
                 .map(exclusion -> ExcludedAttraction.of(
                         exclusion.attractionId(), exclusion.attractionName(), exclusion.reason()))
                 .toList();
+    }
+}
+        if (!recommendation.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.NOT_ROUTE_OWNER);
+        }
+        recommendation.delete(clock.instant());
+    }
+
+    @Transactional(readOnly = true)
+    public PageableDto<SearchRouteRecommendationSummaryResponse> findRouteRecommendations(
+            Long userId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size,
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        Page<RouteRecommendation> recommendations =
+                routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(userId, pageable);
+
+        Map<Long, Long> stopCounts = countStops(recommendations.getContent());
+        return PageableDto.from(recommendations.map(recommendation ->
+                SearchRouteRecommendationSummaryResponse.of(
+                        recommendation, stopCounts.getOrDefault(recommendation.getId(), 0L).intValue())));
+    }
+    private Map<Long, Long> countStops(List<RouteRecommendation> recommendations) {
+        if (recommendations.isEmpty()) {
+            return Map.of();   // 빈 IN 절 쿼리를 보내지 않는다
+        }
+        List<Long> ids = recommendations.stream()
+                .map(RouteRecommendation::getId)
+                .toList();
+        return routeRecommendationRepository.countStopsByRecommendationIds(ids).stream()
+                .collect(Collectors.toMap(StopCount::recommendationId, StopCount::stopCount));
     }
 }

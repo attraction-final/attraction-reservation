@@ -110,7 +110,18 @@ public class Refund extends BaseTimeEntity {
         this.attemptCount++;
     }
 
+    // PG 취소 성공 응답을 받은 처리만 완료한다. 점유한 환불(PROCESSING)만 대상이다.
     public void markAsComplete(Instant completedAt) {
+        if (this.status != RefundStatus.PROCESSING) {
+            throw new BusinessException(ErrorCode.REFUND_INVALID_STATUS_TRANSITION);
+        }
+
+        transitTo(RefundStatus.COMPLETED);
+        this.completedAt = completedAt;
+    }
+
+    // PG 재조회로 취소가 반영된 것을 확인한 환불을 완료한다. 실패·DEAD로 기록됐어도 PG 기준으로 맞춘다.
+    public void markAsCompleteByPg(Instant completedAt) {
         transitTo(RefundStatus.COMPLETED);
         this.completedAt = completedAt;
     }

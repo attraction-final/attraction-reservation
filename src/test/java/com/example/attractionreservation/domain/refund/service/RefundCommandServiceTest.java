@@ -3,6 +3,7 @@ package com.example.attractionreservation.domain.refund.service;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.refund.dto.ClaimedRefund;
@@ -21,6 +22,8 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -296,6 +299,125 @@ class RefundCommandServiceTest {
         assertThat(ids).containsExactly(stale);
     }
 
+    @Test
+    @DisplayName("PG 취소 금액이 완료된 환불 금액과 같으면 이미 맞으므로 아무것도 바꾸지 않는다.")
+    void syncWithPgCancelledAmount_inSync_AlreadyDone() {
+        //given
+        saveRefund(RefundStatus.COMPLETED, adult, 1);
+        Long failed = saveRefund(RefundStatus.FAILED, child, 2);
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.ALREADY_DONE);
+        assertThat(find(failed).getStatus()).isEqualTo(RefundStatus.FAILED);
+        assertThat(findPayment().getStatus()).isEqualTo(PaymentStatus.PAID);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"PROCESSING", "FAILED", "DEAD"})
+    @DisplayName("PG에 반영된 취소 금액과 같은 미완료 환불이 1건이면 COMPLETED로 바꾸고 결제·주문은 PARTIALLY_REFUNDED가 된다.")
+    void syncWithPgCancelledAmount_oneMatched_Synced(RefundStatus status) {
+        //given
+        Long refundId = saveRefund(status, adult, 1);
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_SYNCED);
+        Refund found = find(refundId);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(found.getCompletedAt()).isEqualTo(now);
+        Payment foundPayment = findPayment();
+        assertThat(foundPayment.getStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(foundPayment.getOrder().getStatus()).isEqualTo(OrderStatus.PARTIALLY_REFUNDED);
+    }
+
+    @Test
+    @DisplayName("PG 기준으로 마지막 환불을 완료하면 결제와 주문은 REFUNDED가 된다.")
+    void syncWithPgCancelledAmount_lastRefundMatched_Refunded() {
+        //given
+        saveRefund(RefundStatus.COMPLETED, adult, 3);
+        Long dead = saveRefund(RefundStatus.DEAD, child, 4);
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 50000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_SYNCED);
+        assertThat(find(dead).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        Payment foundPayment = findPayment();
+        assertThat(foundPayment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(foundPayment.getOrder().getStatus()).isEqualTo(OrderStatus.REFUNDED);
+    }
+
+    @Test
+    @DisplayName("PG에 보낸 적이 없는 REQUESTED 환불은 금액이 같아도 완료하지 않고 불일치로 본다.")
+    void syncWithPgCancelledAmount_onlyRequested_Mismatch() {
+        //given
+        Long requested = saveRefund(RefundStatus.REQUESTED, adult, 1);
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
+        assertThat(find(requested).getStatus()).isEqualTo(RefundStatus.REQUESTED);
+        assertThat(findPayment().getStatus()).isEqualTo(PaymentStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("금액이 같은 미완료 환불이 2건 이상이면 어느 것인지 알 수 없으므로 완료하지 않고 불일치로 본다.")
+    void syncWithPgCancelledAmount_multipleMatched_Mismatch() {
+        //given
+        Long first = saveRefund(RefundStatus.FAILED, adult, 1);    // 10,000원
+        Long second = saveRefund(RefundStatus.DEAD, child, 2);     // 10,000원
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
+        assertThat(find(first).getStatus()).isEqualTo(RefundStatus.FAILED);
+        assertThat(find(second).getStatus()).isEqualTo(RefundStatus.DEAD);
+    }
+
+    @Test
+    @DisplayName("일치하는 환불이 없는 취소(외부 취소)는 완료하지 않고 불일치로 본다.")
+    void syncWithPgCancelledAmount_noMatched_Mismatch() {
+        //given
+        Long failed = saveRefund(RefundStatus.FAILED, adult, 1);   // 10,000원
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 7000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
+        assertThat(find(failed).getStatus()).isEqualTo(RefundStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("PG 취소 금액이 완료된 환불 금액보다 적으면 불일치로 본다.")
+    void syncWithPgCancelledAmount_lessThanCompleted_Mismatch() {
+        //given
+        saveRefund(RefundStatus.COMPLETED, adult, 1);
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 0L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
+    }
+
     private Long saveRefund(RefundStatus status, OrderItem orderItem, int quantity) {
         return saveRefund(status, orderItem, quantity, now);
     }
@@ -314,6 +436,10 @@ class RefundCommandServiceTest {
             case COMPLETED -> {
                 refund.markAsProcessing();
                 refund.markAsComplete(at);
+            }
+            case DEAD -> {
+                refund.markAsProcessing();
+                refund.markAsDead("error");
             }
             default -> throw new IllegalArgumentException("지원하지 않는 상태: " + status);
         }

@@ -1,6 +1,9 @@
 package com.example.attractionreservation.domain.refund.facade;
 
 import com.example.attractionreservation.domain.payment.port.PaymentGateway;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayResponse;
+import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymentStatus;
 import com.example.attractionreservation.domain.refund.dto.ClaimedRefund;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.service.RefundCommandService;
@@ -17,10 +20,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -122,6 +128,65 @@ class RefundProcessorTest {
         verify(refundCommandService).recordDead(REFUND_ID, errorCode.getMessage());
         verify(refundCommandService, never()).recordFailure(anyLong(), any(), any());
         verify(refundCommandService, never()).recordComplete(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("PG 취소 실패를 기록하려는 사이 취소 웹훅이 먼저 완료 처리했으면 예외를 던지지 않고 건너뛴다.")
+    void process_failureRecordAfterSynced_Skip() {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+        given(refundCommandService.recordFailure(eq(REFUND_ID), anyString(), any()))
+                .willThrow(new BusinessException(ErrorCode.REFUND_INVALID_STATUS_TRANSITION));
+
+        //when & then
+        assertThatCode(() -> refundProcessor.process(REFUND_ID)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("PG를 다시 조회해 취소된 누적 금액으로 환불 상태를 맞추고 그 결과를 반환한다.")
+    void syncWithPg_cancelled_SyncWithCancelledAmount() {
+        //given
+        given(paymentGateway.getPayment("pg-id")).willReturn(Optional.of(new PaymentGatewayResponse(
+                "pg-id", GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 20000L, Instant.now(), List.of())));
+        given(refundCommandService.syncWithPgCancelledAmount(eq("pg-id"), eq(20000L), any()))
+                .willReturn(PaymentSyncResult.REFUND_SYNCED);
+
+        //when
+        PaymentSyncResult result = refundProcessor.syncWithPg("pg-id");
+
+        //then
+        assertEquals(PaymentSyncResult.REFUND_SYNCED, result);
+    }
+
+    @Test
+    @DisplayName("PG 응답에 취소 금액이 없으면 0으로 보고 환불 상태를 맞춘다.")
+    void syncWithPg_noCancelledAmount_SyncWithZero() {
+        //given
+        given(paymentGateway.getPayment("pg-id")).willReturn(Optional.of(new PaymentGatewayResponse(
+                "pg-id", GatewayPaymentStatus.PAID, 50000L, null, Instant.now(), List.of())));
+        given(refundCommandService.syncWithPgCancelledAmount(eq("pg-id"), eq(0L), any()))
+                .willReturn(PaymentSyncResult.ALREADY_DONE);
+
+        //when
+        PaymentSyncResult result = refundProcessor.syncWithPg("pg-id");
+
+        //then
+        assertEquals(PaymentSyncResult.ALREADY_DONE, result);
+    }
+
+    @Test
+    @DisplayName("PG에 결제가 없으면 재시도할 수 있도록 예외를 던지고 환불 상태를 바꾸지 않는다.")
+    void syncWithPg_pgPaymentNotFound_Fail() {
+        //given
+        given(paymentGateway.getPayment("pg-id")).willReturn(Optional.empty());
+
+        //when & then
+        assertThatThrownBy(() -> refundProcessor.syncWithPg("pg-id"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_PG_PAYMENT_NOT_FOUND.getMessage());
+        verify(refundCommandService, never()).syncWithPgCancelledAmount(anyString(), anyLong(), any());
     }
 
     @Test

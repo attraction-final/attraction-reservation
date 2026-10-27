@@ -6,9 +6,14 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Import;
@@ -16,9 +21,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.sql.Timestamp;
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
@@ -27,6 +37,9 @@ class TicketProductRepositoryTest {
 
     @Autowired
     private TicketProductRepository ticketProductRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private TicketType firstType;
     private TicketType secondType;
@@ -231,6 +244,209 @@ class TicketProductRepositoryTest {
         assertThat(result.getTotalPages()).isEqualTo(2);
         assertThat(result.getNumber()).isZero();
         assertThat(result.hasNext()).isTrue();
+    }
+
+    @ParameterizedTest
+    @EnumSource(Sort.Direction.class)
+    @DisplayName("요청한 방향에 따라 상품명을 정렬한다")
+    void findAllByCondition_NameSort_AppliesDirection(Sort.Direction direction) {
+        // given
+        ticketProductRepository.save(
+                createProduct("sort-test-B", firstType, TicketProductStatus.ON_SALE)
+        );
+        ticketProductRepository.save(
+                createProduct("sort-test-A", firstType, TicketProductStatus.ON_SALE)
+        );
+        ticketProductRepository.flush();
+
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, "name"));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "sort-test-", null, null, pageable
+        );
+
+        // then
+        String[] expectedNames = direction.isAscending()
+                ? new String[]{"sort-test-A", "sort-test-B"}
+                : new String[]{"sort-test-B", "sort-test-A"};
+
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getName)
+                .containsExactly(expectedNames);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("이름 오름차순 정렬 후 같은 이름은 ID 내림차순으로 정렬한다")
+    void findAllByCondition_MultipleSorts_AppliesPriority() {
+        // given
+        TicketProduct firstB = ticketProductRepository.save(
+                createProduct("multi-sort-B", firstType, TicketProductStatus.ON_SALE)
+        );
+        TicketProduct productA = ticketProductRepository.save(
+                createProduct("multi-sort-A", firstType, TicketProductStatus.ON_SALE)
+        );
+        TicketProduct secondB = ticketProductRepository.save(
+                createProduct("multi-sort-B", firstType, TicketProductStatus.ON_SALE)
+        );
+        ticketProductRepository.flush();
+
+        Pageable pageable = PageRequest.of(
+                0,
+                10,
+                Sort.by(Sort.Order.asc("name"), Sort.Order.desc("id"))
+        );
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "multi-sort-", null, null, pageable
+        );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getId)
+                .containsExactly(
+                        productA.getId(),
+                        secondB.getId(),
+                        firstB.getId()
+                );
+    }
+
+    @Test
+    @DisplayName("검색 조건으로 페이징해도 전체 건수는 검색에 일치하는 상품 수를 반환한다")
+    void findAllByCondition_FilteredPagination_ReturnsFilteredTotal() {
+        // given
+        Pageable pageable = PageRequest.of(1, 1, Sort.by(Sort.Direction.ASC, "id"));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                null,
+                firstType,
+                TicketProductStatus.ON_SALE,
+                pageable
+        );
+
+        // then
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getName)
+                .containsExactly("롯데월드 종일권");
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(1);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+        assertThat(result.isLast()).isTrue();
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 정렬 필드를 요청하면 예외가 발생한다")
+    void findAllByCondition_InvalidSortProperty_ThrowsException() {
+        // given
+        Pageable pageable = PageRequest.of(
+                0, 10, Sort.by(Sort.Direction.ASC, "unknownField")
+        );
+
+        // when & then
+        assertThatThrownBy(() -> ticketProductRepository.findAllByCondition(
+                null, null, null, pageable
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_SORT_PROPERTY)
+                );
+    }
+
+    @ParameterizedTest(name = "{0} {1} 정렬")
+    @CsvSource({
+            "type, ASC", "type, DESC",
+            "price, ASC", "price, DESC",
+            "description, ASC", "description, DESC",
+            "status, ASC", "status, DESC",
+            "stock, ASC", "stock, DESC"
+    })
+    @DisplayName("상품 필드별로 요청한 방향에 따라 정렬한다")
+    void findAllByCondition_ProductFieldSort_AppliesDirection(
+            String property, Sort.Direction direction
+    ) {
+        // given: 정렬 대상 필드만 다르게 하고 큰 값을 먼저 저장한다.
+        TicketProduct higher = ticketProductRepository.save(createSortProduct(property, false));
+        TicketProduct lower = ticketProductRepository.save(createSortProduct(property, true));
+        ticketProductRepository.flush();
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, property));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "field-sort-test", null, null, pageable
+        );
+
+        // then
+        Long[] expectedIds = direction.isAscending()
+                ? new Long[]{lower.getId(), higher.getId()}
+                : new Long[]{higher.getId(), lower.getId()};
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getId)
+                .containsExactly(expectedIds);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @ParameterizedTest(name = "{0} {1} 정렬")
+    @CsvSource({
+            "createdAt, ASC", "createdAt, DESC",
+            "updatedAt, ASC", "updatedAt, DESC"
+    })
+    @DisplayName("생성 시각과 수정 시각을 각각 요청한 방향으로 정렬한다")
+    void findAllByCondition_AuditTimeSort_AppliesDirection(
+            String property, Sort.Direction direction
+    ) {
+        // given
+        TicketProduct later = ticketProductRepository.save(createSortProduct(property, false));
+        TicketProduct earlier = ticketProductRepository.save(createSortProduct(property, true));
+        ticketProductRepository.flush();
+
+        Instant earlyTime = Instant.parse("2026-01-01T00:00:00Z");
+        Instant lateTime = earlyTime.plusSeconds(60);
+        // 두 시각의 순서를 반대로 설정해 createdAt과 updatedAt의 잘못된 매핑도 검증한다.
+        setAuditTimes(later.getId(),
+                property.equals("createdAt") ? lateTime : earlyTime,
+                property.equals("updatedAt") ? lateTime : earlyTime);
+        setAuditTimes(earlier.getId(),
+                property.equals("createdAt") ? earlyTime : lateTime,
+                property.equals("updatedAt") ? earlyTime : lateTime);
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, property));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "field-sort-test", null, null, pageable
+        );
+
+        // then
+        Long[] expectedIds = direction.isAscending()
+                ? new Long[]{earlier.getId(), later.getId()}
+                : new Long[]{later.getId(), earlier.getId()};
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getId)
+                .containsExactly(expectedIds);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    private TicketProduct createSortProduct(String property, boolean lower) {
+        return new TicketProduct(
+                "field-sort-test",
+                property.equals("price") && lower ? 10000 : 50000,
+                property.equals("description") && lower ? "A description" : "B description",
+                property.equals("type") && lower ? TicketType.AFTERNOON : TicketType.ALL_DAY,
+                property.equals("stock") && lower ? 10 : 100,
+                property.equals("status") && lower
+                        ? TicketProductStatus.ON_SALE : TicketProductStatus.STOPPED
+        );
+    }
+
+    private void setAuditTimes(Long id, Instant createdAt, Instant updatedAt) {
+        jdbcTemplate.update(
+                "UPDATE ticket_products SET created_at = ?, updated_at = ? WHERE id = ?",
+                Timestamp.from(createdAt), Timestamp.from(updatedAt), id
+        );
     }
 
     private TicketProduct createProduct(

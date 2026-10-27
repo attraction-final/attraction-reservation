@@ -44,6 +44,9 @@ public enum ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "유저를 찾을 수 없습니다."),
+    USER_STATUS_SAME(HttpStatus.CONFLICT, "현재 회원 상태와 동일합니다."),
+    USER_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "허용되지 않는 회원 상태 변경입니다."),
+
     // auth
     INVALID_LOGIN_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
     USER_NOT_ACTIVE(HttpStatus.FORBIDDEN, "이용할 수 없는 회원 상태입니다."),
@@ -103,6 +106,10 @@ public enum ErrorCode {
     RESERVATION_STATUS_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "예약 완료 상태에서만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
     INVALID_RESERVATION_TARGET_STATUS(HttpStatus.BAD_REQUEST, "변경할 예약 상태는 이용 완료 또는 노쇼만 가능합니다."),
     RESERVATION_SLOT_NOT_ENDED(HttpStatus.CONFLICT, "슬롯 종료 후에만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
+
+    //routeRecommendation
+    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다"),
+    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
 
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),

@@ -4,6 +4,7 @@ package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import com.example.attractionreservation.global.util.KstTime
 
 //경로 탐색 결과
 public record RouteSearchResult(

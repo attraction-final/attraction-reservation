@@ -1,5 +1,5 @@
 package com.example.attractionreservation.domain.routeRecommendation.entity.enums;
-
+//추천 결과에 포한됨 어트랙션 범위
 public enum RouteResultType {
     FULL, //선택한 어트랙션 전부 포함
     PARTIAL, //일부만 포함

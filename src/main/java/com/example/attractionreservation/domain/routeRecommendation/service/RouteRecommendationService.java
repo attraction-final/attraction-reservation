@@ -46,7 +46,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-public class RouteRecommendationService {
+public class 정RouteRecommendationService {
 
     private static final LocalTime AFTERNOON_TICKET_START = LocalTime.of(15, 0);
     private static final long CANCEL_DEADLINE_MINUTES = 30;

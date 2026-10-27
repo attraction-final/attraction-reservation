@@ -70,6 +70,13 @@ public class PaymentService {
     }
 
     @Transactional
+    public void lockPaymentByOrderIdIfExists(Long orderId) {
+        // 결제 승인 경로와 잠금 순서를 맞추기 위해 결제 행을 먼저 잠근다.
+        // 여기서는 결제 상태를 변경하지 않는다.
+        paymentRepository.findWithLockByOrderId(orderId);
+    }
+
+    @Transactional
     public void cancelPendingPaymentIfExists(Long userId, Long orderId) {
         // 결제 정보가 아직 생성되지 않은 주문도 취소할 수 있다.
         Payment payment = paymentRepository.findWithLockByOrderId(orderId)

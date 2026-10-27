@@ -86,7 +86,10 @@ public class WebhookEventCommandService {
         switch (result) {
             case NOT_OUR_PAYMENT -> event.markAsIgnored(now);
             case STATE_CONFLICT -> event.markAsDead("원장 상태와 충돌: 수동 확인 필요", now);
-            case APPROVED, ALREADY_DONE, NOT_PAID, PG_FAILED, COMPENSATED -> event.markAsProcessed(now);
+            case REFUND_MISMATCH -> event.markAsDead("PG 취소 금액과 환불 불일치: 수동 확인 필요", now);
+            case APPROVED, ALREADY_DONE, NOT_PAID, PG_FAILED, COMPENSATED, REFUND_SYNCED -> event.markAsProcessed(now);
+            // 환불 동기화를 거친 뒤의 결과만 기록한다.
+            case REFUND_SYNC_REQUIRED -> throw new IllegalArgumentException("환불 동기화 전 결과는 기록할 수 없습니다.");
             // 새 결과가 추가됐는데 분기가 없으면 상태 변경 없이 넘어가지 않도록 실패시켜 재시도 흐름으로 보낸다.
             default -> throw new IllegalArgumentException("기록할 수 없는 처리 결과입니다: " + result);
         }

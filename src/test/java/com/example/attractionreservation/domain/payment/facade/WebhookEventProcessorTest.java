@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.payment.facade;
 
 import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
 import com.example.attractionreservation.domain.payment.service.WebhookEventCommandService;
+import com.example.attractionreservation.domain.refund.facade.RefundProcessor;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +38,9 @@ class WebhookEventProcessorTest {
     @Mock
     private PaymentFacade paymentFacade;
 
+    @Mock
+    private RefundProcessor refundProcessor;
+
     @InjectMocks
     private WebhookEventProcessor webhookEventProcessor;
 
@@ -53,6 +57,54 @@ class WebhookEventProcessorTest {
         //then
         verify(webhookEventCommandService).recordResult(eq(EVENT_ID), eq(PaymentSyncResult.APPROVED), any());
         verify(webhookEventCommandService, never()).recordFailure(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("결제 완료·환불된 결제는 환불 동기화 결과를 기록한다.")
+    void process_refundSyncRequired_RecordRefundSyncResult() {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.REFUND_SYNC_REQUIRED);
+        given(refundProcessor.syncWithPg(PG_ID)).willReturn(PaymentSyncResult.REFUND_SYNCED);
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        verify(webhookEventCommandService).recordResult(eq(EVENT_ID), eq(PaymentSyncResult.REFUND_SYNCED), any());
+        verify(webhookEventCommandService, never()).recordResult(anyLong(), eq(PaymentSyncResult.REFUND_SYNC_REQUIRED), any());
+        verify(webhookEventCommandService, never()).recordFailure(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("환불 동기화가 필요 없는 결과면 환불 동기화를 호출하지 않는다.")
+    void process_notRefundSync_SkipRefundSync() {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.APPROVED);
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        verifyNoInteractions(refundProcessor);
+    }
+
+    @Test
+    @DisplayName("환불 동기화 중 재시도가 필요한 오류가 나면 실패로 기록한다.")
+    void process_refundSyncError_RecordFailure() {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.REFUND_SYNC_REQUIRED);
+        given(refundProcessor.syncWithPg(PG_ID)).willThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        verify(webhookEventCommandService).recordFailure(
+                eq(EVENT_ID), eq(ErrorCode.PAYMENT_GATEWAY_ERROR.getMessage()), any());
+        verify(webhookEventCommandService, never()).recordResult(anyLong(), any(), any());
     }
 
     @Test

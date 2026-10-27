@@ -50,7 +50,7 @@ class TicketDetailServiceTest {
         // given
         Ticket ticket = createTicket(status, null);
 
-        when(ticketRepository.findByIdAndUser_Id(TICKET_ID, USER_ID))
+        when(ticketRepository.findByIdAndOwner_Id(TICKET_ID, USER_ID))
                 .thenReturn(Optional.of(ticket));
 
         // when
@@ -71,7 +71,7 @@ class TicketDetailServiceTest {
                 )
         );
 
-        verify(ticketRepository).findByIdAndUser_Id(TICKET_ID, USER_ID);
+        verify(ticketRepository).findByIdAndOwner_Id(TICKET_ID, USER_ID);
     }
 
     @Test
@@ -81,7 +81,7 @@ class TicketDetailServiceTest {
         Instant enteredAt = Instant.parse("2026-10-25T01:00:00Z");
         Ticket ticket = createTicket(TicketStatus.IN_USE, enteredAt);
 
-        when(ticketRepository.findByIdAndUser_Id(TICKET_ID, USER_ID))
+        when(ticketRepository.findByIdAndOwner_Id(TICKET_ID, USER_ID))
                 .thenReturn(Optional.of(ticket));
 
         // when
@@ -92,7 +92,7 @@ class TicketDetailServiceTest {
         assertThat(response.enteredAt()).isEqualTo(enteredAt);
         assertThat(response.status()).isEqualTo(TicketStatus.IN_USE);
 
-        verify(ticketRepository).findByIdAndUser_Id(TICKET_ID, USER_ID);
+        verify(ticketRepository).findByIdAndOwner_Id(TICKET_ID, USER_ID);
     }
 
     @Test
@@ -101,7 +101,7 @@ class TicketDetailServiceTest {
         // given
         Long ticketId = 999L;
 
-        when(ticketRepository.findByIdAndUser_Id(ticketId, USER_ID))
+        when(ticketRepository.findByIdAndOwner_Id(ticketId, USER_ID))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -112,7 +112,7 @@ class TicketDetailServiceTest {
                                 .isEqualTo(ErrorCode.TICKET_NOT_FOUND)
                 );
 
-        verify(ticketRepository).findByIdAndUser_Id(ticketId, USER_ID);
+        verify(ticketRepository).findByIdAndOwner_Id(ticketId, USER_ID);
     }
 
     private Ticket createTicket(TicketStatus status, Instant enteredAt) {

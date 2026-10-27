@@ -148,6 +148,38 @@ class RefundTest {
         assertEquals(status, refund.getStatus());
     }
 
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"PROCESSING", "FAILED", "DEAD"})
+    @DisplayName("PG에 보낸 적이 있는 환불은 PG 재조회로 취소가 확인되면 COMPLETED가 되고 완료 시각이 기록된다.")
+    void markAsCompleteByPg_sentToPg_Completed(RefundStatus status) {
+        //given
+        Refund refund = createRefundWithStatus(status);
+
+        //when
+        refund.markAsCompleteByPg(NOW);
+
+        //then
+        assertEquals(RefundStatus.COMPLETED, refund.getStatus());
+        assertEquals(NOW, refund.getCompletedAt());
+        assertFalse(refund.isProcessable(NOW.plus(Duration.ofDays(1)), STALE_TIMEOUT));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"REQUESTED", "COMPLETED"})
+    @DisplayName("PG에 보낸 적이 없거나 이미 완료된 환불은 PG 기준 완료 처리할 수 없다.")
+    void markAsCompleteByPg_notSentOrCompleted_Fail(RefundStatus status) {
+        //given
+        Refund refund = createRefundWithStatus(status);
+        Instant completedAt = refund.getCompletedAt();
+
+        //when & then
+        assertThatThrownBy(() -> refund.markAsCompleteByPg(NOW.plusSeconds(1)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(status, refund.getStatus());
+        assertEquals(completedAt, refund.getCompletedAt());
+    }
+
     @Test
     @DisplayName("첫 PG 취소에 실패하면 FAILED가 되고 1분 뒤 재시도로 예약되며 완료 시각은 기록되지 않는다.")
     void markAsFailed_firstAttempt_RetryAfterOneMinute() {

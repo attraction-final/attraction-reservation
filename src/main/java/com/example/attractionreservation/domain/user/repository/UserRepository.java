@@ -19,6 +19,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmail(String email);
 
+    // 제공자와 제공자 회원 ID로 소셜 회원을 식별한다.
     Optional<User> findByProviderAndProviderUserId(
             AuthProvider provider,
             String providerUserId

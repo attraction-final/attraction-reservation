@@ -16,7 +16,7 @@ public record PortOnePaymentResponse(
         List<PortOneCancellation> cancellations
 ) {
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Amount(Long total) {}
+    public record Amount(Long total, Long cancelled) {}
 
     // 응답의 id 대신 요청한 pgId를 사용한다.
     public PaymentGatewayResponse toGatewayResponse(String pgId) {
@@ -24,6 +24,7 @@ public record PortOnePaymentResponse(
                 pgId,
                 toGatewayStatus(status),
                 amount == null ? null : amount.total(),
+                amount == null ? null : amount.cancelled(),
                 paidAt,
                 cancellations == null ? List.of() : cancellations.stream()
                         .map(PortOneCancellation::toGatewayResponse)

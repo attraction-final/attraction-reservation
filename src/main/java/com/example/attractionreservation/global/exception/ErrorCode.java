@@ -109,6 +109,10 @@ public enum ErrorCode {
     INVALID_RESERVATION_TARGET_STATUS(HttpStatus.BAD_REQUEST, "변경할 예약 상태는 이용 완료 또는 노쇼만 가능합니다."),
     RESERVATION_SLOT_NOT_ENDED(HttpStatus.CONFLICT, "슬롯 종료 후에만 이용 완료 또는 노쇼로 변경할 수 있습니다."),
 
+    //routeRecommendation
+    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다"),
+    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
+
     //payment
     PAYMENT_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "유효하지 않은 결제 금액입니다."),
     PAYMENT_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 전이입니다."),

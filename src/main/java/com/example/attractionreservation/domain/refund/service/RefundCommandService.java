@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.refund.service;
 
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
 import com.example.attractionreservation.domain.refund.dto.ClaimedRefund;
@@ -41,6 +42,10 @@ public class RefundCommandService {
     // 처리 중 상태로 이 시간이 지나면 서버가 멈춘 것으로 보고 다시 점유한다.
     // PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) = 45초)보다 길어야 한다.
     static final Duration STALE_PROCESSING_TIMEOUT = Duration.ofMinutes(5);
+
+    // PG에 보낸 적이 있어 PG 취소 금액으로 완료 여부를 맞출 수 있는 환불 상태
+    private static final List<RefundStatus> PG_SYNC_TARGET_STATUSES =
+            List.of(RefundStatus.PROCESSING, RefundStatus.FAILED, RefundStatus.DEAD);
 
     private final RefundRepository refundRepository;
     private final RefundItemRepository refundItemRepository;
@@ -101,7 +106,49 @@ public class RefundCommandService {
         Payment payment = getPaymentWithLock(refundId);
         Refund refund = getWithLock(refundId);
         refund.markAsComplete(now);
+        updatePaymentAndOrderStatus(payment);
+    }
 
+    /**
+     * PG에서 취소된 누적 금액으로 환불 상태를 맞춘다. 취소 웹훅 처리에서 사용한다.
+     *
+     * <p>{@code PG 취소 금액 − 완료 환불 합계}가 0이면 이미 맞다. 이 차이와 금액이 같은 미완료 환불
+     * (PROCESSING·FAILED·DEAD)이 정확히 1건이면 PG에 반영된 것으로 보고 완료 처리한다.
+     * REQUESTED는 아직 PG에 보낸 적이 없으므로 후보가 아니다. 그 밖의 경우는 자동으로 맞추지 않는다.
+     *
+     * <p>결과 기록과 같이 결제를 먼저 잠그므로, 같은 환불의 완료 기록과 겹치면 한쪽만 완료한다.
+     *
+     * @return ALREADY_DONE(이미 맞음), REFUND_SYNCED(1건 완료), REFUND_MISMATCH(수동 확인 필요)
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public PaymentSyncResult syncWithPgCancelledAmount(String pgId, long pgCancelledAmount, Instant now) {
+        Payment payment = paymentRepository.findWithLockByPgId(pgId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+
+        long completedAmount = refundRepository.sumRefundAmountByPaymentIdAndStatus(
+                payment.getId(), RefundStatus.COMPLETED);
+        long unsyncedAmount = pgCancelledAmount - completedAmount;
+
+        if (unsyncedAmount == 0) {
+            return PaymentSyncResult.ALREADY_DONE;
+        }
+        if (unsyncedAmount < 0 || unsyncedAmount > Integer.MAX_VALUE) {
+            return PaymentSyncResult.REFUND_MISMATCH;
+        }
+
+        List<Long> candidateIds = refundRepository.findIdsByPaymentIdAndStatusInAndRefundAmount(
+                payment.getId(), PG_SYNC_TARGET_STATUSES, (int) unsyncedAmount);
+        if (candidateIds.size() != 1) {
+            return PaymentSyncResult.REFUND_MISMATCH;
+        }
+
+        Refund refund = getWithLock(candidateIds.get(0));
+        refund.markAsCompleteByPg(now);
+        updatePaymentAndOrderStatus(payment);
+        return PaymentSyncResult.REFUND_SYNCED;
+    }
+
+    private void updatePaymentAndOrderStatus(Payment payment) {
         Order order = payment.getOrder();
         if (isAllRefunded(order)) {
             payment.markAsRefunded();

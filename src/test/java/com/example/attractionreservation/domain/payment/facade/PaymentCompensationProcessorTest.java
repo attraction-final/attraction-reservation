@@ -513,6 +513,6 @@ class PaymentCompensationProcessorTest {
     }
 
     private PaymentGatewayResponse pgPayment(GatewayPaymentStatus status, PaymentCancellationResponse... cancellations) {
-        return new PaymentGatewayResponse(PG_ID, status, 9999L, null, List.of(cancellations));
+        return new PaymentGatewayResponse(PG_ID, status, 9999L, null, null, List.of(cancellations));
     }
 }

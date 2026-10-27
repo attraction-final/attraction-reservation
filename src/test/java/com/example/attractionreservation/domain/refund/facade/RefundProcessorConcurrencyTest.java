@@ -5,7 +5,13 @@ import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.entity.WebhookEvent;
+import com.example.attractionreservation.domain.payment.entity.enums.WebhookStatus;
+import com.example.attractionreservation.domain.payment.facade.WebhookEventProcessor;
 import com.example.attractionreservation.domain.payment.port.PaymentGateway;
+import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayResponse;
+import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymentStatus;
 import com.example.attractionreservation.domain.refund.entity.Refund;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.service.RefundService;
@@ -13,6 +19,8 @@ import com.example.attractionreservation.domain.ticketProduct.entity.TicketProdu
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,11 +50,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.BDDMockito.willThrow;
 
 /**
  * 즉시 시도와 스케줄러가 겹쳐도 PG 취소가 중복되지 않고, 같은 결제의 환불이 한 번에 하나씩 처리되는지
- * 실제 MySQL 락으로 검증한다. PG는 응답에 시간이 걸리는 가짜 구현으로 대체한다.
+ * 실제 MySQL 락으로 검증한다. 취소 웹훅으로 환불 상태를 맞추는 흐름도 웹훅 처리부터 DB까지 함께 검증한다. PG는 응답에 시간이 걸리는 가짜 구현으로 대체한다.
  */
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 @Import(TestcontainersConfiguration.class)
@@ -59,6 +70,9 @@ class RefundProcessorConcurrencyTest {
 
     @Autowired
     private RefundService refundService;
+
+    @Autowired
+    private WebhookEventProcessor webhookEventProcessor;
 
     @Autowired
     private TransactionTemplate transactionTemplate;
@@ -128,6 +142,7 @@ class RefundProcessorConcurrencyTest {
     @AfterEach
     void tearDown() {
         transactionTemplate.executeWithoutResult(status -> {
+            entityManager.createQuery("delete from WebhookEvent").executeUpdate();
             entityManager.createQuery("delete from RefundItem").executeUpdate();
             entityManager.createQuery("delete from Refund").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
@@ -174,6 +189,75 @@ class RefundProcessorConcurrencyTest {
         assertThat(pgCalls.get(1).get(1)).isEqualTo(50000L - firstAmount);
         assertThat(findRefund(adultRefund).getStatus()).isEqualTo(RefundStatus.COMPLETED);
         assertThat(findRefund(childRefund).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("PG 취소 응답을 기다리는 사이 취소 웹훅이 먼저 완료 처리해도 환불은 한 번만 완료되고 오류 없이 끝난다.")
+    void syncWithPg_whileCancelInFlight_CompleteOnce() throws Exception {
+        //given
+        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
+                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(), List.of())));
+
+        // PG 취소가 PG에 도착한 뒤 응답 전에 멈춰, 그 사이 웹훅을 처리한다.
+        CountDownLatch cancelArrived = new CountDownLatch(1);
+        CountDownLatch webhookDone = new CountDownLatch(1);
+        willAnswer(invocation -> {
+            pgCalls.add(List.of(invocation.getArgument(2), invocation.getArgument(3)));
+            cancelArrived.countDown();
+            webhookDone.await(10, TimeUnit.SECONDS);
+            return null;
+        }).given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+
+        //when
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> processing = executor.submit(() -> refundProcessor.processById(refundId));
+        PaymentSyncResult syncResult;
+        try {
+            assertThat(cancelArrived.await(10, TimeUnit.SECONDS)).isTrue();
+            syncResult = refundProcessor.syncWithPg(pgId);
+        } finally {
+            webhookDone.countDown();
+        }
+        processing.get(30, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        //then
+        assertThat(syncResult).isEqualTo(PaymentSyncResult.REFUND_SYNCED);
+        assertThat(pgCalls).containsExactly(List.of(10000L, 50000L));
+        assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(refundProcessor.syncWithPg(pgId)).isEqualTo(PaymentSyncResult.ALREADY_DONE);
+    }
+
+    @Test
+    @DisplayName("PG에는 취소됐지만 실패로 기록된 환불은 취소 웹훅을 처리하면 COMPLETED가 되고 웹훅은 PROCESSED가 된다.")
+    void processWebhook_cancelledButRecordedFailed_RefundCompleted() {
+        //given
+        // PG 응답이 타임아웃 나 실패로 기록됐지만 PG에는 취소가 반영된 상황
+        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+        refundProcessor.processById(refundId);
+        assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.FAILED);
+
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
+                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(), List.of())));
+        Long eventId = transactionTemplate.execute(status -> {
+            WebhookEvent event = WebhookEvent.receive("webhook-1", pgId, "WebhookTransactionCancelled", "{}");
+            entityManager.persist(event);
+            return event.getId();
+        });
+
+        //when
+        webhookEventProcessor.process(eventId);
+
+        //then
+        assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        WebhookStatus webhookStatus = transactionTemplate.execute(
+                status -> entityManager.find(WebhookEvent.class, eventId).getStatus());
+        assertThat(webhookStatus).isEqualTo(WebhookStatus.PROCESSED);
     }
 
     private void runConcurrently(Runnable task) throws Exception {

@@ -24,7 +24,8 @@ public enum RefundStatus {
     FAILED {
         @Override
         public boolean canTransitTo(RefundStatus nextStatus) {
-            return nextStatus == PROCESSING;
+            // FAILED → COMPLETED는 실패로 기록됐지만 PG에는 취소가 반영된 것을 웹훅으로 확인한 경우
+            return nextStatus == PROCESSING || nextStatus == COMPLETED;
         }
     },
     // PG 취소 완료
@@ -38,7 +39,8 @@ public enum RefundStatus {
     DEAD {
         @Override
         public boolean canTransitTo(RefundStatus nextStatus) {
-            return false;
+            // DEAD → COMPLETED는 PG에 취소가 반영된 것을 웹훅으로 확인한 경우
+            return nextStatus == COMPLETED;
         }
     };
 

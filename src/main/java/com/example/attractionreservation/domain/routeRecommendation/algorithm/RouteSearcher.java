@@ -70,7 +70,7 @@ public class RouteSearcher {
             }
             CandidateSlot slot = availableSLot.get();
             int waitMinutes = Math.toIntExact(
-                    Duration.between(arrivalAt, slot.startsAt()).toMinutes()
+                    Duration.between(arrivalAt.atZone(KstTime.ZONE), slot.startsAt().atZone(KstTime.ZONE)).toMinutes()
             );
 
             PlannedVisit visit = new PlannedVisit(

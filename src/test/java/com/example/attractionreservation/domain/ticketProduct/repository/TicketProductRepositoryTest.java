@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -20,7 +21,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+
+import java.sql.Timestamp;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,6 +37,9 @@ class TicketProductRepositoryTest {
 
     @Autowired
     private TicketProductRepository ticketProductRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private TicketType firstType;
     private TicketType secondType;
@@ -347,6 +355,98 @@ class TicketProductRepositoryTest {
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_SORT_PROPERTY)
                 );
+    }
+
+    @ParameterizedTest(name = "{0} {1} 정렬")
+    @CsvSource({
+            "type, ASC", "type, DESC",
+            "price, ASC", "price, DESC",
+            "description, ASC", "description, DESC",
+            "status, ASC", "status, DESC",
+            "stock, ASC", "stock, DESC"
+    })
+    @DisplayName("상품 필드별로 요청한 방향에 따라 정렬한다")
+    void findAllByCondition_ProductFieldSort_AppliesDirection(
+            String property, Sort.Direction direction
+    ) {
+        // given: 정렬 대상 필드만 다르게 하고 큰 값을 먼저 저장한다.
+        TicketProduct higher = ticketProductRepository.save(createSortProduct(property, false));
+        TicketProduct lower = ticketProductRepository.save(createSortProduct(property, true));
+        ticketProductRepository.flush();
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, property));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "field-sort-test", null, null, pageable
+        );
+
+        // then
+        Long[] expectedIds = direction.isAscending()
+                ? new Long[]{lower.getId(), higher.getId()}
+                : new Long[]{higher.getId(), lower.getId()};
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getId)
+                .containsExactly(expectedIds);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @ParameterizedTest(name = "{0} {1} 정렬")
+    @CsvSource({
+            "createdAt, ASC", "createdAt, DESC",
+            "updatedAt, ASC", "updatedAt, DESC"
+    })
+    @DisplayName("생성 시각과 수정 시각을 각각 요청한 방향으로 정렬한다")
+    void findAllByCondition_AuditTimeSort_AppliesDirection(
+            String property, Sort.Direction direction
+    ) {
+        // given
+        TicketProduct later = ticketProductRepository.save(createSortProduct(property, false));
+        TicketProduct earlier = ticketProductRepository.save(createSortProduct(property, true));
+        ticketProductRepository.flush();
+
+        Instant earlyTime = Instant.parse("2026-01-01T00:00:00Z");
+        Instant lateTime = earlyTime.plusSeconds(60);
+        // 두 시각의 순서를 반대로 설정해 createdAt과 updatedAt의 잘못된 매핑도 검증한다.
+        setAuditTimes(later.getId(),
+                property.equals("createdAt") ? lateTime : earlyTime,
+                property.equals("updatedAt") ? lateTime : earlyTime);
+        setAuditTimes(earlier.getId(),
+                property.equals("createdAt") ? earlyTime : lateTime,
+                property.equals("updatedAt") ? earlyTime : lateTime);
+        Pageable pageable = PageRequest.of(0, 10, Sort.by(direction, property));
+
+        // when
+        Page<TicketProduct> result = ticketProductRepository.findAllByCondition(
+                "field-sort-test", null, null, pageable
+        );
+
+        // then
+        Long[] expectedIds = direction.isAscending()
+                ? new Long[]{earlier.getId(), later.getId()}
+                : new Long[]{later.getId(), earlier.getId()};
+        assertThat(result.getContent())
+                .extracting(TicketProduct::getId)
+                .containsExactly(expectedIds);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    private TicketProduct createSortProduct(String property, boolean lower) {
+        return new TicketProduct(
+                "field-sort-test",
+                property.equals("price") && lower ? 10000 : 50000,
+                property.equals("description") && lower ? "A description" : "B description",
+                property.equals("type") && lower ? TicketType.AFTERNOON : TicketType.ALL_DAY,
+                property.equals("stock") && lower ? 10 : 100,
+                property.equals("status") && lower
+                        ? TicketProductStatus.ON_SALE : TicketProductStatus.STOPPED
+        );
+    }
+
+    private void setAuditTimes(Long id, Instant createdAt, Instant updatedAt) {
+        jdbcTemplate.update(
+                "UPDATE ticket_products SET created_at = ?, updated_at = ? WHERE id = ?",
+                Timestamp.from(createdAt), Timestamp.from(updatedAt), id
+        );
     }
 
     private TicketProduct createProduct(

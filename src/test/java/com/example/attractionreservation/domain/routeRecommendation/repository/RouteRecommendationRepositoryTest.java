@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.Route
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(JpaConfig.class)
+@Import({JpaConfig.class, QuerydslConfig.class})
 public class RouteRecommendationRepositoryTest {
     @Autowired
     private RouteRecommendationRepository routeRecommendationRepository;

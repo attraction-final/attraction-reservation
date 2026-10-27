@@ -64,6 +64,22 @@ public class Order extends BaseTimeEntity {
         this.status = OrderStatus.CANCELLED;
     }
 
+    public void markAsPartiallyRefunded() {
+        if (!this.status.canTransitTo(OrderStatus.PARTIALLY_REFUNDED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.PARTIALLY_REFUNDED;
+    }
+
+    public void markAsRefunded() {
+        if (!this.status.canTransitTo(OrderStatus.REFUNDED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.REFUNDED;
+    }
+
     public void addOrderItem(TicketProduct ticketProduct, int quantity) {
         // 주문 항목의 부모 참조와 주문의 항목 목록을 함께 설정한다.
         OrderItem orderItem = OrderItem.create(this, ticketProduct, quantity);

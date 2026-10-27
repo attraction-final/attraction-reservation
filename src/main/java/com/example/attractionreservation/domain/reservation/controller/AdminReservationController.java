@@ -1,9 +1,6 @@
 package com.example.attractionreservation.domain.reservation.controller;
 
-import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationCondition;
-import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationDetailResponse;
-import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationListResponse;
-import com.example.attractionreservation.domain.reservation.dto.SearchAdminReservationResponse;
+import com.example.attractionreservation.domain.reservation.dto.*;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -49,5 +46,25 @@ public class AdminReservationController {
     ) {
         SearchAdminReservationDetailResponse response = reservationService.findAdminReservationById(reservationId);
         return ResponseEntity.ok(ApiResponse.ok("예약 상세 조회에 성공했습니다.", response));
+    }
+
+    // 관리자 예약 강제 취소
+    @PatchMapping("/{reservationId}/cancel")
+    public ResponseEntity<ApiResponse<UpdateAdminReservationCancelResponse>> adminReservationCancel(
+            @Min(1) @PathVariable Long reservationId,
+            @Valid @RequestBody UpdateAdminReservationCancelRequest request
+    ) {
+        UpdateAdminReservationCancelResponse response = reservationService.adminReservationCancel(reservationId, request);
+        return ResponseEntity.ok(ApiResponse.ok("예약 강제 취소에 성공했습니다.", response));
+    }
+
+    // 관리자 예약 상태 변경
+    @PatchMapping("/{reservationId}/status")
+    public ResponseEntity<ApiResponse<UpdateAdminReservationStatusResponse>> updateReservationStatus(
+            @Min(1) @PathVariable Long reservationId,
+            @Valid @RequestBody UpdateAdminReservationStatusRequest request
+    ) {
+        UpdateAdminReservationStatusResponse response = reservationService.updateReservationStatus(reservationId, request);
+        return ResponseEntity.ok(ApiResponse.ok("예약 상태 변경에 성공했습니다.", response));
     }
 }

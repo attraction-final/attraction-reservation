@@ -16,8 +16,6 @@ import com.example.attractionreservation.domain.user.service.UserService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -234,9 +232,56 @@ public class ReservationService {
 
     // 관리자 예약 상세 조회
     public SearchAdminReservationDetailResponse findAdminReservationById(Long reservationId) {
-        Reservation reservation = reservationRepository.findById(reservationId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
-
+        Reservation reservation = getReservationById(reservationId);
         return SearchAdminReservationDetailResponse.from(reservation);
+    }
+
+    // 관리자 예약 강제 취소
+    @Transactional
+    public UpdateAdminReservationCancelResponse adminReservationCancel(Long reservationId, UpdateAdminReservationCancelRequest request) {
+
+        // 예약 존재 여부 및 RESERVED 상태 검증
+        Reservation reservation = getReservationById(reservationId);
+
+        if (reservation.getStatus() != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        // 취소 상태·시각·사유
+        reservation.adminCancelReservation(request.cancelReason());
+
+        // 슬롯 예약 인원을 1 감소시켜 잔여 정원 복구
+        Long slotId = reservation.getAttractionSlot().getId();
+        attractionSlotService.releaseReservationCapacity(slotId);
+
+        return UpdateAdminReservationCancelResponse.from(reservation);
+    }
+
+    // 관리자 예약 상태 변경
+    @Transactional
+    public UpdateAdminReservationStatusResponse updateReservationStatus(Long reservationId, UpdateAdminReservationStatusRequest request) {
+        Reservation reservation = getReservationById(reservationId);
+
+        // KST 기준 슬롯 종료 이후인지 검증
+        Instant now = Instant.now();
+        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime endTime = reservation.getAttractionSlot().getEndsAt();
+        if (currentTime.isBefore(endTime)) {
+            throw new BusinessException(ErrorCode.RESERVATION_SLOT_NOT_ENDED);
+        }
+
+        reservation.updateReservationStatus(request.status());
+
+        // DB 반영 및 Auditing의 updatedAt 갱신
+        reservationRepository.flush();
+
+        return UpdateAdminReservationStatusResponse.from(reservation);
+    }
+
+    // reservation 공통 처리
+    private Reservation getReservationById(Long reservationId) {
+        return reservationRepository.findById(reservationId).orElseThrow(
+                () -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION)
+        );
     }
 }

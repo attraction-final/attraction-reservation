@@ -1,5 +1,8 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.SearchUserResponse;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
@@ -23,6 +26,11 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import com.example.attractionreservation.domain.user.dto.UpdateUserStatusRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserStatusResponse;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.MediaType;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,6 +39,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 
 @WebMvcTest(AdminUserController.class)
 @Import({
@@ -176,6 +185,230 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.success").value(false));
 
         verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("관리자는 탈퇴 회원의 상세 정보도 조회할 수 있다")
+    void getUserById_adminRequest_returnsMemberDetail() throws Exception {
+        // given
+        SearchUserResponse response = new SearchUserResponse(
+                10L,
+                "detail@example.com",
+                "상세조회회원",
+                Role.USER,
+                UserStatus.WITHDRAWN,
+                LocalDateTime.of(2026, 10, 15, 10, 0),
+                LocalDateTime.of(2026, 10, 15, 12, 0)
+        );
+
+        when(userService.findUserById(10L)).thenReturn(response);
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L)
+                        .with(authenticatedAs("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("회원 상세 조회에 성공했습니다."))
+                .andExpect(jsonPath("$.data.id").value(10))
+                .andExpect(jsonPath("$.data.email")
+                        .value("detail@example.com"))
+                .andExpect(jsonPath("$.data.nickname").value("상세조회회원"))
+                .andExpect(jsonPath("$.data.role").value("USER"))
+                .andExpect(jsonPath("$.data.status").value("WITHDRAWN"))
+                .andExpect(jsonPath("$.data.createdAt")
+                        .value("2026-10-15T10:00:00"))
+                .andExpect(jsonPath("$.data.updatedAt")
+                        .value("2026-10-15T12:00:00"))
+                .andExpect(jsonPath("$.data.password").doesNotExist());
+
+        verify(userService).findUserById(10L);
+    }
+
+    @Test
+    @DisplayName("비로그인 사용자의 상세 조회는 HTTP 401을 반환한다")
+    void getUserById_unauthenticated_returnsUnauthorized() throws Exception {
+        // given: 인증 정보를 전달하지 않는다.
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("일반 회원의 상세 조회는 HTTP 403을 반환한다")
+    void getUserById_regularUser_returnsForbidden() throws Exception {
+        // given: 관리자 권한 없이 요청한다.
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L)
+                        .with(authenticatedAs("USER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("조회 대상 회원이 없으면 HTTP 404를 반환한다")
+    void getUserById_missingMember_returnsNotFound() throws Exception {
+        // given
+        when(userService.findUserById(10L))
+                .thenThrow(new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", 10L)
+                        .with(authenticatedAs("ADMIN")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value(ErrorCode.USER_NOT_FOUND.getMessage()));
+
+        verify(userService).findUserById(10L);
+    }
+
+    @Test
+    @DisplayName("회원 ID가 숫자가 아니면 HTTP 400을 반환한다")
+    void getUserById_invalidIdFormat_returnsBadRequest() throws Exception {
+        // given: Long으로 변환할 수 없는 회원 ID를 전달한다.
+
+        // when & then
+        mockMvc.perform(get("/api/admin/users/{userId}", "abc")
+                        .with(authenticatedAs("ADMIN")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("관리자는 회원 상태를 변경하고 변경 결과를 받는다")
+    void updateUserStatus_adminRequest_returnsUpdatedMember() throws Exception {
+        // given
+        UpdateUserStatusRequest request =
+                new UpdateUserStatusRequest(UserStatus.SUSPENDED);
+
+        when(userService.updateUserStatus(10L, request))
+                .thenReturn(new UpdateUserStatusResponse(
+                        10L,
+                        "user@example.com",
+                        "상태변경회원",
+                        UserStatus.SUSPENDED
+                ));
+
+        // when & then
+        mockMvc.perform(patch("/api/admin/users/{userId}/status", 10L)
+                        .with(authenticatedAs("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message")
+                        .value("회원 상태 변경에 성공했습니다."))
+                .andExpect(jsonPath("$.data.id").value(10))
+                .andExpect(jsonPath("$.data.email").value("user@example.com"))
+                .andExpect(jsonPath("$.data.nickname").value("상태변경회원"))
+                .andExpect(jsonPath("$.data.status").value("SUSPENDED"))
+                .andExpect(jsonPath("$.data.password").doesNotExist());
+
+        verify(userService).updateUserStatus(10L, request);
+    }
+
+    @Test
+    @DisplayName("비로그인 상태 변경 요청은 HTTP 401을 반환한다")
+    void updateUserStatus_unauthenticated_returnsUnauthorized() throws Exception {
+        // given: 유효한 본문을 전달하되 인증 정보는 전달하지 않는다.
+
+        // when & then
+        mockMvc.perform(patch("/api/admin/users/{userId}/status", 10L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    @DisplayName("일반 회원의 상태 변경 요청은 HTTP 403을 반환한다")
+    void updateUserStatus_regularUser_returnsForbidden() throws Exception {
+        // given: 관리자 권한이 없는 인증 정보를 전달한다.
+
+        // when & then
+        mockMvc.perform(patch("/api/admin/users/{userId}/status", 10L)
+                        .with(authenticatedAs("USER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}",
+            "{\"status\":null}",
+            "{\"status\":\"UNKNOWN\"}",
+            "{\"status\":\"\"}"
+    })
+    @DisplayName("누락되거나 유효하지 않은 상태는 HTTP 400을 반환한다")
+    void updateUserStatus_invalidBody_returnsBadRequest(String body)
+            throws Exception {
+        // given: 필수값 또는 enum 변환 조건을 만족하지 않는 본문이다.
+
+        // when & then
+        mockMvc.perform(patch("/api/admin/users/{userId}/status", 10L)
+                        .with(authenticatedAs("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ErrorCode.class,
+            names = {
+                    "USER_NOT_FOUND",
+                    "USER_STATUS_SAME",
+                    "USER_INVALID_STATUS_TRANSITION"
+            }
+    )
+    @DisplayName("상태 변경 업무 예외를 해당 HTTP 상태와 공통 응답으로 반환한다")
+    void updateUserStatus_businessException_returnsExpectedError(
+            ErrorCode errorCode
+    ) throws Exception {
+        // given
+        UpdateUserStatusRequest request =
+                new UpdateUserStatusRequest(UserStatus.SUSPENDED);
+
+        when(userService.updateUserStatus(10L, request))
+                .thenThrow(new BusinessException(errorCode));
+
+        // when & then
+        mockMvc.perform(patch("/api/admin/users/{userId}/status", 10L)
+                        .with(authenticatedAs("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"SUSPENDED"}
+                                """))
+                .andExpect(status().is(errorCode.getStatus().value()))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(errorCode.getMessage()));
+
+        verify(userService).updateUserStatus(10L, request);
     }
 
     private RequestPostProcessor authenticatedAs(String role) {

@@ -58,7 +58,7 @@ class TicketProductSearchControllerTest {
     @DisplayName("검색 조건이 없으면 기본 페이징과 정렬을 사용한다")
     void getTicketProductAll_NoCondition_DefaultPageable() throws Exception {
         // given
-        when(ticketProductService.getTicketProductAll(
+        when(ticketProductService.findTicketProductAll(
                 any(SearchTicketProductCondition.class),
                 any(Pageable.class)
         )).thenAnswer(invocation ->
@@ -85,7 +85,7 @@ class TicketProductSearchControllerTest {
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(ticketProductService).getTicketProductAll(
+        verify(ticketProductService).findTicketProductAll(
                 conditionCaptor.capture(),
                 pageableCaptor.capture()
         );
@@ -118,7 +118,7 @@ class TicketProductSearchControllerTest {
                         TicketProductStatus.ON_SALE
                 );
 
-        when(ticketProductService.getTicketProductAll(
+        when(ticketProductService.findTicketProductAll(
                 any(SearchTicketProductCondition.class),
                 any(Pageable.class)
         )).thenAnswer(invocation ->
@@ -163,7 +163,7 @@ class TicketProductSearchControllerTest {
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(ticketProductService).getTicketProductAll(
+        verify(ticketProductService).findTicketProductAll(
                 conditionCaptor.capture(),
                 pageableCaptor.capture()
         );
@@ -217,7 +217,7 @@ class TicketProductSearchControllerTest {
     @DisplayName("ID 정렬을 직접 지정하면 해당 정렬을 유지한다")
     void getTicketProductAll_IdSort_PreservesRequestedSort() throws Exception {
         // given
-        when(ticketProductService.getTicketProductAll(
+        when(ticketProductService.findTicketProductAll(
                 any(SearchTicketProductCondition.class),
                 any(Pageable.class)
         )).thenAnswer(invocation ->
@@ -235,7 +235,7 @@ class TicketProductSearchControllerTest {
         ArgumentCaptor<Pageable> pageableCaptor =
                 ArgumentCaptor.forClass(Pageable.class);
 
-        verify(ticketProductService).getTicketProductAll(
+        verify(ticketProductService).findTicketProductAll(
                 any(SearchTicketProductCondition.class),
                 pageableCaptor.capture()
         );

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.BeanUtils;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -18,6 +19,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Duration;
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -303,6 +305,181 @@ class RefundTest {
         assertFalse(refund.isProcessable(NOW.plus(STALE_TIMEOUT).minusMillis(1), STALE_TIMEOUT));
     }
 
+    @Test
+    @DisplayName("처리 중인 환불을 확인 대기로 바꾸면 취소 내역 ID와 시작 시각을 기록하고 1분 뒤 첫 확인을 예약한다.")
+    void markAsPgPending_processing_PgPending() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PROCESSING);
+
+        //when
+        refund.markAsPgPending("cancel-1", NOW);
+
+        //then
+        assertEquals(RefundStatus.PG_PENDING, refund.getStatus());
+        assertEquals("cancel-1", refund.getPgCancellationId());
+        assertEquals(NOW, refund.getPgPendingSince());
+        assertEquals(NOW.plus(Duration.ofMinutes(1)), refund.getNextRetryAt());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"REQUESTED", "FAILED", "COMPLETED", "DEAD"})
+    @DisplayName("처리 중이 아닌 환불은 확인 대기로 바꿀 수 없다.")
+    void markAsPgPending_notProcessing_Fail(RefundStatus status) {
+        //given
+        Refund refund = createRefundWithStatus(status);
+
+        //when & then
+        assertThatThrownBy(() -> refund.markAsPgPending("cancel-1", NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(status, refund.getStatus());
+    }
+
+    @Test
+    @DisplayName("확인 대기 환불은 취소를 다시 보내지 않도록 처리 대상이 아니고, 확인 시각부터 확인 대상이다.")
+    void isPgCheckable_pgPending_FromNextCheck() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+        Instant nextCheck = NOW.plus(Duration.ofMinutes(1));
+
+        //when & then
+        assertFalse(refund.isProcessable(NOW.plus(Duration.ofDays(1)), STALE_TIMEOUT));
+        assertTrue(refund.isPgCheckable(nextCheck));
+        assertFalse(refund.isPgCheckable(nextCheck.minusMillis(1)));
+    }
+
+    @Test
+    @DisplayName("확인 대기 환불의 취소 완료를 확인하면 COMPLETED가 되고 완료 시각이 기록된다.")
+    void confirmPgCancelled_pgPending_Completed() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+
+        //when
+        refund.confirmPgCancelled(NOW.plusSeconds(30));
+
+        //then
+        assertEquals(RefundStatus.COMPLETED, refund.getStatus());
+        assertEquals(NOW.plusSeconds(30), refund.getCompletedAt());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"PROCESSING", "FAILED", "DEAD"})
+    @DisplayName("확인 대기가 아닌 환불은 조회 결과로 완료하지 않는다.")
+    void confirmPgCancelled_notPgPending_Fail(RefundStatus status) {
+        //given
+        Refund refund = createRefundWithStatus(status);
+
+        //when & then
+        assertThatThrownBy(() -> refund.confirmPgCancelled(NOW))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+        assertEquals(status, refund.getStatus());
+    }
+
+    @Test
+    @DisplayName("확인 대기 환불의 취소 실패를 확인하면 FAILED가 되어 백오프 후 다시 처리할 수 있다.")
+    void confirmPgCancelFailed_pgPending_Failed() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+
+        //when
+        refund.confirmPgCancelFailed("PG 취소 실패 확인", NOW);
+
+        //then
+        assertEquals(RefundStatus.FAILED, refund.getStatus());
+        assertEquals("PG 취소 실패 확인", refund.getLastError());
+        assertTrue(refund.isProcessable(NOW.plus(Duration.ofMinutes(1)), STALE_TIMEOUT));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0, 1", "3, 3", "10, 10", "45, 30"})
+    @DisplayName("다음 확인 간격은 확인 대기가 된 뒤 지난 시간이고 1분~30분 사이로 제한된다.")
+    void reschedulePgCheck_beforeTimeout_RescheduledWithElapsed(long elapsedMinutes, long expectedDelayMinutes) {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+        Instant now = NOW.plus(Duration.ofMinutes(elapsedMinutes));
+
+        //when
+        refund.reschedulePgCheck(now);
+
+        //then
+        assertEquals(RefundStatus.PG_PENDING, refund.getStatus());
+        assertEquals(now.plus(Duration.ofMinutes(expectedDelayMinutes)), refund.getNextRetryAt());
+    }
+
+    @Test
+    @DisplayName("확인 기한 직전이면 DEAD가 되지 않고 확인 대기를 유지한다.")
+    void reschedulePgCheck_justBeforeTimeout_PgPending() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+
+        //when
+        refund.reschedulePgCheck(NOW.plus(Refund.PG_CHECK_TIMEOUT).minusMillis(1));
+
+        //then
+        assertEquals(RefundStatus.PG_PENDING, refund.getStatus());
+    }
+
+    @Test
+    @DisplayName("확인 기한이 지나도 확정되지 않으면 DEAD가 되고 사유가 기록된다.")
+    void reschedulePgCheck_afterTimeout_Dead() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+
+        //when
+        refund.reschedulePgCheck(NOW.plus(Refund.PG_CHECK_TIMEOUT));
+
+        //then
+        assertEquals(RefundStatus.DEAD, refund.getStatus());
+        assertEquals("PG 취소 확인 기한 초과", refund.getLastError());
+        assertFalse(refund.isPgCheckable(NOW.plus(Duration.ofDays(2))));
+    }
+
+    @Test
+    @DisplayName("점유한 처리의 시도 횟수와 같으면 결과를 기록할 수 있다.")
+    void verifyClaimedBy_sameAttempt_Pass() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PROCESSING);
+
+        //when & then
+        assertThatCode(() -> refund.verifyClaimedBy(1)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("다른 처리가 다시 점유해 시도 횟수가 달라졌으면 이전 처리의 결과는 거부한다.")
+    void verifyClaimedBy_reclaimedByOther_Fail() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PROCESSING);
+        refund.markAsProcessing(); // 멈춘 환불로 보고 다시 점유
+
+        //when & then
+        assertThatThrownBy(() -> refund.verifyClaimedBy(1))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
+    @Test
+    @DisplayName("같은 확인 대기 주기를 확인한 결과는 기록할 수 있다.")
+    void verifyPgPendingSince_sameCycle_Pass() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+
+        //when & then
+        assertThatCode(() -> refund.verifyPgPendingSince(NOW)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("확인 사이에 새 확인 대기 주기가 됐으면 이전 주기의 확인 결과는 거부한다.")
+    void verifyPgPendingSince_otherCycle_Fail() {
+        //given
+        Refund refund = createRefundWithStatus(RefundStatus.PG_PENDING);
+
+        //when & then
+        assertThatThrownBy(() -> refund.verifyPgPendingSince(NOW.minusSeconds(1)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
     private Refund createRefundWithStatus(RefundStatus status) {
         Refund refund = Refund.create(payment, "단순 변심", NOW);
         switch (status) {
@@ -322,6 +499,10 @@ class RefundTest {
                     refund.markAsProcessing();
                     refund.markAsFailed("error", NOW);
                 }
+            }
+            case PG_PENDING -> {
+                refund.markAsProcessing();
+                refund.markAsPgPending("cancel-1", NOW);
             }
         }
         return refund;

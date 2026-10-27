@@ -190,7 +190,7 @@ class WebhookEventCommandServiceTest {
 
     @ParameterizedTest
     @EnumSource(value = PaymentSyncResult.class,
-            names = {"APPROVED", "ALREADY_DONE", "NOT_PAID", "PG_FAILED", "COMPENSATED"})
+            names = {"APPROVED", "ALREADY_DONE", "NOT_PAID", "PG_FAILED", "COMPENSATED", "REFUND_PENDING"})
     @DisplayName("처리가 끝난 결과는 모두 PROCESSED로 기록한다.")
     void recordResult_completedResult_Processed(PaymentSyncResult result) {
         //given

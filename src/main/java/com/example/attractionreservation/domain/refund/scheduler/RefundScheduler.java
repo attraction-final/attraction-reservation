@@ -18,19 +18,23 @@ import org.springframework.stereotype.Component;
 public class RefundScheduler {
     private final RefundProcessor refundProcessor;
     private final int batchSize;
+    private final int pgCheckBatchSize;
 
     public RefundScheduler(
             RefundProcessor refundProcessor,
-            @Value("${payment.refund.scheduler.batch-size:20}") int batchSize
+            @Value("${payment.refund.scheduler.batch-size:20}") int batchSize,
+            // PG 장애로 PG_PENDING이 쌓여도 확인(PG 조회) 때문에 PG 취소 처리가 밀리지 않도록 한 주기의 확인 건수를 따로 제한한다.
+            @Value("${payment.refund.scheduler.pg-check-batch-size:5}") int pgCheckBatchSize
     ) {
         this.refundProcessor = refundProcessor;
         this.batchSize = batchSize;
+        this.pgCheckBatchSize = pgCheckBatchSize;
     }
 
     @Scheduled(fixedDelayString = "${payment.refund.scheduler.fixed-delay:30s}")
     public void processPendingRefunds() {
         try {
-            refundProcessor.processPending(batchSize);
+            refundProcessor.processPending(batchSize, pgCheckBatchSize);
         } catch (RuntimeException e) {
             // 처리 대상 조회 실패 등. 다음 주기에 다시 시도한다.
             log.error("[Refund] 스케줄러 실행 실패", e);

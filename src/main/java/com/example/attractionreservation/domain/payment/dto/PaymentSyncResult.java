@@ -21,5 +21,7 @@ public enum PaymentSyncResult {
     // PG에 반영된 취소로 미완료 환불을 완료 처리
     REFUND_SYNCED,
     // PG 취소 금액과 환불 기록을 맞출 수 없다. 수동 확인이 필요하다.
-    REFUND_MISMATCH
+    REFUND_MISMATCH,
+    // PG가 접수한 환불 취소가 아직 확정되지 않았다. 스케줄러가 조회로 확정한다.
+    REFUND_PENDING
 }

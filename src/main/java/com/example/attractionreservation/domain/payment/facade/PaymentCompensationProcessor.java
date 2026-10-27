@@ -22,7 +22,7 @@ import java.util.Optional;
  * 트랜잭션 없이 "점유(짧은 트랜잭션) → PG 취소 → 결과 기록(짧은 트랜잭션)" 순서로 진행한다.
  *
  * <p>보상 요청이 커밋된 직후 {@link #processByPgId(String)}로 한 번 즉시 시도하고,
- * 실패하거나 시도 전에 서버가 종료된 요청은 스케줄러가 {@link #processPending(int)}로 이어받는다.
+ * 실패하거나 시도 전에 서버가 종료된 요청은 스케줄러가 {@link #processPending(int, int)}로 이어받는다.
  *
  * <p>PG가 취소를 접수만 했거나(REQUESTED) 결과를 해석할 수 없으면 PG_PENDING으로 두고, 취소를 다시 보내지 않는다.
  * 스케줄러가 PG 결제를 조회해 취소 내역으로 확정한다. 웹훅 수신 여부와 관계없이 이 조회가 확정을 책임진다.
@@ -47,8 +47,13 @@ public class PaymentCompensationProcessor {
         }
     }
 
-    // 스케줄러에서 실행. PG 취소 대상을 처리한 뒤, PG 취소 결과를 확인할 대상을 처리한다.
-    public void processPending(int limit) {
+    /**
+     * 스케줄러에서 실행. PG 취소 대상을 처리한 뒤, PG 취소 결과를 확인할 대상을 처리한다.
+     *
+     * @param limit        한 번에 처리할 PG 취소 대상 수
+     * @param pgCheckLimit 한 번에 확인할 PG_PENDING 수. 확인마다 PG를 조회하므로 PG 장애로 쌓여도 PG 취소 처리가 밀리지 않게 따로 제한한다
+     */
+    public void processPending(int limit, int pgCheckLimit) {
         for (Long compensationId : paymentCompensationService.findProcessableIds(Instant.now(), limit)) {
             try {
                 process(compensationId);
@@ -57,7 +62,7 @@ public class PaymentCompensationProcessor {
             }
         }
 
-        for (Long compensationId : paymentCompensationService.findPgCheckableIds(Instant.now(), limit)) {
+        for (Long compensationId : paymentCompensationService.findPgCheckableIds(Instant.now(), pgCheckLimit)) {
             try {
                 confirmPending(compensationId);
             } catch (RuntimeException e) {

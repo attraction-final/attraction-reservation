@@ -40,5 +40,17 @@ public class RouteRecommendationController {
                 ApiResponse.ok("추천 경로 목록 조회에 성공했습니다.", response)
         );
     }
+
+    @DeleteMapping("/{recommendationId}")
+    public ResponseEntity<ApiResponse<Void>> deleteRouteRecommendation(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long recommendationId
+    ) {
+        routeRecommendationService.deleteRouteRecommendation(userId, recommendationId);
+
+        return ResponseEntity.ok(
+                ApiResponse.<Void>ok("추천 경로 이력이 삭제되었습니다.", null)
+        );
+    }
 }
 

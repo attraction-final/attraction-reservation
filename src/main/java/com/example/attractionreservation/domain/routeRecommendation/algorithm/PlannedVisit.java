@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 public record PlannedVisit(
         int sequence, // 현제 경로에서의 방문 순번 1부터 시작
         Long attractionId, //방문할 어트랙션 ID
-        String attractionName, //추천 결과에 사용할 어트랙션 이
+        String attractionName, //추천 결과에 사용할 어트랙션 이름
         Long slotId, //이번 방문에서 선택한 슬롯 ID
         int moveMinutes, //이번 구간에 적용한 이동 시간
         LocalDateTime arrivalAt, //도착 예상 시간

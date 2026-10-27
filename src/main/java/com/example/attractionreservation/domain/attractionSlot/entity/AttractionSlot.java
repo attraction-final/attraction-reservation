@@ -141,7 +141,7 @@ public class AttractionSlot extends BaseTimeEntity {
     }
 
     // 잔여 0이면 OPEN → CLOSED, 잔여 1 이상이면 CLOSED → OPEN (SUSPENDED는 그대로)
-    private void syncStatusWithRemainingCount() {
+    public void syncStatusWithRemainingCount() {
         if (status == SlotStatus.OPEN && isFull()) {
             this.status = SlotStatus.CLOSED;
             this.autoClosed = true;  // "정원 때문에 닫았다"고 기록

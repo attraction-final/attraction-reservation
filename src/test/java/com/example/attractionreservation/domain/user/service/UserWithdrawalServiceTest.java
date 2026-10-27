@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
@@ -25,6 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -69,9 +71,12 @@ class UserWithdrawalServiceTest {
         when(userRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(user));
 
-        when(ticketRepository.existsByOrderItem_Order_User_IdAndStatus(
-                1L, TicketStatus.UNUSED
-        )).thenReturn(true);
+        when(ticketRepository
+                .existsByOrderItem_Order_User_IdAndStatusAndValidDateGreaterThanEqual(
+                        eq(1L),
+                        eq(TicketStatus.UNUSED),
+                        any(LocalDate.class)
+                )).thenReturn(true);
 
         assertThatThrownBy(() -> service.withdraw(1L))
                 .isInstanceOfSatisfying(
@@ -101,9 +106,12 @@ class UserWithdrawalServiceTest {
         when(userRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(user));
 
-        when(ticketRepository.existsByOrderItem_Order_User_IdAndStatus(
-                1L, TicketStatus.UNUSED
-        )).thenReturn(false);
+        when(ticketRepository
+                .existsByOrderItem_Order_User_IdAndStatusAndValidDateGreaterThanEqual(
+                        eq(1L),
+                        eq(TicketStatus.UNUSED),
+                        any(LocalDate.class)
+                )).thenReturn(false);
 
         when(reservationRepository.findUpcomingForUpdate(
                 eq(1L), any(), any()
@@ -126,9 +134,12 @@ class UserWithdrawalServiceTest {
                 .build();
     }
 
-    @Test
-    @DisplayName("이용 예정 예약을 취소하고 정원을 복구한 뒤 탈퇴한다")
-    void withdraw_withReservation_cancelsAndRestoresCapacity() {
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 2})
+    @DisplayName("이용 예정 예약 수만큼 정원을 복구한 뒤 탈퇴한다")
+    void withdraw_withReservation_cancelsAndRestoresCapacity(
+            int reservationCount
+    ) {
         User user = activeUser();
 
         Attraction attraction = mock(Attraction.class);
@@ -146,45 +157,60 @@ class UserWithdrawalServiceTest {
         ReflectionTestUtils.setField(slot, "status", SlotStatus.CLOSED);
         ReflectionTestUtils.setField(slot, "autoClosed", true);
 
-        Reservation reservation = new Reservation(
-                user,
-                mock(Ticket.class),
-                slot
-        );
+        // 모든 예약이 같은 슬롯을 사용하도록 구성한다.
+        List<Reservation> reservations = new java.util.ArrayList<>();
+
+        for (int i = 0; i < reservationCount; i++) {
+            reservations.add(new Reservation(
+                    user,
+                    mock(Ticket.class),
+                    slot
+            ));
+        }
 
         when(userRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(user));
 
-        when(ticketRepository.existsByOrderItem_Order_User_IdAndStatus(
-                1L, TicketStatus.UNUSED
-        )).thenReturn(false);
+        when(ticketRepository
+                .existsByOrderItem_Order_User_IdAndStatusAndValidDateGreaterThanEqual(
+                        eq(1L),
+                        eq(TicketStatus.UNUSED),
+                        any(LocalDate.class)
+                )).thenReturn(false);
 
         when(reservationRepository.findUpcomingForUpdate(
                 eq(1L), eq(ReservationStatus.RESERVED), any()
-        )).thenReturn(List.of(reservation));
+        )).thenReturn(reservations);
 
         when(attractionSlotRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(slot));
 
         service.withdraw(1L);
 
-        assertThat(reservation.getStatus())
-                .isEqualTo(ReservationStatus.CANCELLED);
-        assertThat(reservation.getCancelReason()).isEqualTo("회원 탈퇴");
-        assertThat(reservation.getCancelledAt()).isNotNull();
+        assertThat(user.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
+        assertThat(user.getWithdrawnAt()).isNotNull();
 
-        // 전체 정원은 유지하고 예약 인원만 줄인다.
+        // 조회된 모든 예약이 취소됐는지 확인한다.
+        for (Reservation reservation : reservations) {
+            assertThat(reservation.getStatus())
+                    .isEqualTo(ReservationStatus.CANCELLED);
+            assertThat(reservation.getCancelReason())
+                    .isEqualTo(ReservationCancelReason.USER_WITHDRAWAL);
+            assertThat(reservation.getCancelledAt())
+                    .isEqualTo(user.getWithdrawnAt());
+        }
+
+        // 전체 정원은 유지하고 취소된 예약 수만큼 예약 인원을 줄인다.
         assertThat(slot.getCapacity()).isEqualTo(2);
-        assertThat(slot.getReservedCount()).isEqualTo(1);
-        assertThat(slot.getRemainingCount()).isEqualTo(1);
+        assertThat(slot.getReservedCount())
+                .isEqualTo(2 - reservationCount);
+        assertThat(slot.getRemainingCount())
+                .isEqualTo(reservationCount);
         assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
         assertThat(slot.isAutoClosed()).isFalse();
 
-        assertThat(user.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
-        assertThat(user.getWithdrawnAt())
-                .isEqualTo(reservation.getCancelledAt());
-
-        verify(attractionSlotRepository).findByIdForUpdate(10L);
+        verify(attractionSlotRepository, times(reservationCount))
+                .findByIdForUpdate(10L);
         verify(userRepository).flush();
     }
 
@@ -239,5 +265,57 @@ class UserWithdrawalServiceTest {
                 attractionSlotRepository
         );
         verify(userRepository, never()).flush();
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = SlotStatus.class,
+            names = {"CLOSED", "SUSPENDED", "CANCELLED"}
+    )
+    @DisplayName("탈퇴로 정원을 복구해도 관리자 지정 슬롯 상태는 유지한다")
+    void withdraw_preservesManuallyAssignedSlotStatus(SlotStatus status) {
+        User user = activeUser();
+
+        Attraction attraction = mock(Attraction.class);
+        when(attraction.getDurationMinutes()).thenReturn(10);
+
+        AttractionSlot slot = AttractionSlot.create(
+                attraction,
+                LocalDateTime.of(2030, 1, 1, 12, 0),
+                2
+        );
+
+        ReflectionTestUtils.setField(slot, "id", 10L);
+        ReflectionTestUtils.setField(slot, "reservedCount", 1);
+
+        // 관리자에 의한 상태 변경은 자동 마감 표시를 해제한다.
+        slot.changeStatus(status);
+
+        Reservation reservation = new Reservation(
+                user,
+                mock(Ticket.class),
+                slot
+        );
+
+        when(userRepository.findByIdForUpdate(1L))
+                .thenReturn(Optional.of(user));
+
+        when(reservationRepository.findUpcomingForUpdate(
+                eq(1L), eq(ReservationStatus.RESERVED), any()
+        )).thenReturn(List.of(reservation));
+
+        when(attractionSlotRepository.findByIdForUpdate(10L))
+                .thenReturn(Optional.of(slot));
+
+        // 모의 저장소의 미사용 입장권 조회 결과는 기본값인 false다.
+        service.withdraw(1L);
+
+        assertThat(reservation.getStatus())
+                .isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(slot.getReservedCount()).isZero();
+        assertThat(slot.getCapacity()).isEqualTo(2);
+        assertThat(slot.getStatus()).isEqualTo(status);
+        assertThat(slot.isAutoClosed()).isFalse();
+        assertThat(user.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
     }
 }

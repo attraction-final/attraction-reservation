@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
@@ -63,15 +65,30 @@ class UserWithdrawalFacadeTest {
     }
 
     @Test
-    @DisplayName("토큰 삭제 장애는 성공으로 숨기지 않고 호출자에게 전달한다")
-    void withdraw_tokenDeletionFailed_propagatesError() {
-        var error = new IllegalStateException("test-redis-failure");
+    @DisplayName("토큰 삭제가 일시적으로 실패하면 재시도한다")
+    void withdraw_tokenDeletionTemporarilyFailed_retriesSuccessfully() {
+        doThrow(new RedisConnectionFailureException("테스트 연결 장애"))
+                .doNothing()
+                .when(refreshTokenRepository).delete(1L);
 
-        doThrow(error).when(refreshTokenRepository).delete(1L);
+        assertThatCode(() -> facade.withdraw(1L))
+                .doesNotThrowAnyException();
 
-        assertThatThrownBy(() -> facade.withdraw(1L))
-                .isSameAs(error);
+        verify(userWithdrawalService, times(1)).withdraw(1L);
+        verify(refreshTokenRepository, times(2)).delete(1L);
+    }
 
-        verify(userWithdrawalService).withdraw(1L);
+    @Test
+    @DisplayName("토큰 삭제가 계속 실패해도 완료된 탈퇴는 성공으로 반환한다")
+    void withdraw_tokenDeletionAlwaysFailed_returnsSuccessfully() {
+        doThrow(new RedisConnectionFailureException("테스트 연결 장애"))
+                .when(refreshTokenRepository).delete(1L);
+
+        assertThatCode(() -> facade.withdraw(1L))
+                .doesNotThrowAnyException();
+
+        // 탈퇴 처리를 반복하지 않고 토큰 삭제만 세 번 시도한다.
+        verify(userWithdrawalService, times(1)).withdraw(1L);
+        verify(refreshTokenRepository, times(3)).delete(1L);
     }
 }

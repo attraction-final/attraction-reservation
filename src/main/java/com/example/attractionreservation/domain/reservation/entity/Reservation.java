@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.reservation.entity;
 
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.user.entity.User;
@@ -30,7 +31,8 @@ public class Reservation extends BaseTimeEntity {
     private ReservationStatus status;
 
     @Column(name = "cancel_reason", length = 255)
-    private String cancelReason;
+    @Enumerated(EnumType.STRING)
+    private ReservationCancelReason cancelReason;
 
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
@@ -70,6 +72,43 @@ public class Reservation extends BaseTimeEntity {
         this.status = ReservationStatus.RESERVED;
     }
 
+    // 취소 요청
+    public void cancelReservation(Instant now) {
+        if (this.status != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        this.status = ReservationStatus.CANCELLED;
+        this.cancelledAt = now;
+    }
+
+    // 관리자 강제 취소 요청
+    public void adminCancelReservation(ReservationCancelReason reason) {
+        if (this.status != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        if (reason == null) {
+            throw new BusinessException(ErrorCode.INVALID_RESERVATION_CANCEL_REASON);
+        }
+
+        this.status = ReservationStatus.CANCELLED;
+        this.cancelledAt = Instant.now();
+        this.cancelReason = reason;
+    }
+
+    // 관리자 예약 상태 변경
+    public void updateReservationStatus(ReservationStatus status) {
+        if (this.status != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_STATUS_CHANGE_NOT_ALLOWED);
+        }
+
+        if (status != ReservationStatus.NO_SHOW && status != ReservationStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.INVALID_RESERVATION_TARGET_STATUS);
+        }
+        this.status = status;
+    }
+
     public void cancelForWithdrawal(Instant cancelledAt) {
         // 이미 완료·취소된 예약을 다시 변경하지 않는다.
         if (this.status != ReservationStatus.RESERVED) {
@@ -83,7 +122,7 @@ public class Reservation extends BaseTimeEntity {
         }
 
         this.status = ReservationStatus.CANCELLED;
-        this.cancelReason = "회원 탈퇴";
+        this.cancelReason = ReservationCancelReason.USER_WITHDRAWAL;
         this.cancelledAt = cancelledAt;
     }
 }

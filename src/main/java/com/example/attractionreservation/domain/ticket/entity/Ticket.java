@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -70,7 +71,11 @@ public class Ticket extends BaseTimeEntity {
 
     // 티켓 입장 처리
     public void entryTicket(Instant now) {
-        ZonedDateTime kstNow = now.atZone(ZoneId.of("Asia/Seoul"));
+        LocalDateTime kstNow = KstTime.toLocalDateTime(now);
+
+        if (kstNow == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_ENTRY_TIME);
+        }
 
         validateEntryStatus();
         validateEntryDate(kstNow.toLocalDate());
@@ -96,10 +101,7 @@ public class Ticket extends BaseTimeEntity {
 
     // 입장권 시간 검증
     private void validateEntryTime(LocalTime currentTime) {
-        LocalTime opensAt = switch (this.type) {
-            case ALL_DAY -> LocalTime.of(10, 0);
-            case AFTERNOON -> LocalTime.of(15, 0);
-        };
+        LocalTime opensAt = this.type.getAvailableFrom();
         LocalTime closesAt = LocalTime.of(22, 0);
 
         if (currentTime.isBefore(opensAt) || !currentTime.isBefore(closesAt)) {

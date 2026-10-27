@@ -40,26 +40,27 @@ public class UserWithdrawalService {
             throw new BusinessException(ErrorCode.USER_NOT_WITHDRAWABLE);
         }
 
-        // 미사용 입장권이 있으면 예약과 회원 상태를 변경하기 전에 중단한다.
+        Instant now = Instant.now();
+
+        // 입장권 날짜와 예약 시작 시각을 같은 한국 시각 기준으로 판단한다.
+        LocalDateTime nowInSeoul = LocalDateTime.ofInstant(
+                now,
+                ZoneId.of("Asia/Seoul")
+        );
+
         boolean hasUnusedTicket =
-                ticketRepository.existsByOrderItem_Order_User_IdAndStatus(
-                        userId,
-                        TicketStatus.UNUSED
-                );
+                ticketRepository
+                        .existsByOrderItem_Order_User_IdAndStatusAndValidDateGreaterThanEqual(
+                                userId,
+                                TicketStatus.UNUSED,
+                                nowInSeoul.toLocalDate()
+                        );
 
         if (hasUnusedTicket) {
             throw new BusinessException(
                     ErrorCode.USER_WITHDRAWAL_UNUSED_TICKET
             );
         }
-
-        Instant now = Instant.now();
-
-        // 슬롯 시각은 LocalDateTime이므로 한국 기준 시각으로 비교한다.
-        LocalDateTime nowInSeoul = LocalDateTime.ofInstant(
-                now,
-                ZoneId.of("Asia/Seoul")
-        );
 
         var reservations = reservationRepository.findUpcomingForUpdate(
                 userId,

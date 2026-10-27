@@ -15,6 +15,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -29,6 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class TicketDetailControllerTest {
 
+    private static final Long USER_ID = 100L;
+
     @Mock
     private TicketService ticketService;
 
@@ -36,10 +42,23 @@ class TicketDetailControllerTest {
 
     @BeforeEach
     void setUp() {
+        SecurityContextHolder.clearContext();
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(USER_ID, null)
+        );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new TicketController(ticketService))
+                .setCustomArgumentResolvers(
+                        new AuthenticationPrincipalArgumentResolver()
+                )
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -52,7 +71,7 @@ class TicketDetailControllerTest {
         SearchTicketDetailResponse response =
                 createResponse(ticketId, TicketStatus.IN_USE, enteredAt);
 
-        when(ticketService.findTicketById(ticketId))
+        when(ticketService.findTicketById(USER_ID, ticketId))
                 .thenReturn(response);
 
         // when & then
@@ -73,7 +92,7 @@ class TicketDetailControllerTest {
                 .andExpect(jsonPath("$.data.enteredAt")
                         .value("2026-10-25T01:00:00Z"));
 
-        verify(ticketService).findTicketById(ticketId);
+        verify(ticketService).findTicketById(USER_ID, ticketId);
     }
 
     @Test
@@ -82,7 +101,7 @@ class TicketDetailControllerTest {
         // given
         Long ticketId = 1L;
 
-        when(ticketService.findTicketById(ticketId))
+        when(ticketService.findTicketById(USER_ID, ticketId))
                 .thenReturn(createResponse(
                         ticketId, TicketStatus.UNUSED, null
                 ));
@@ -94,7 +113,7 @@ class TicketDetailControllerTest {
                 .andExpect(jsonPath("$.data.status").value("UNUSED"))
                 .andExpect(jsonPath("$.data.enteredAt").doesNotExist());
 
-        verify(ticketService).findTicketById(ticketId);
+        verify(ticketService).findTicketById(USER_ID, ticketId);
     }
 
     @Test
@@ -103,7 +122,7 @@ class TicketDetailControllerTest {
         // given
         Long ticketId = 999L;
 
-        when(ticketService.findTicketById(ticketId))
+        when(ticketService.findTicketById(USER_ID, ticketId))
                 .thenThrow(new BusinessException(ErrorCode.TICKET_NOT_FOUND));
 
         // when & then
@@ -114,7 +133,7 @@ class TicketDetailControllerTest {
                         .value(ErrorCode.TICKET_NOT_FOUND.getMessage()))
                 .andExpect(jsonPath("$.data").doesNotExist());
 
-        verify(ticketService).findTicketById(ticketId);
+        verify(ticketService).findTicketById(USER_ID, ticketId);
     }
 
     @Test

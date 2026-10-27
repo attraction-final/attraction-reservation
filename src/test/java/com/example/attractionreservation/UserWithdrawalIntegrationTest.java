@@ -1,5 +1,6 @@
 package com.example.attractionreservation;
 
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.user.entity.User;
@@ -27,6 +28,8 @@ import jakarta.persistence.EntityManager;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -106,7 +109,7 @@ class UserWithdrawalIntegrationTest {
                     assertThat(reservation.getStatus())
                             .isEqualTo(ReservationStatus.CANCELLED);
                     assertThat(reservation.getCancelReason())
-                            .isEqualTo("회원 탈퇴");
+                            .isEqualTo(ReservationCancelReason.USER_WITHDRAWAL);
                     assertThat(reservation.getCancelledAt())
                             .isEqualTo(user.getWithdrawnAt());
 
@@ -284,6 +287,87 @@ class UserWithdrawalIntegrationTest {
                     assertThat(slot.getRemainingCount()).isZero();
                     assertThat(slot.getStatus())
                             .isEqualTo(SlotStatus.CLOSED);
+                }
+        );
+    }
+
+    @ParameterizedTest(name = "입장권 이용일: 오늘 기준 {0}일")
+    @ValueSource(ints = {-1, 0, 1})
+    @DisplayName("미사용 입장권의 날짜에 따라 탈퇴 허용 여부를 결정한다")
+    void withdraw_unusedTicket_checksValidDateInDatabase(int daysFromToday) {
+        LocalDate validDate = LocalDate.now(
+                ZoneId.of("Asia/Seoul")
+        ).plusDays(daysFromToday);
+
+        Long userId = createUserWithUnusedTicket(validDate);
+
+        if (daysFromToday < 0) {
+            // 이용일이 지난 미사용 입장권은 탈퇴를 막지 않는다.
+            withdrawalService.withdraw(userId);
+        } else {
+            // 오늘 또는 미래의 미사용 입장권이 있으면 탈퇴를 거부한다.
+            assertThatThrownBy(
+                    () -> withdrawalService.withdraw(userId)
+            ).isInstanceOfSatisfying(
+                    BusinessException.class,
+                    exception -> assertThat(exception.getErrorCode())
+                            .isEqualTo(
+                                    ErrorCode.USER_WITHDRAWAL_UNUSED_TICKET
+                            )
+            );
+        }
+
+        // 서비스 처리가 끝난 뒤 새 트랜잭션에서 DB 상태를 확인한다.
+        new TransactionTemplate(transactionManager).executeWithoutResult(
+                transaction -> {
+                    User savedUser = entityManager.find(User.class, userId);
+
+                    if (daysFromToday < 0) {
+                        assertThat(savedUser.getStatus())
+                                .isEqualTo(UserStatus.WITHDRAWN);
+                        assertThat(savedUser.getWithdrawnAt()).isNotNull();
+                    } else {
+                        assertThat(savedUser.getStatus())
+                                .isEqualTo(UserStatus.ACTIVE);
+                        assertThat(savedUser.getWithdrawnAt()).isNull();
+                    }
+                }
+        );
+    }
+
+    private Long createUserWithUnusedTicket(LocalDate validDate) {
+        return new TransactionTemplate(transactionManager).execute(
+                transaction -> {
+                    User user = User.builder()
+                            .email(UUID.randomUUID() + "@test.com")
+                            .password("test-password-hash")
+                            .nickname("입장권날짜테스트")
+                            .build();
+                    entityManager.persist(user);
+
+                    TicketProduct product = new TicketProduct(
+                            "종일권",
+                            10000,
+                            "입장권 날짜 조건 검증용 상품",
+                            TicketType.ALL_DAY,
+                            100,
+                            TicketProductStatus.ON_SALE
+                    );
+                    entityManager.persist(product);
+
+                    Order order = Order.create(user, 10000);
+                    order.addOrderItem(product, 1);
+                    entityManager.persist(order);
+
+                    // 생성자의 기본 상태인 UNUSED로 실제 DB에 저장한다.
+                    Ticket ticket = new Ticket(
+                            validDate,
+                            order.getOrderItems().get(0)
+                    );
+                    entityManager.persist(ticket);
+                    entityManager.flush();
+
+                    return user.getId();
                 }
         );
     }

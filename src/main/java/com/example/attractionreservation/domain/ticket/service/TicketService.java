@@ -38,8 +38,8 @@ public class TicketService {
     }
 
     // 내 티켓 상세 조회
-    public SearchTicketDetailResponse findTicketById(Long ticketId) {
-        Ticket ticket = ticketRepository.findById(ticketId)
+    public SearchTicketDetailResponse findTicketById(Long userId, Long ticketId) {
+        Ticket ticket = ticketRepository.findByIdAndUser_Id(ticketId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
 
         return SearchTicketDetailResponse.from(ticket);
@@ -61,5 +61,11 @@ public class TicketService {
         ticket.entryTicket(now);
 
         return CreateTicketEntryResponse.from(ticket);
+    }
+
+    // 예약 - 티켓 찾기
+    public Ticket findByTicketId(Long ticketId) {
+        return ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
     }
 }

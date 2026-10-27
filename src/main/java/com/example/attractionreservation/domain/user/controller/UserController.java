@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -57,6 +58,18 @@ public class UserController {
 
         return ResponseEntity.ok(
                 ApiResponse.ok("회원 정보 수정에 성공했습니다.", response)
+        );
+    }
+
+    @PatchMapping("/me/password")
+    public ResponseEntity<ApiResponse<Void>> updatePassword(
+            @AuthenticationPrincipal Long userId,
+            @Valid @RequestBody UpdatePasswordRequest request
+    ) {
+        userService.updatePassword(userId, request);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("비밀번호 변경에 성공했습니다.", null)
         );
     }
 }

@@ -19,9 +19,7 @@ public class AdminTicketController {
 
     private final TicketService ticketService;
 
-
     // 티켓 입장 처리
-    // TODO: 관리자 인증 검사 추가
     @PostMapping("/entry")
     public ResponseEntity<ApiResponse<CreateTicketEntryResponse>> createTicketEntry(
             @Valid @RequestBody CreateTicketEntryRequest request

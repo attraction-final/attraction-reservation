@@ -9,6 +9,7 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
+import com.example.attractionreservation.global.config.QuerydslConfig;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(JpaConfig.class)
+@Import({JpaConfig.class, QuerydslConfig.class})
 class TicketRepositoryTest {
 
     @Autowired
@@ -247,6 +248,24 @@ class TicketRepositoryTest {
         assertThat(lastPage.getTotalPages()).isEqualTo(2);
         assertThat(lastPage.hasNext()).isFalse();
         assertThat(lastPage.isLast()).isTrue();
+    }
+
+    @Test
+    @DisplayName("다른 사용자의 티켓 ID로 상세 조회하면 빈 결과를 반환한다")
+    void findByIdAndOwnerId_OtherUserTicket_ReturnsEmpty() {
+        // given
+        Long requestedTicketId = otherUserTicketId;
+        Long requestingUserId = userId;
+
+        // when
+        var result = ticketRepository.findByIdAndOwner_Id(
+                requestedTicketId,
+                requestingUserId
+        );
+
+        // then
+        assertThat(ticketRepository.findById(requestedTicketId)).isPresent();
+        assertThat(result).isEmpty();
     }
 
     private Page<Ticket> search(

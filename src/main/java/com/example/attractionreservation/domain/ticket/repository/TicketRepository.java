@@ -2,9 +2,7 @@ package com.example.attractionreservation.domain.ticket.repository;
 
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
-import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
-import jakarta.validation.constraints.NotBlank;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -22,8 +20,22 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
         AND (:type IS NULL OR t.type = :type)
         AND (:status IS NULL OR t.status = :status)
     """)
-    Page<Ticket> findAllByUserIdWithCondition(Long userId, String name, TicketType type, TicketStatus status, Pageable stablePageable);
+    Page<Ticket> findAllByUserIdWithCondition(
+            @Param("userId") Long userId,
+            @Param("name") String name,
+            @Param("type") TicketType type,
+            @Param("status") TicketStatus status,
+            Pageable stablePageable
+    );
 
     @Query("SELECT t FROM Ticket t WHERE t.code = :code")
     Optional<Ticket> findByCode(@Param("code") String code);
+
+    // 내 티켓 상세 조회
+    @Query("""
+    SELECT t
+    FROM Ticket t
+    WHERE t.id = :ticketId AND t.orderItem.order.user.id = :userId
+    """)
+    Optional<Ticket> findByIdAndOwner_Id(@Param("ticketId") Long ticketId, @Param("userId") Long userId);
 }

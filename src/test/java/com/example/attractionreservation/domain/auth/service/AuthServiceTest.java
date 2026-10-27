@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.auth.service;
 
+import com.example.attractionreservation.domain.user.entity.AuthProvider;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthRefreshResponse;
@@ -57,6 +58,7 @@ class AuthServiceTest {
                 new CreateAuthLoginRequest("test@example.com", "Password!123");
 
         User user = mock(User.class);
+        when(user.getProvider()).thenReturn(AuthProvider.LOCAL);
         when(user.getPassword()).thenReturn("encoded-password");
         when(user.getStatus()).thenReturn(UserStatus.ACTIVE);
         when(user.getId()).thenReturn(1L);
@@ -115,6 +117,7 @@ class AuthServiceTest {
                 new CreateAuthLoginRequest("test@example.com", "WrongPassword");
 
         User user = mock(User.class);
+        when(user.getProvider()).thenReturn(AuthProvider.LOCAL);
         when(user.getPassword()).thenReturn("encoded-password");
 
         when(userRepository.findByEmail(request.email()))
@@ -143,6 +146,7 @@ class AuthServiceTest {
                 new CreateAuthLoginRequest("test@example.com", "Password!123");
 
         User user = mock(User.class);
+        when(user.getProvider()).thenReturn(AuthProvider.LOCAL);
         when(user.getPassword()).thenReturn("encoded-password");
         when(user.getStatus()).thenReturn(UserStatus.INACTIVE);
 
@@ -487,6 +491,43 @@ class AuthServiceTest {
                 jwtProvider,
                 userRepository,
                 passwordEncoder
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = AuthProvider.class,
+            names = {"KAKAO", "GOOGLE"}
+    )
+    @DisplayName("소셜 회원은 이메일·비밀번호 로그인으로 토큰을 발급받을 수 없다")
+    void login_socialMember_rejected(AuthProvider provider) {
+        var request = new CreateAuthLoginRequest(
+                "social@example.com",
+                "Password!123"
+        );
+
+        User user = User.createSocial(
+                "social@example.com",
+                "소셜회원",
+                provider,
+                "provider-123"
+        );
+
+        when(userRepository.findByEmail(request.email()))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_LOGIN_CREDENTIALS)
+                );
+
+        // 비밀번호 비교와 서비스 토큰 발급 모두 진행하지 않는다.
+        verifyNoInteractions(
+                passwordEncoder,
+                jwtProvider,
+                refreshTokenRepository
         );
     }
 }

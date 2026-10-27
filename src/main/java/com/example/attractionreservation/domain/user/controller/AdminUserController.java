@@ -1,5 +1,9 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import com.example.attractionreservation.domain.user.dto.UpdateUserStatusRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserStatusResponse;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import com.example.attractionreservation.domain.user.dto.SearchUserResponse;
 import org.springframework.web.bind.annotation.PathVariable;
 import com.example.attractionreservation.domain.user.dto.SearchUserCondition;
@@ -41,6 +45,18 @@ public class AdminUserController {
 
         return ResponseEntity.ok(
                 ApiResponse.ok("회원 상세 조회에 성공했습니다.", response)
+        );
+    }
+    @PatchMapping("/{userId}/status")
+    public ResponseEntity<ApiResponse<UpdateUserStatusResponse>> updateUserStatus(
+            @PathVariable Long userId,
+            @Valid @RequestBody UpdateUserStatusRequest request
+    ) {
+        UpdateUserStatusResponse response =
+                userService.updateUserStatus(userId, request);
+
+        return ResponseEntity.ok(
+                ApiResponse.ok("회원 상태 변경에 성공했습니다.", response)
         );
     }
 }

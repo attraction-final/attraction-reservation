@@ -13,6 +13,15 @@ import java.util.List;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long>, ReservationCustomRepository {
 
+    @Query("""
+            select r from Reservation r
+            join fetch r.attractionSlot
+            where r.ticket.id = :ticketId
+              and r.status = :status
+            """)
+    List<Reservation> findAllWithSlotByTicketIdAndStatus(@Param("ticketId") Long ticketId,
+                                                         @Param("status") ReservationStatus status);
+
     // 탈퇴 시 취소할 이용 예정 예약을 조회하고 중복 변경을 방지한다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

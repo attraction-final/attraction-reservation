@@ -40,7 +40,6 @@ public class RouteRecommendationRepositoryTest {
         return LocalDateTime.parse("2026-10-20T" + hhmm + ":00");
     }
 
-
     private RouteRecommendation saveRecommendation() {
         RouteRecommendation recommendation = RouteRecommendation.create(
                 1L,

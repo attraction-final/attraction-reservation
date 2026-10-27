@@ -29,6 +29,4 @@ public int totalDurationMinutes() {
      }
      return visits.get(visits.size() - 1).endsAt();
  }
-
-
 }

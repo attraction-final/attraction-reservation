@@ -224,7 +224,7 @@ class UserServiceTest {
 
         ReflectionTestUtils.setField(user, "id", userId);
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.of(user));
 
         UpdateUserResponse response = userService.updateMe(
@@ -243,7 +243,7 @@ class UserServiceTest {
         assertThat(user.getRole().name()).isEqualTo("USER");
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
 
-        verify(userRepository).findById(userId);
+        verify(userRepository).findByIdForUpdate(userId);
         verifyNoMoreInteractions(userRepository);
     }
 
@@ -251,7 +251,7 @@ class UserServiceTest {
     void updateMe_missingUser_throwsUnauthorized() {
         Long userId = 1L;
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updateMe(
@@ -276,7 +276,7 @@ class UserServiceTest {
 
         ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.of(user));
 
         assertThatThrownBy(() -> userService.updateMe(
@@ -302,7 +302,7 @@ class UserServiceTest {
                 .nickname("홍길동")
                 .build();
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.of(user));
 
         userService.updatePassword(userId, new UpdatePasswordRequest(
@@ -319,7 +319,7 @@ class UserServiceTest {
         assertThat(passwordEncoder.matches("Password!123", updatedHash))
                 .isFalse();
 
-        verify(userRepository).findById(userId);
+        verify(userRepository).findByIdForUpdate(userId);
         verifyNoMoreInteractions(userRepository);
     }
 
@@ -333,7 +333,7 @@ class UserServiceTest {
                 .nickname("홍길동")
                 .build();
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.of(user));
 
         assertThatThrownBy(() -> userService.updatePassword(
@@ -353,7 +353,7 @@ class UserServiceTest {
     void updatePassword_missingUser_throwsUnauthorized() {
         Long userId = 1L;
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updatePassword(
@@ -379,7 +379,7 @@ class UserServiceTest {
 
         ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
 
-        when(userRepository.findById(userId))
+        when(userRepository.findByIdForUpdate(userId))
                 .thenReturn(Optional.of(user));
 
         assertThatThrownBy(() -> userService.updatePassword(

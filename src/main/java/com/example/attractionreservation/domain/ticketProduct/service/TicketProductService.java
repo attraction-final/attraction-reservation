@@ -11,6 +11,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -73,6 +76,19 @@ public class TicketProductService {
     public SearchTicketProductResponse findTicketProductById(Long ticketProductId) {
         TicketProduct ticketProduct = getTicketProductById(ticketProductId);
         return SearchTicketProductResponse.from(ticketProduct);
+    }
+
+    @Transactional
+    public void updateTicketProductsStockIncrease(Map<Long, Integer> quantitiesByTicketProductId) {
+        List<TicketProduct> ticketProducts = ticketProductRepository.findAllWithUpdateByIdInOrderById(quantitiesByTicketProductId.keySet());
+
+        if (quantitiesByTicketProductId.size() != ticketProducts.size()) {
+            throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
+        }
+
+        ticketProducts.forEach(
+                ticketProduct -> ticketProduct.increaseStock(quantitiesByTicketProductId.get(ticketProduct.getId()))
+        );
     }
 
     // 티켓 찾기 중복 코드 메서드 분리

@@ -17,7 +17,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -401,5 +406,68 @@ class TicketProductServiceTest {
 
         verify(ticketProductRepository).findById(ticketProductId);
         verify(ticketProductRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("재고를 복구하면 상품별 수량만큼 재고가 늘어난다")
+    void updateTicketProductsStockIncrease_existingProducts_increasesStock() {
+        // given
+        TicketProduct first = createStockProduct(1L, 10, TicketProductStatus.ON_SALE);
+        TicketProduct second = createStockProduct(2L, 20, TicketProductStatus.ON_SALE);
+
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(1L, 2L)))
+                .thenReturn(List.of(first, second));
+
+        // when
+        ticketProductService.updateTicketProductsStockIncrease(Map.of(1L, 2, 2L, 3));
+
+        // then
+        assertThat(first.getStock()).isEqualTo(12);
+        assertThat(second.getStock()).isEqualTo(23);
+    }
+
+    @Test
+    @DisplayName("재고 0으로 품절된 상품을 복구하면 다시 판매 중이 된다")
+    void updateTicketProductsStockIncrease_outOfStock_reopensSale() {
+        // given
+        TicketProduct soldOut = createStockProduct(1L, 0, TicketProductStatus.OUT_OF_STOCK);
+
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(1L)))
+                .thenReturn(List.of(soldOut));
+
+        // when
+        ticketProductService.updateTicketProductsStockIncrease(Map.of(1L, 2));
+
+        // then
+        assertThat(soldOut.getStock()).isEqualTo(2);
+        assertThat(soldOut.getStatus()).isEqualTo(TicketProductStatus.ON_SALE);
+    }
+
+    @Test
+    @DisplayName("복구할 상품이 하나라도 없으면 예외가 발생하고 재고를 바꾸지 않는다")
+    void updateTicketProductsStockIncrease_missingProduct_throwsNotFound() {
+        // given: 2개를 요청했지만 1개만 조회된다.
+        TicketProduct first = createStockProduct(1L, 10, TicketProductStatus.ON_SALE);
+
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(1L, 2L)))
+                .thenReturn(List.of(first));
+
+        // when & then
+        assertThatThrownBy(() ->
+                ticketProductService.updateTicketProductsStockIncrease(Map.of(1L, 2, 2L, 3)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.TICKET_PRODUCT_NOT_FOUND)
+                );
+        assertThat(first.getStock()).isEqualTo(10);
+    }
+
+    private TicketProduct createStockProduct(Long id, int stock, TicketProductStatus status) {
+        TicketProduct product = new TicketProduct(
+                "재고상품", 50000, "재고 테스트 상품", TicketType.ALL_DAY, stock, status
+        );
+        ReflectionTestUtils.setField(product, "id", id);
+        return product;
     }
 }

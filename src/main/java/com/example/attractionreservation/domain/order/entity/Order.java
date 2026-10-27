@@ -13,6 +13,8 @@ import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Entity
 @Table(name = "orders")
@@ -84,5 +86,15 @@ public class Order extends BaseTimeEntity {
         // 주문 항목의 부모 참조와 주문의 항목 목록을 함께 설정한다.
         OrderItem orderItem = OrderItem.create(this, ticketProduct, quantity);
         this.orderItems.add(orderItem);
+    }
+
+    // 주문 항목을 상품별 수량으로 합산한다. 같은 상품이 여러 항목이면 수량을 더한다.
+    public Map<Long, Integer> getQuantityByTicketProductId() {
+        return orderItems.stream()
+                .collect(Collectors.toMap(
+                        orderItem -> orderItem.getTicketProduct().getId(),
+                        OrderItem::getQuantity,
+                        Integer::sum
+                ));
     }
 }

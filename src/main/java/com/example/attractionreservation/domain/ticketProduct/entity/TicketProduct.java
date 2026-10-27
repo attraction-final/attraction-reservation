@@ -87,6 +87,43 @@ public class TicketProduct extends BaseTimeEntity {
         this.status = TicketProductStatus.DELETED;
     }
 
+    public void decreaseStock(int quantity) {
+        if (quantity <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+
+        // 품절 상품은 판매 중지와 구분해 재고 부족으로 응답한다.
+        if (this.status == TicketProductStatus.OUT_OF_STOCK) {
+            throw new BusinessException(ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT);
+        }
+
+        if (this.status != TicketProductStatus.ON_SALE) {
+            throw new BusinessException(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE);
+        }
+
+        if (this.stock < quantity) {
+            throw new BusinessException(ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT);
+        }
+
+        this.stock -= quantity;
+
+        if (this.stock == 0) {
+            this.status = TicketProductStatus.OUT_OF_STOCK;
+        }
+    }
+
+    public void increaseStock(int quantity) {
+        if (quantity <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+
+        if (this.stock == 0 && this.status == TicketProductStatus.OUT_OF_STOCK) {
+            this.status = TicketProductStatus.ON_SALE;
+        }
+
+        this.stock += quantity;
+    }
+
     // 검증용 중복 코드 메서드로 분리
     private void validateName(String name) {
         if (name == null || name.isBlank()) {

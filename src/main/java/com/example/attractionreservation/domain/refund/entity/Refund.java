@@ -14,7 +14,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 환불. 환불 요청 자체를 PG 취소 Outbox로 사용한다.
@@ -219,6 +221,15 @@ public class Refund extends BaseTimeEntity {
     public void markAsDead(String error) {
         transitTo(RefundStatus.DEAD);
         this.lastError = truncate(error);
+    }
+
+    public Map<Long, Integer> getQuantityByTicketProductId() {
+        return refundItems.stream()
+                .collect(Collectors.toMap(
+                        refundItem -> refundItem.getOrderItem().getTicketProduct().getId(),
+                        RefundItem::getQuantity,
+                        Integer::sum
+                ));
     }
 
     private void requirePgPending() {

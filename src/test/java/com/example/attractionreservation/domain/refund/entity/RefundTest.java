@@ -4,6 +4,9 @@ import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -18,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -478,6 +482,34 @@ class RefundTest {
         assertThatThrownBy(() -> refund.verifyPgPendingSince(NOW.minusSeconds(1)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+    }
+
+    @Test
+    @DisplayName("환불 항목을 상품별 수량으로 합산하고, 같은 상품이 여러 항목이면 수량을 더한다.")
+    void getQuantityByTicketProductId_sameProductInMultipleItems_SumsQuantity() {
+        //given
+        Refund refund = Refund.create(payment, "단순 변심", NOW);
+        TicketProduct sharedProduct = createTicketProduct(10L);
+        TicketProduct otherProduct = createTicketProduct(20L);
+        refund.addRefundItem(RefundItem.of(createOrderItem(order, 10000, 2, sharedProduct), 2, 2));
+        refund.addRefundItem(RefundItem.of(createOrderItem(order, 10000, 3, sharedProduct), 3, 3));
+        refund.addRefundItem(RefundItem.of(createOrderItem(order, 5000, 1, otherProduct), 1, 1));
+
+        //when & then
+        assertEquals(Map.of(10L, 5, 20L, 1), refund.getQuantityByTicketProductId());
+    }
+
+    private TicketProduct createTicketProduct(Long id) {
+        TicketProduct product = new TicketProduct(
+                "종일이용권", 10000, "설명", TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE);
+        ReflectionTestUtils.setField(product, "id", id);
+        return product;
+    }
+
+    private OrderItem createOrderItem(Order owner, int price, int quantity, TicketProduct ticketProduct) {
+        OrderItem orderItem = createOrderItem(owner, price, quantity);
+        ReflectionTestUtils.setField(orderItem, "ticketProduct", ticketProduct);
+        return orderItem;
     }
 
     private Refund createRefundWithStatus(RefundStatus status) {

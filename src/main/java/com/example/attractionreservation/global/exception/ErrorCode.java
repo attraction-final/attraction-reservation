@@ -67,6 +67,7 @@ public enum ErrorCode {
     INVALID_TICKET_PRODUCT_STATUS(HttpStatus.BAD_REQUEST, "티켓 상품의 상태값이 올바르지 않습니다."),
     TICKET_PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "티켓 상품을 찾을 수 없습니다."),
     TICKET_PRODUCT_ALREADY_DELETED(HttpStatus.CONFLICT, "삭제된 티켓 상품은 수정할 수 없습니다."),
+    TICKET_PRODUCT_STOCK_INSUFFICIENT(HttpStatus.CONFLICT, "티켓 상품 재고가 부족합니다."),
 
     // order
     ORDER_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 전이입니다."),

@@ -6,6 +6,10 @@ import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentRespon
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -21,6 +25,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -49,6 +54,9 @@ class PaymentCommandServiceTest {
 
     @Mock
     private PaymentCompensationService paymentCompensationService;
+
+    @Mock
+    private TicketProductService ticketProductService;
 
     @InjectMocks
     private PaymentCommandService paymentCommandService;
@@ -300,6 +308,78 @@ class PaymentCommandServiceTest {
         assertThatThrownBy(() -> paymentCommandService.failPayment(PG_ID))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
+    }
+
+    @Test
+    @DisplayName("결제 실패 처리하면 주문 항목의 상품별 수량을 합산해 재고를 복구한다.")
+    void failPayment_pending_RestoresStock() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        addItem(payment, 10L, 2);
+        addItem(payment, 10L, 3);
+        addItem(payment, 20L, 1);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.failPayment(PG_ID);
+
+        //then
+        verify(ticketProductService).updateTicketProductsStockIncrease(Map.of(10L, 5, 20L, 1));
+    }
+
+    @Test
+    @DisplayName("금액 불일치로 실패 처리해도 재고를 복구한다.")
+    void failPaymentWithCompensation_pending_RestoresStock() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        addItem(payment, 10L, 2);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        verify(ticketProductService).updateTicketProductsStockIncrease(Map.of(10L, 2));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "PENDING")
+    @DisplayName("결제 대기 상태가 아니면 실패 처리하지 않으므로 재고를 복구하지 않는다.")
+    void failPayment_notPending_DoesNotRestoreStock(PaymentStatus status) {
+        //given
+        Payment payment = createPaymentWithStatus(status);
+        addItem(payment, 10L, 2);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.failPayment(PG_ID);
+
+        //then
+        verifyNoInteractions(ticketProductService);
+    }
+
+    @Test
+    @DisplayName("사용자가 이미 취소한 결제는 보상 요청만 저장하고 재고를 다시 복구하지 않는다.")
+    void failPaymentWithCompensation_cancelled_DoesNotRestoreStock() {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        addItem(payment, 10L, 2);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+        given(paymentCompensationService.findIdByPgId(payment.getPgId())).willReturn(Optional.empty());
+
+        //when
+        paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        verifyNoInteractions(ticketProductService);
+    }
+
+    private void addItem(Payment payment, Long productId, int quantity) {
+        TicketProduct product = new TicketProduct(
+                "테스트상품", 5000, "테스트설명", TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE
+        );
+        ReflectionTestUtils.setField(product, "id", productId);
+        payment.getOrder().addOrderItem(product, quantity);
     }
 
     private Payment createPaymentWithStatus(PaymentStatus status) {

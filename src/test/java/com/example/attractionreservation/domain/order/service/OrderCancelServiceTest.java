@@ -5,7 +5,11 @@ import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -26,6 +30,7 @@ import java.time.temporal.ChronoUnit;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.List;
+import java.util.Map;
 import java.time.Clock;
 import org.mockito.Spy;
 
@@ -53,6 +58,9 @@ class OrderCancelServiceTest {
     @Mock
     private OrderCancelProcessor orderCancelProcessor;
 
+    @Mock
+    private TicketProductService ticketProductService;
+
     @Spy
     private Clock clock = Clock.systemUTC();
 
@@ -65,7 +73,7 @@ class OrderCancelServiceTest {
         // given
         Order order = createOrder(1L);
 
-        when(orderRepository.findById(101L))
+        when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.of(order));
         when(orderRepository.cancelPendingOrder(
                 eq(101L),
@@ -93,10 +101,10 @@ class OrderCancelServiceTest {
         verifyNoInteractions(ticketProductRepository, userRepository);
 
         // 주문 취소 시 연결된 결제의 취소도 요청한다.
-        verify(paymentService).cancelPendingPaymentIfExists(1L, 101L);
+        verify(paymentService).cancelledByUser(1L, 101L);
 
         // 주문 취소 시 연결된 결제의 취소도 요청한다.
-        verify(paymentService).cancelPendingPaymentIfExists(1L, 101L);
+        verify(paymentService).cancelledByUser(1L, 101L);
 
         // 직접 취소도 결제 잠금 → 주문 수정 → 결제 취소 순서인지 확인한다.
         var executionOrder = inOrder(paymentService, orderRepository);
@@ -113,14 +121,14 @@ class OrderCancelServiceTest {
         );
 
         executionOrder.verify(paymentService)
-                .cancelPendingPaymentIfExists(1L, 101L);
+                .cancelledByUser(1L, 101L);
     }
 
     @Test
     @DisplayName("존재하지 않는 주문은 취소할 수 없다")
     void updateOrderByCancel_missingOrder_throwsNotFound() {
         // given
-        when(orderRepository.findById(101L))
+        when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -133,7 +141,7 @@ class OrderCancelServiceTest {
                 );
 
         // 조회에서 거부된 경우 수정 쿼리는 실행하지 않는다.
-        verify(orderRepository).findById(101L);
+        verify(orderRepository).findOrderById(101L);
         verifyNoMoreInteractions(orderRepository);
     }
 
@@ -143,7 +151,7 @@ class OrderCancelServiceTest {
         // given
         Order order = createOrder(2L);
 
-        when(orderRepository.findById(101L))
+        when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.of(order));
 
         // when & then
@@ -155,7 +163,7 @@ class OrderCancelServiceTest {
                                 .isEqualTo(ErrorCode.ORDER_CANCEL_ACCESS_DENIED)
                 );
 
-        verify(orderRepository).findById(101L);
+        verify(orderRepository).findOrderById(101L);
         verifyNoMoreInteractions(orderRepository);
     }
 
@@ -173,7 +181,7 @@ class OrderCancelServiceTest {
         Order order = createOrder(1L);
         ReflectionTestUtils.setField(order, "status", status);
 
-        when(orderRepository.findById(101L))
+        when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.of(order));
 
         // when & then
@@ -186,7 +194,7 @@ class OrderCancelServiceTest {
                 );
 
         // 이미 취소됐거나 완료된 주문에는 수정 쿼리를 실행하지 않는다.
-        verify(orderRepository).findById(101L);
+        verify(orderRepository).findOrderById(101L);
         verifyNoMoreInteractions(orderRepository);
     }
 
@@ -196,7 +204,7 @@ class OrderCancelServiceTest {
         // given
         Order order = createOrder(1L);
 
-        when(orderRepository.findById(101L))
+        when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.of(order));
 
         // 조회 당시에는 PENDING이지만 실제 수정 시에는 조건이 맞지 않는 상황을 재현한다.
@@ -262,6 +270,148 @@ class OrderCancelServiceTest {
         assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(100);
 
         verifyNoInteractions(paymentService);
+    }
+
+    @Test
+    @DisplayName("주문을 취소하면 주문 항목의 상품별 수량만큼 재고를 복구한다")
+    void updateOrderByCancel_pendingOrder_restoresStock() {
+        // given
+        Order order = createOrder(1L);
+        addItem(order, 10L, 2);
+        addItem(order, 20L, 3);
+        stubCancelSuccess(order);
+
+        // when
+        orderService.updateOrderByCancel(1L, 101L);
+
+        // then
+        verify(ticketProductService)
+                .updateTicketProductsStockIncrease(Map.of(10L, 2, 20L, 3));
+    }
+
+    @Test
+    @DisplayName("같은 상품이 여러 항목이면 수량을 합산해 재고를 복구한다")
+    void updateOrderByCancel_sameProductInMultipleItems_restoresSummedStock() {
+        // given
+        Order order = createOrder(1L);
+        addItem(order, 10L, 2);
+        addItem(order, 10L, 3);
+        stubCancelSuccess(order);
+
+        // when
+        orderService.updateOrderByCancel(1L, 101L);
+
+        // then
+        verify(ticketProductService)
+                .updateTicketProductsStockIncrease(Map.of(10L, 5));
+    }
+
+    @Test
+    @DisplayName("재고 복구는 주문 상태 변경 후, 결제 취소 전에 실행한다")
+    void updateOrderByCancel_pendingOrder_restoresStockBetweenOrderAndPaymentCancel() {
+        // given
+        Order order = createOrder(1L);
+        addItem(order, 10L, 2);
+        stubCancelSuccess(order);
+
+        // when
+        orderService.updateOrderByCancel(1L, 101L);
+
+        // then
+        var executionOrder = inOrder(
+                paymentService, orderRepository, ticketProductService
+        );
+        executionOrder.verify(paymentService)
+                .lockPaymentByOrderIdIfExists(101L);
+        executionOrder.verify(orderRepository).cancelPendingOrder(
+                eq(101L), eq(1L),
+                eq(OrderStatus.PENDING), eq(OrderStatus.CANCELLED),
+                any(Instant.class)
+        );
+        executionOrder.verify(ticketProductService)
+                .updateTicketProductsStockIncrease(Map.of(10L, 2));
+        executionOrder.verify(paymentService)
+                .cancelledByUser(1L, 101L);
+    }
+
+    @Test
+    @DisplayName("다른 요청이 먼저 취소했다면 재고를 복구하지 않는다")
+    void updateOrderByCancel_updateConditionNoLongerMatches_doesNotRestoreStock() {
+        // given
+        Order order = createOrder(1L);
+        addItem(order, 10L, 2);
+
+        when(orderRepository.findOrderById(101L))
+                .thenReturn(Optional.of(order));
+        when(orderRepository.cancelPendingOrder(
+                eq(101L), eq(1L),
+                eq(OrderStatus.PENDING), eq(OrderStatus.CANCELLED),
+                any(Instant.class)
+        )).thenReturn(0);
+
+        // when & then
+        assertThatThrownBy(() -> orderService.updateOrderByCancel(1L, 101L))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.ORDER_NOT_CANCELLABLE)
+                );
+        verifyNoInteractions(ticketProductService);
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태가 아닌 주문은 재고를 복구하지 않는다")
+    void updateOrderByCancel_nonPendingOrder_doesNotRestoreStock() {
+        // given
+        Order order = createOrder(1L);
+        addItem(order, 10L, 2);
+        ReflectionTestUtils.setField(order, "status", OrderStatus.COMPLETED);
+
+        when(orderRepository.findOrderById(101L))
+                .thenReturn(Optional.of(order));
+
+        // when & then
+        assertThatThrownBy(() -> orderService.updateOrderByCancel(1L, 101L))
+                .isInstanceOf(BusinessException.class);
+        verifyNoInteractions(ticketProductService);
+    }
+
+    @Test
+    @DisplayName("결제 취소에 실패하면 예외를 전파해 재고 복구도 롤백되게 한다")
+    void updateOrderByCancel_paymentCancelFails_propagatesException() {
+        // given
+        Order order = createOrder(1L);
+        addItem(order, 10L, 2);
+        stubCancelSuccess(order);
+        doThrow(new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED))
+                .when(paymentService).cancelledByUser(1L, 101L);
+
+        // when & then
+        assertThatThrownBy(() -> orderService.updateOrderByCancel(1L, 101L))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.PAYMENT_CANCEL_PROHIBITED)
+                );
+    }
+
+    private void stubCancelSuccess(Order order) {
+        when(orderRepository.findOrderById(101L))
+                .thenReturn(Optional.of(order));
+        when(orderRepository.cancelPendingOrder(
+                eq(101L), eq(1L),
+                eq(OrderStatus.PENDING), eq(OrderStatus.CANCELLED),
+                any(Instant.class)
+        )).thenReturn(1);
+    }
+
+    private void addItem(Order order, Long productId, int quantity) {
+        TicketProduct product = new TicketProduct(
+                "테스트상품", 30000, "테스트설명",
+                TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE
+        );
+        ReflectionTestUtils.setField(product, "id", productId);
+        order.addOrderItem(product, quantity);
     }
 
     private Order createOrder(Long userId) {

@@ -42,6 +42,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.Clock;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -336,12 +337,23 @@ class OrderServiceIntegrationTest {
                     user, OrderStatus.COMPLETED, cutoff.minusSeconds(60)
             );
 
+            // 주문은 결제와 함께 생성되므로 취소 처리 대상 주문에도 결제 대기 결제를 만든다.
+            List<Long> paymentIds = new ArrayList<>();
+            for (Long orderId : List.of(expiredId, boundaryId, recentId)) {
+                paymentIds.add(paymentRepository.saveAndFlush(
+                        Payment.create(orderRepository.findById(orderId).orElseThrow())
+                ).getId());
+            }
+
             return new Long[]{
                     user.getId(),
                     expiredId,
                     boundaryId,
                     recentId,
-                    completedId
+                    completedId,
+                    paymentIds.get(0),
+                    paymentIds.get(1),
+                    paymentIds.get(2)
             };
         });
 
@@ -371,7 +383,13 @@ class OrderServiceIntegrationTest {
             assertThat(orderService.updateExpiredOrdersByCancel()).isZero();
         } finally {
             transaction.executeWithoutResult(status -> {
-                for (int i = 1; i < ids.length; i++) {
+                // 결제가 주문을 참조하므로 결제를 먼저 지운다.
+                for (int i = 5; i < ids.length; i++) {
+                    paymentRepository.deleteById(ids[i]);
+                }
+                paymentRepository.flush();
+
+                for (int i = 1; i <= 4; i++) {
                     orderRepository.deleteById(ids[i]);
                 }
 

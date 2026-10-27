@@ -168,9 +168,11 @@ public class ReservationService {
         }
 
         // 현재 KST 시각이 슬롯 시작 30분 전 이내인지 확인
-        Instant now = Instant.now();
-        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
-        LocalDateTime deadLine = reservation.getAttractionSlot().getStartsAt().minusMinutes(RESERVATION_DEADLINE_MINUTES);
+        LocalDateTime currentTime = KstTime.now();
+        Instant now = currentTime.atZone(KstTime.ZONE).toInstant();
+
+        LocalDateTime deadLine = reservation.getAttractionSlot().getStartsAt()
+                .minusMinutes(RESERVATION_DEADLINE_MINUTES);
 
         if (currentTime.isAfter(deadLine)) {
             throw new BusinessException(ErrorCode.RESERVATION_CANCEL_DEADLINE_PASSED);

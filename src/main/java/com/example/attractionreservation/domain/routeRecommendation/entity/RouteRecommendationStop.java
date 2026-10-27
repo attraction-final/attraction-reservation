@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import com.example.attractionreservation.global.util.KstTime;
 //추천 경로에 포함된 방문 일정 한 건을 저장한다
 @Getter
 @Entity

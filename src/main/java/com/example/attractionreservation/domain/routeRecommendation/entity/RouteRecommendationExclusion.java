@@ -32,4 +32,16 @@ public class RouteRecommendationExclusion {
 
     @Column(name = "reason_message", nullable = false, length = 255)
     private String reasonMessage;
+
+    public static RouteRecommendationExclusion of(Long attractionId, String attractionName, ExclusionReason reason) {
+        RouteRecommendationExclusion exclusion = new RouteRecommendationExclusion();
+        exclusion.attractionId = attractionId;
+        exclusion.attractionNameSnapshot = attractionName;
+        exclusion.reasonCode = reason;
+        exclusion.reasonMessage = reason.getMessage();
+        return exclusion;
+    }
+    void assignRouteRecommendation(RouteRecommendation recommendation) {
+        this.routeRecommendation = recommendation;
+    }
 }

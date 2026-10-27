@@ -1,5 +1,7 @@
 package com.example.attractionreservation;
 
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
@@ -32,15 +34,18 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.Clock;
 
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.Mockito.doReturn;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -70,6 +75,9 @@ class OrderServiceIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @MockitoSpyBean
+    private Clock clock;
 
     @Test
     @DisplayName("주문과 항목을 DB에 함께 저장하고 상품 가격 변경 후에도 주문 단가를 유지한다")
@@ -295,79 +303,82 @@ class OrderServiceIntegrationTest {
     }
 
     @Test
-    @DisplayName("30분이 지난 결제 대기 주문만 자동 취소하고 반복 처리하지 않는다")
-    void cancelExpiredPendingOrders_timeBoundary_updatesOnlyExpiredPendingOrders() {
-        // given
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("실제 자동 취소 서비스가 정확한 30분 경계를 적용한다")
+    void updateExpiredOrdersByCancel_timeBoundary() {
         Instant now = Instant.parse("2026-10-23T01:30:00Z");
         Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
 
-        User user = userRepository.saveAndFlush(
-                User.builder()
-                        .email(UUID.randomUUID() + "@test.com")
-                        .password("test-password-hash")
-                        .nickname("자동취소테스트")
-                        .build()
-        );
+        doReturn(now).when(clock).instant();
 
-        Long expiredId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.PENDING,
-                now.minus(31, ChronoUnit.MINUTES)
-        );
-        Long boundaryId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.PENDING,
-                cutoff
-        );
-        Long recentId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.PENDING,
-                now.minus(29, ChronoUnit.MINUTES)
-        );
-        Long completedId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.COMPLETED,
-                now.minus(40, ChronoUnit.MINUTES)
-        );
-        Long cancelledId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.CANCELLED,
-                now.minus(40, ChronoUnit.MINUTES)
-        );
+        TransactionTemplate transaction =
+                new TransactionTemplate(transactionManager);
 
-        entityManager.clear();
+        Long[] ids = transaction.execute(status -> {
+            User user = userRepository.saveAndFlush(
+                    User.builder()
+                            .email(UUID.randomUUID() + "@test.com")
+                            .password("test-password-hash")
+                            .nickname("시간경계테스트")
+                            .build()
+            );
 
-        // when
-        int cancelledCount = orderRepository.cancelExpiredPendingOrders(
-                OrderStatus.PENDING,
-                OrderStatus.CANCELLED,
-                cutoff,
-                now
-        );
+            Long expiredId = saveOrderForExpirationTest(
+                    user, OrderStatus.PENDING, cutoff.minusSeconds(1)
+            );
+            Long boundaryId = saveOrderForExpirationTest(
+                    user, OrderStatus.PENDING, cutoff
+            );
+            Long recentId = saveOrderForExpirationTest(
+                    user, OrderStatus.PENDING, cutoff.plusSeconds(1)
+            );
+            Long completedId = saveOrderForExpirationTest(
+                    user, OrderStatus.COMPLETED, cutoff.minusSeconds(60)
+            );
 
-        // then
-        assertThat(cancelledCount).isEqualTo(2);
+            return new Long[]{
+                    user.getId(),
+                    expiredId,
+                    boundaryId,
+                    recentId,
+                    completedId
+            };
+        });
 
-        assertThat(orderRepository.findById(expiredId).orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.CANCELLED);
-        assertThat(orderRepository.findById(boundaryId).orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.CANCELLED);
-        assertThat(orderRepository.findById(recentId).orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.PENDING);
-        assertThat(orderRepository.findById(completedId).orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.COMPLETED);
-        assertThat(orderRepository.findById(cancelledId).orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.CANCELLED);
+        try {
+            int count = orderService.updateExpiredOrdersByCancel();
 
-        // 같은 기준으로 다시 실행해도 이미 취소된 주문을 재처리하지 않는다.
-        int repeatedCount = orderRepository.cancelExpiredPendingOrders(
-                OrderStatus.PENDING,
-                OrderStatus.CANCELLED,
-                cutoff,
-                now
-        );
+            assertThat(count).isEqualTo(2);
 
-        assertThat(repeatedCount).isZero();
+            transaction.executeWithoutResult(status -> {
+                assertThat(orderRepository.findById(ids[1])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.CANCELLED);
+
+                assertThat(orderRepository.findById(ids[2])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.CANCELLED);
+
+                assertThat(orderRepository.findById(ids[3])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.PENDING);
+
+                assertThat(orderRepository.findById(ids[4])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.COMPLETED);
+            });
+
+            assertThat(orderService.updateExpiredOrdersByCancel()).isZero();
+        } finally {
+            transaction.executeWithoutResult(status -> {
+                for (int i = 1; i < ids.length; i++) {
+                    orderRepository.deleteById(ids[i]);
+                }
+
+                orderRepository.flush();
+                userRepository.deleteById(ids[0]);
+            });
+        }
     }
 
     @Test
@@ -524,69 +535,169 @@ class OrderServiceIntegrationTest {
     }
 
     @Test
-    @DisplayName("자동 취소는 만료된 주문과 결제를 함께 취소하고 최근 주문은 유지한다")
-    void updateExpiredOrdersByCancel_cancelsExpiredOrderAndPayment() {
-        User user = userRepository.saveAndFlush(
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("자동 취소에서 실패한 주문은 롤백하고 다음 정상 주문은 취소한다")
+    void updateExpiredOrdersByCancel_failureDoesNotBlockNextOrder() {
+        TransactionTemplate transaction =
+                new TransactionTemplate(transactionManager);
+
+        Long[] ids = transaction.execute(status -> {
+            User user = userRepository.saveAndFlush(
+                    User.builder()
+                            .email(UUID.randomUUID() + "@test.com")
+                            .password("test-password-hash")
+                            .nickname("자동취소격리테스트")
+                            .build()
+            );
+
+            Instant now = Instant.now();
+
+            // 실패할 주문을 먼저 조회하도록 더 오래된 시각으로 저장한다.
+            Long failedOrderId = saveOrderForExpirationTest(
+                    user,
+                    OrderStatus.PENDING,
+                    now.minus(32, ChronoUnit.MINUTES)
+            );
+
+            Long normalOrderId = saveOrderForExpirationTest(
+                    user,
+                    OrderStatus.PENDING,
+                    now.minus(31, ChronoUnit.MINUTES)
+            );
+
+            Payment failedPayment = Payment.create(
+                    orderRepository.findById(failedOrderId).orElseThrow()
+            );
+            failedPayment.markAsPaid(now);
+            paymentRepository.saveAndFlush(failedPayment);
+
+            Payment normalPayment = paymentRepository.saveAndFlush(
+                    Payment.create(
+                            orderRepository.findById(normalOrderId).orElseThrow()
+                    )
+            );
+
+            return new Long[]{
+                    user.getId(),
+                    failedOrderId,
+                    normalOrderId,
+                    failedPayment.getId(),
+                    normalPayment.getId()
+            };
+        });
+
+        try {
+            int count = orderService.updateExpiredOrdersByCancel();
+
+            assertThat(count).isEqualTo(1);
+
+            // 서비스 처리가 끝난 후 새 트랜잭션에서 실제 저장 상태를 확인한다.
+            transaction.executeWithoutResult(status -> {
+                // 결제가 완료된 주문의 취소 시도는 롤백된다.
+                assertThat(orderRepository.findById(ids[1])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.PENDING);
+
+                assertThat(paymentRepository.findById(ids[3])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(PaymentStatus.PAID);
+
+                // 앞 주문의 실패와 관계없이 다음 주문은 취소된다.
+                assertThat(orderRepository.findById(ids[2])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.CANCELLED);
+
+                assertThat(paymentRepository.findById(ids[4])
+                        .orElseThrow().getStatus())
+                        .isEqualTo(PaymentStatus.CANCELLED);
+            });
+
+            // 실패한 주문을 다시 만나도 예외를 밖으로 던지지 않는다.
+            assertThat(orderService.updateExpiredOrdersByCancel()).isZero();
+        } finally {
+            transaction.executeWithoutResult(status -> {
+                paymentRepository.deleteById(ids[3]);
+                paymentRepository.deleteById(ids[4]);
+                paymentRepository.flush();
+
+                orderRepository.deleteById(ids[1]);
+                orderRepository.deleteById(ids[2]);
+                orderRepository.flush();
+
+                userRepository.deleteById(ids[0]);
+            });
+        }
+    }
+
+    @Test
+    @DisplayName("본인 주문만 최신순으로 페이지 조회하고 다른 회원 주문은 전체 개수에서도 제외한다")
+    void findOrdersByUserId_multipleMembers_returnsOwnOrdersByPage() {
+        User member = userRepository.saveAndFlush(
                 User.builder()
                         .email(UUID.randomUUID() + "@test.com")
                         .password("test-password-hash")
-                        .nickname("자동취소연동테스트")
+                        .nickname("목록회원")
                         .build()
         );
 
-        Instant now = Instant.now();
-
-        Long expiredOrderId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.PENDING,
-                now.minus(31, ChronoUnit.MINUTES)
+        User otherMember = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("다른회원")
+                        .build()
         );
 
-        Long recentOrderId = saveOrderForExpirationTest(
-                user,
-                OrderStatus.PENDING,
-                now.minus(1, ChronoUnit.MINUTES)
-        );
-
-        Payment expiredPayment = paymentRepository.saveAndFlush(
-                Payment.create(
-                        orderRepository.findById(expiredOrderId).orElseThrow()
+        TicketProduct product = ticketProductRepository.saveAndFlush(
+                new TicketProduct(
+                        "종일이용권",
+                        60000,
+                        "주문 목록 테스트 상품",
+                        TicketType.ALL_DAY,
+                        100,
+                        TicketProductStatus.ON_SALE
                 )
         );
 
-        Payment recentPayment = paymentRepository.saveAndFlush(
-                Payment.create(
-                        orderRepository.findById(recentOrderId).orElseThrow()
-                )
-        );
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(product.getId(), 1)
+        ));
 
-        Long expiredPaymentId = expiredPayment.getId();
-        Long recentPaymentId = recentPayment.getId();
+        Long memberId = member.getId();
 
-        entityManager.clear();
+        CreateOrderResponse olderOrder =
+                orderService.createOrder(memberId, request);
+        CreateOrderResponse newerOrder =
+                orderService.createOrder(memberId, request);
 
-        int cancelledCount = orderService.updateExpiredOrdersByCancel();
+        // 타인 주문은 본인 목록과 전체 건수에서 제외한다.
+        orderService.createOrder(otherMember.getId(), request);
 
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(cancelledCount).isEqualTo(1);
+        SearchOrderListResponse firstPage = orderService.findOrdersByUserId(
+                memberId,
+                new SearchOrderCondition(0, 1)
+        );
+        SearchOrderListResponse secondPage = orderService.findOrdersByUserId(
+                memberId,
+                new SearchOrderCondition(1, 1)
+        );
 
-        assertThat(orderRepository.findById(expiredOrderId)
-                .orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.CANCELLED);
-        assertThat(paymentRepository.findById(expiredPaymentId)
-                .orElseThrow().getStatus())
-                .isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(firstPage.content())
+                .extracting(SearchOrderListResponse.Item::orderId)
+                .containsExactly(newerOrder.orderId());
+        assertThat(firstPage.page()).isZero();
+        assertThat(firstPage.size()).isEqualTo(1);
+        assertThat(firstPage.totalElements()).isEqualTo(2L);
+        assertThat(firstPage.totalPages()).isEqualTo(2);
 
-        assertThat(orderRepository.findById(recentOrderId)
-                .orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.PENDING);
-        assertThat(paymentRepository.findById(recentPaymentId)
-                .orElseThrow().getStatus())
-                .isEqualTo(PaymentStatus.PENDING);
-
-        // 같은 대상이 다시 처리되지 않는지 확인한다.
-        assertThat(orderService.updateExpiredOrdersByCancel()).isZero();
+        assertThat(secondPage.content())
+                .extracting(SearchOrderListResponse.Item::orderId)
+                .containsExactly(olderOrder.orderId());
+        assertThat(secondPage.page()).isEqualTo(1);
+        assertThat(secondPage.totalElements()).isEqualTo(2L);
+        assertThat(secondPage.totalPages()).isEqualTo(2);
     }
 }

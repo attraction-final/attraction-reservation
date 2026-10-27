@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.reservation.dto.SearchReservationDetailResponse;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
@@ -88,10 +89,12 @@ class ReservationDetailServiceTest {
     void findReservationById_cancelledReservation() {
         // given
         Instant cancelledAt = Instant.parse("2026-10-24T02:00:00Z");
+        ReservationCancelReason cancelReason =
+                ReservationCancelReason.ATTRACTION_MAINTENANCE;
 
         Reservation reservation = createReservation(
                 ReservationStatus.CANCELLED,
-                "어트랙션 긴급 점검",
+                cancelReason,
                 cancelledAt
         );
 
@@ -110,8 +113,13 @@ class ReservationDetailServiceTest {
         // then
         assertThat(response.reservationId()).isEqualTo(RESERVATION_ID);
         assertThat(response.status()).isEqualTo(ReservationStatus.CANCELLED);
-        assertThat(response.cancelReason()).isEqualTo("어트랙션 긴급 점검");
+        assertThat(response.cancelReason()).isEqualTo(cancelReason);
         assertThat(response.cancelledAt()).isEqualTo(cancelledAt);
+
+        verify(reservationRepository).findReservationByIdAndUser_Id(
+                RESERVATION_ID,
+                USER_ID
+        );
     }
 
     @Test
@@ -172,7 +180,7 @@ class ReservationDetailServiceTest {
 
     private Reservation createReservation(
             ReservationStatus status,
-            String cancelReason,
+            ReservationCancelReason cancelReason,
             Instant cancelledAt
     ) {
         Reservation reservation = mock(Reservation.class);

@@ -19,6 +19,7 @@ import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.core.annotation.Order;
 
 @Configuration
 @RequiredArgsConstructor
@@ -33,6 +34,7 @@ public class SecurityConfig {
     private static final String ADMIN_ROLE = "ADMIN";
 
     @Bean
+    @Order(2)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         var paths = PathPatternRequestMatcher.withDefaults();

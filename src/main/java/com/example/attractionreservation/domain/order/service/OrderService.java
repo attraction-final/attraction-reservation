@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.order.service;
 
 import com.example.attractionreservation.domain.payment.service.PaymentService;
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
@@ -19,8 +21,14 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Propagation;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -30,6 +38,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -38,6 +47,8 @@ public class OrderService {
     private final TicketProductRepository ticketProductRepository;
     private final UserRepository userRepository;
     private final PaymentService paymentService;
+    private final OrderCancelProcessor orderCancelProcessor;
+    private final Clock clock;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -138,6 +149,9 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
         }
 
+        // 결제 → 주문 순서로 잠금을 획득한다.
+        paymentService.lockPaymentByOrderIdIfExists(orderId);
+
         // 조회 후 상태가 바뀔 수 있으므로 실제 수정 시에도 PENDING 조건을 확인한다.
         int updatedCount = orderRepository.cancelPendingOrder(
                 orderId,
@@ -161,12 +175,11 @@ public class OrderService {
         );
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int updateExpiredOrdersByCancel() {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
 
-        // 한 번에 처리할 주문 수를 제한한다.
         List<Order> expiredOrders = orderRepository.findExpiredPendingOrders(
                 OrderStatus.PENDING,
                 cutoff,
@@ -176,28 +189,48 @@ public class OrderService {
         int cancelledCount = 0;
 
         for (Order order : expiredOrders) {
-            // 수정 쿼리가 영속성 컨텍스트를 비우므로 필요한 값을 먼저 보관한다.
             Long orderId = order.getId();
             Long userId = order.getUser().getId();
 
-            // 조회 후 상태가 변경된 주문은 취소하지 않는다.
-            int updatedCount = orderRepository.cancelPendingOrder(
-                    orderId,
-                    userId,
-                    OrderStatus.PENDING,
-                    OrderStatus.CANCELLED,
-                    now
-            );
-
-            if (updatedCount == 0) {
-                continue;
+            try {
+                if (orderCancelProcessor.cancelExpiredOrder(
+                        orderId,
+                        userId,
+                        now
+                )) {
+                    cancelledCount++;
+                }
+            } catch (BusinessException exception) {
+                // 실패한 주문은 해당 트랜잭션에서 롤백하고 다음 주문을 처리한다.
+                log.warn(
+                        "만료 주문 자동 취소 실패: orderId={}, errorCode={}",
+                        orderId,
+                        exception.getErrorCode()
+                );
             }
-
-            paymentService.cancelPendingPaymentIfExists(userId, orderId);
-            cancelledCount++;
         }
 
         return cancelledCount;
+    }
+
+    @Transactional(readOnly = true)
+    public SearchOrderListResponse findOrdersByUserId(
+            Long userId,
+            SearchOrderCondition condition
+    ) {
+        // 생성 시각이 같아도 조회 순서가 일정하도록 ID를 보조 정렬로 사용한다.
+        Pageable pageable = PageRequest.of(
+                condition.page(),
+                condition.size(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")
+                )
+        );
+
+        Page<Order> orders = orderRepository.findAllByUser_Id(userId, pageable);
+
+        return SearchOrderListResponse.from(orders);
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

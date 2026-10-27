@@ -69,6 +69,13 @@ public class PaymentService {
         paymentRepository.save(found);
     }
 
+    @Transactional
+    public void lockPaymentByOrderIdIfExists(Long orderId) {
+        // 결제 승인 경로와 잠금 순서를 맞추기 위해 결제 행을 먼저 잠근다.
+        // 여기서는 결제 상태를 변경하지 않는다.
+        paymentRepository.findWithLockByOrderId(orderId);
+    }
+
     // 웹훅처럼 로그인 사용자가 없는 경로에서 사용한다. 소유자를 확인하지 않는다.
     @Transactional(readOnly = true)
     public Optional<Payment> findByPgId(String pgId) {
@@ -95,7 +102,7 @@ public class PaymentService {
             throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
         }
 
-        // 결제가 완료됐거나 이미 다른 상태로 변경됐다면 취소를 중단한다.
+        // 대기 상태가 아닌 결제는 취소하지 않는다.
         if (payment.getStatus() != PaymentStatus.PENDING) {
             throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
         }

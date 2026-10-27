@@ -44,7 +44,7 @@ PaymentController
                │                        → (Facade) PaymentCompensationProcessor 즉시 1회 시도
                │                        → PAYMENT_ALREADY_CANCELLED (409)
                ├─ 그 밖의 전이 불가    → PAYMENT_INVALID_STATUS_TRANSITION (409)
-               └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 PAID
+               └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 COMPLETED
 
 [웹훅]  상세는 payment-webhook-plan.md
 POST /api/payments/webhooks/portone → 서명 검증 → webhook_events 저장 → 200

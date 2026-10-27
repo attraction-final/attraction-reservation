@@ -1,10 +1,14 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepository;
+import com.example.attractionreservation.domain.user.dto.UpdateUserStatusRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserStatusResponse;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
+import com.example.attractionreservation.domain.user.dto.SearchUserResponse;
 import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
-import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
@@ -30,6 +34,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     @Transactional
     public CreateUserResponse signup(CreateUserRequest request) {
@@ -87,6 +92,40 @@ public class UserService {
                         pageable
                 )
         );
+    }
+
+    @Transactional(readOnly = true)
+    public SearchUserResponse findUserById(Long userId) {
+        // 관리자 상세 조회는 관리 목적의 예외로 탈퇴·정지 회원도 조회한다.
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        return SearchUserResponse.from(user);
+    }
+
+    @Transactional
+    public UpdateUserStatusResponse updateUserStatus(
+            Long userId,
+            UpdateUserStatusRequest request
+    ) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        user.updateStatus(request.status());
+
+        // Redis 토큰을 삭제하기 전에 DB 수정 쿼리를 실행하여
+        // 이 시점에 확인 가능한 DB 오류를 먼저 검출한다. 아직 커밋된 것은 아니다.
+        userRepository.flush();
+
+        if (user.getStatus() == UserStatus.SUSPENDED) {
+            // 정지 해제 후에도 이전 Refresh Token으로 재발급하지 못하도록 폐기한다.
+            // Redis 오류를 그대로 전달하여 DB 상태 변경은 롤백되도록 한다.
+            refreshTokenRepository.delete(userId);
+        }
+
+        return UpdateUserStatusResponse.from(user);
     }
 
     @Transactional(readOnly = true)
@@ -165,11 +204,10 @@ public class UserService {
 
         return false;
     }
-
-    // 예약 - 회원 찾기
+    // 예약에서 사용하는 회원 조회
     public User findByUserId(Long userId) {
         return userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.USER_NOT_FOUND));
     }
-
 }

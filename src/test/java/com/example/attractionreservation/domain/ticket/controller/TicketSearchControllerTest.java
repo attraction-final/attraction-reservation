@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.exception.GlobalExceptionHandler;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,9 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -39,6 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class TicketSearchControllerTest {
 
+    private static final Long USER_ID = 100L;
+
     @Mock
     private TicketService ticketService;
 
@@ -46,17 +52,29 @@ class TicketSearchControllerTest {
 
     @BeforeEach
     void setUp() {
+        SecurityContextHolder.clearContext();
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(USER_ID, null)
+        );
+
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new TicketController(ticketService))
                 .setCustomArgumentResolvers(
+                        new AuthenticationPrincipalArgumentResolver(),
                         new PageableHandlerMethodArgumentResolver()
                 )
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
-    @DisplayName("조건이 없으면 임시 사용자와 기본 페이징으로 빈 목록을 반환한다")
+    @DisplayName("조건이 없으면 로그인 사용자와 기본 페이징으로 빈 목록을 반환한다")
     void getTicketAll_NoCondition_DefaultPageable() throws Exception {
         // given
         givenEmptyPage();
@@ -79,7 +97,7 @@ class TicketSearchControllerTest {
                 ArgumentCaptor.forClass(Pageable.class);
 
         verify(ticketService).findTicketAll(
-                eq(1L), conditionCaptor.capture(), pageableCaptor.capture()
+                eq(USER_ID), conditionCaptor.capture(), pageableCaptor.capture()
         );
 
         assertThat(conditionCaptor.getValue())
@@ -105,7 +123,7 @@ class TicketSearchControllerTest {
         );
 
         when(ticketService.findTicketAll(
-                eq(1L),
+                eq(USER_ID),
                 any(SearchTicketCondition.class),
                 any(Pageable.class)
         )).thenAnswer(invocation ->
@@ -149,7 +167,7 @@ class TicketSearchControllerTest {
                 ArgumentCaptor.forClass(Pageable.class);
 
         verify(ticketService).findTicketAll(
-                eq(1L), conditionCaptor.capture(), pageableCaptor.capture()
+                eq(USER_ID), conditionCaptor.capture(), pageableCaptor.capture()
         );
 
         assertThat(conditionCaptor.getValue()).isEqualTo(
@@ -179,7 +197,7 @@ class TicketSearchControllerTest {
                 ArgumentCaptor.forClass(Pageable.class);
 
         verify(ticketService).findTicketAll(
-                eq(1L),
+                eq(USER_ID),
                 any(SearchTicketCondition.class),
                 pageableCaptor.capture()
         );
@@ -203,7 +221,7 @@ class TicketSearchControllerTest {
 
     private void givenEmptyPage() {
         when(ticketService.findTicketAll(
-                eq(1L),
+                eq(USER_ID),
                 any(SearchTicketCondition.class),
                 any(Pageable.class)
         )).thenAnswer(invocation ->

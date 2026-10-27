@@ -32,6 +32,9 @@ import java.time.LocalTime;
 @Transactional(readOnly = true)
 public class ReservationService {
 
+    private static final LocalTime PARK_CLOSE_TIME = LocalTime.of(22, 0);
+    private static final long RESERVATION_DEADLINE_MINUTES = 30;
+
     private final ReservationRepository reservationRepository;
     private final UserService userService;
     private final TicketService ticketService;
@@ -45,9 +48,6 @@ public class ReservationService {
         /* 현재시간, 오늘날짜, 현재시각 */
         LocalDateTime now = KstTime.now();
         LocalDate today = now.toLocalDate();
-
-        /* 놀이공원 폐장시간 */
-        LocalTime parkCloseTime = LocalTime.of(22, 0);
 
         // 회원이 활성 상태인지 확인
         User user = userService.findByUserId(userId);
@@ -81,7 +81,7 @@ public class ReservationService {
         LocalDateTime slotEndsAt = attractionSlot.getEndsAt();
 
         /* 슬롯 예약 마감 시간 */
-        LocalDateTime deadLine = attractionSlot.getStartsAt().minusMinutes(30);
+        LocalDateTime deadLine = slotStartsAt.minusMinutes(RESERVATION_DEADLINE_MINUTES);
 
         if (!slotStartsAt.toLocalDate().equals(ticket.getValidDate())) {
             throw new BusinessException(ErrorCode.TICKET_RESERVATION_DATE_MISMATCH);
@@ -89,7 +89,7 @@ public class ReservationService {
 
         // 티켓 시간이랑 슬롯 시간 검증
         if (slotStartsAt.toLocalTime().isBefore(ticket.getType().getAvailableFrom())
-                || slotStartsAt.toLocalTime().isAfter(parkCloseTime) || slotEndsAt.toLocalTime().isAfter(parkCloseTime)
+                || slotStartsAt.toLocalTime().isAfter(PARK_CLOSE_TIME) || slotEndsAt.toLocalTime().isAfter(PARK_CLOSE_TIME)
         ) {
             throw new BusinessException(ErrorCode.TICKET_RESERVATION_TIME_NOT_ALLOWED);
         }
@@ -135,23 +135,14 @@ public class ReservationService {
 
     // 내 예약 목록 조회 (예약상태 + 날짜 + 페이징)
     public Page<SearchReservationResponse> findReservationAll(Long userId, Pageable stablePageable, SearchReservationCondition condition) {
-        LocalDateTime dayStart;
-        LocalDateTime nextDayStart;
 
-        // 날짜가 null일 경우 메서드 호출시 npe 방지
-        if (condition.date() == null) {
-            dayStart = null;
-            nextDayStart = null;
-        } else {
-            dayStart = condition.date().atStartOfDay();
-            nextDayStart = condition.date().plusDays(1).atStartOfDay();
-        }
+        ReservationDateRange dateRange = ReservationDateRange.from(condition.date());
 
         Page<Reservation> reservations = reservationRepository.findReservationAllByCondition(
                 userId,
                 condition.status(),
-                dayStart,
-                nextDayStart,
+                dateRange.dayStart,
+                dateRange.nextDayStart,
                 stablePageable
         );
 
@@ -160,9 +151,138 @@ public class ReservationService {
 
     // 내 예약 상세 조회
     public SearchReservationDetailResponse findReservationById(Long userId, Long reservationId) {
-        Reservation reservation = reservationRepository.findReservationByIdAndUser_Id(reservationId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
-
+        Reservation reservation = getReservationByIdAndUserId(reservationId, userId);
         return SearchReservationDetailResponse.from(reservation);
     }
+
+    // 내 예약 취소
+    // 추후 동시성 해결 필요
+    @Transactional
+    public UpdateReservationCancelResponse cancelReservation(Long userId, Long reservationId) {
+
+        Reservation reservation = getReservationByIdAndUserId(reservationId, userId);
+
+        // 예약 상태가 RESERVED인지 확인
+        if (reservation.getStatus() != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        // 현재 KST 시각이 슬롯 시작 30분 전 이내인지 확인
+        LocalDateTime currentTime = KstTime.now();
+        Instant now = currentTime.atZone(KstTime.ZONE).toInstant();
+
+        LocalDateTime deadLine = reservation.getAttractionSlot().getStartsAt()
+                .minusMinutes(RESERVATION_DEADLINE_MINUTES);
+
+        if (currentTime.isAfter(deadLine)) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_DEADLINE_PASSED);
+        }
+
+        // 취소 성공 시 예약 상태를 CANCELLED로 변경하고 취소 시각 기록
+        reservation.cancelReservation(now);
+
+        // 슬롯 예약 인원을 1 감소시켜 잔여 정원 복구
+        Long slotId = reservation.getAttractionSlot().getId();
+        attractionSlotService.releaseReservationCapacity(slotId);
+
+        // 관리자가 직접 마감하거나 운영 중단·취소한 슬롯은 자동으로 열지 않음
+
+        return UpdateReservationCancelResponse.from(reservation);
+    }
+
+    // 관리자 예약 목록 조회
+    public Page<SearchAdminReservationResponse> findAdminReservationAll(
+            SearchAdminReservationCondition condition,
+            Pageable stablePageable
+    ) {
+        ReservationDateRange dateRange = ReservationDateRange.from(condition.date());
+
+        Page<Reservation> reservations = reservationRepository.findAdminReservationByCondition(
+                condition.userId(),
+                condition.attractionId(),
+                condition.status(),
+                dateRange.dayStart,
+                dateRange.nextDayStart,
+                stablePageable
+        );
+
+        return reservations.map(SearchAdminReservationResponse::from);
+    }
+
+    // 관리자 예약 상세 조회
+    public SearchAdminReservationDetailResponse findAdminReservationById(Long reservationId) {
+        Reservation reservation = getReservationById(reservationId);
+        return SearchAdminReservationDetailResponse.from(reservation);
+    }
+
+    // 관리자 예약 강제 취소
+    @Transactional
+    public UpdateAdminReservationCancelResponse adminReservationCancel(Long reservationId, UpdateAdminReservationCancelRequest request) {
+
+        // 예약 존재 여부 및 RESERVED 상태 검증
+        Reservation reservation = getReservationById(reservationId);
+
+        if (reservation.getStatus() != ReservationStatus.RESERVED) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
+        }
+
+        // 취소 상태·시각·사유
+        reservation.adminCancelReservation(request.cancelReason());
+
+        // 슬롯 예약 인원을 1 감소시켜 잔여 정원 복구
+        Long slotId = reservation.getAttractionSlot().getId();
+        attractionSlotService.releaseReservationCapacity(slotId);
+
+        return UpdateAdminReservationCancelResponse.from(reservation);
+    }
+
+    // 관리자 예약 상태 변경
+    @Transactional
+    public UpdateAdminReservationStatusResponse updateReservationStatus(Long reservationId, UpdateAdminReservationStatusRequest request) {
+        Reservation reservation = getReservationById(reservationId);
+
+        // KST 기준 슬롯 종료 이후인지 검증
+        Instant now = Instant.now();
+        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime endTime = reservation.getAttractionSlot().getEndsAt();
+        if (currentTime.isBefore(endTime)) {
+            throw new BusinessException(ErrorCode.RESERVATION_SLOT_NOT_ENDED);
+        }
+
+        reservation.updateReservationStatus(request.status());
+
+        // DB 반영 및 Auditing의 updatedAt 갱신
+        reservationRepository.flush();
+
+        return UpdateAdminReservationStatusResponse.from(reservation);
+    }
+
+    // reservation 공통 처리
+    private Reservation getReservationById(Long reservationId) {
+        return reservationRepository.findById(reservationId).orElseThrow(
+                () -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION)
+        );
+    }
+
+    // 본인 예약 조회 중복 메서드 분리
+    private Reservation getReservationByIdAndUserId(Long reservationId, Long userId) {
+        return reservationRepository.findReservationByIdAndUser_Id(reservationId, userId).orElseThrow(
+                () -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION)
+        );
+    }
+
+    // 목록 조회 날짜 범위 계산 분리
+    private record ReservationDateRange(LocalDateTime dayStart, LocalDateTime nextDayStart) {
+        private static ReservationDateRange from(LocalDate date) {
+            if (date == null) {
+                return new ReservationDateRange(null, null);
+            }
+
+            return new ReservationDateRange(
+                    date.atStartOfDay(),
+                    date.plusDays(1).atStartOfDay()
+            );
+        }
+    }
+
 }

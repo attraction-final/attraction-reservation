@@ -1,5 +1,8 @@
 package com.example.attractionreservation.global.config;
 
+import com.example.attractionreservation.domain.auth.oauth2.SocialLoginSuccessHandler;
+import com.example.attractionreservation.domain.auth.oauth2.SocialLoginFailureHandler;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -18,7 +21,12 @@ import org.springframework.test.context.junit.jupiter.web.SpringJUnitWebConfig;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpSession;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -34,6 +42,13 @@ class OAuth2SecurityConfigTest {
 
     @Autowired
     private WebApplicationContext context;
+
+    // 인증 시작 테스트에서는 처리기의 실제 DB·Redis 작업을 실행하지 않는다.
+    @MockitoBean
+    private SocialLoginSuccessHandler successHandler;
+
+    @MockitoBean
+    private SocialLoginFailureHandler failureHandler;
 
     @ParameterizedTest
     @CsvSource({
@@ -144,5 +159,40 @@ class OAuth2SecurityConfigTest {
                     .tokenUri("https://example.com/token")
                     .build();
         }
+    }
+
+    @Test
+    @DisplayName("인증 시작 때 저장한 state와 다르면 콜백 인증에 실패한다")
+    void callback_wrongState_callsFailureHandler() throws Exception {
+        MockMvc mockMvc = webAppContextSetup(context)
+                .apply(springSecurity())
+                .build();
+
+        String startPath = "/oauth2/authorization/kakao";
+
+        var startResult = mockMvc.perform(
+                        get(startPath).servletPath(startPath)
+                )
+                .andExpect(status().isFound())
+                .andReturn();
+
+        // 시작 요청과 같은 세션을 사용하되 state만 다르게 전달한다.
+        var session = (MockHttpSession) startResult
+                .getRequest()
+                .getSession(false);
+
+        String callbackPath = "/login/oauth2/code/kakao";
+
+        mockMvc.perform(get(callbackPath)
+                .servletPath(callbackPath)
+                .session(session)
+                .param("code", "test-authorization-code")
+                .param("state", "wrong-state"));
+
+        // 검증 실패 시 외부 토큰 교환이나 성공 처리를 진행하면 안 된다.
+        verify(failureHandler).onAuthenticationFailure(
+                any(), any(), any()
+        );
+        verifyNoInteractions(successHandler);
     }
 }

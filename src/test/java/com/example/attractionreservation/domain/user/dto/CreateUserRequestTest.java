@@ -1,5 +1,5 @@
 
-package com.example.attractionreservation.user.dto;
+package com.example.attractionreservation.domain.user.dto;
 
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
 import jakarta.validation.Validation;

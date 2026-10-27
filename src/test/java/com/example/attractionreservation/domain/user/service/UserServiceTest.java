@@ -1,5 +1,9 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepository;
+import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
+import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
 import com.example.attractionreservation.domain.user.dto.CreateUserResponse;
 import com.example.attractionreservation.domain.user.dto.GetUserResponse;
@@ -32,6 +36,9 @@ class UserServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
     private PasswordEncoder passwordEncoder;
     private UserService userService;
 
@@ -39,7 +46,11 @@ class UserServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         passwordEncoder = new BCryptPasswordEncoder();
-        userService = new UserService(userRepository, passwordEncoder);
+        userService = new UserService(
+                userRepository,
+                passwordEncoder,
+                refreshTokenRepository
+        );
     }
 
     @Test
@@ -201,4 +212,187 @@ class UserServiceTest {
                                 .isEqualTo(ErrorCode.UNAUTHORIZED)
                 );
     }
+
+    @Test
+    void updateMe_activeUser_updatesOnlyNickname() {
+        Long userId = 1L;
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password("encoded-password")
+                .nickname("기존닉네임")
+                .build();
+
+        ReflectionTestUtils.setField(user, "id", userId);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        UpdateUserResponse response = userService.updateMe(
+                userId,
+                new UpdateUserRequest("새로운닉네임")
+        );
+
+        assertThat(response).isEqualTo(new UpdateUserResponse(
+                userId,
+                "test@gmail.com",
+                "새로운닉네임"
+        ));
+        assertThat(user.getNickname()).isEqualTo("새로운닉네임");
+        assertThat(user.getEmail()).isEqualTo("test@gmail.com");
+        assertThat(user.getPassword()).isEqualTo("encoded-password");
+        assertThat(user.getRole().name()).isEqualTo("USER");
+        assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+
+        verify(userRepository).findById(userId);
+        verifyNoMoreInteractions(userRepository);
+    }
+
+    @Test
+    void updateMe_missingUser_throwsUnauthorized() {
+        Long userId = 1L;
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updateMe(
+                userId,
+                new UpdateUserRequest("새로운닉네임")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+    }
+
+    @Test
+    void updateMe_withdrawnUser_throwsUnauthorized() {
+        Long userId = 1L;
+        User user = User.builder()
+                .email("withdrawn@gmail.com")
+                .password("encoded-password")
+                .nickname("기존닉네임")
+                .build();
+
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateMe(
+                userId,
+                new UpdateUserRequest("새로운닉네임")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+
+        assertThat(user.getNickname()).isEqualTo("기존닉네임");
+    }
+
+    @Test
+    void updatePassword_validCurrentPassword_changesPasswordHash() {
+        Long userId = 1L;
+        String oldHash = passwordEncoder.encode("Password!123");
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password(oldHash)
+                .nickname("홍길동")
+                .build();
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        userService.updatePassword(userId, new UpdatePasswordRequest(
+                "Password!123", "NewPassword!456"
+        ));
+
+        String updatedHash = user.getPassword();
+
+        assertThat(updatedHash)
+                .isNotEqualTo(oldHash)
+                .isNotEqualTo("NewPassword!456");
+        assertThat(passwordEncoder.matches("NewPassword!456", updatedHash))
+                .isTrue();
+        assertThat(passwordEncoder.matches("Password!123", updatedHash))
+                .isFalse();
+
+        verify(userRepository).findById(userId);
+        verifyNoMoreInteractions(userRepository);
+    }
+
+    @Test
+    void updatePassword_wrongCurrentPassword_keepsOriginalPassword() {
+        Long userId = 1L;
+        String oldHash = passwordEncoder.encode("Password!123");
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password(oldHash)
+                .nickname("홍길동")
+                .build();
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updatePassword(
+                userId,
+                new UpdatePasswordRequest("WrongPassword!123", "NewPassword!456")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.CURRENT_PASSWORD_MISMATCH)
+                );
+
+        assertThat(user.getPassword()).isEqualTo(oldHash);
+    }
+
+    @Test
+    void updatePassword_missingUser_throwsUnauthorized() {
+        Long userId = 1L;
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updatePassword(
+                userId,
+                new UpdatePasswordRequest("Password!123", "NewPassword!456")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+    }
+
+    @Test
+    void updatePassword_withdrawnUser_keepsOriginalPassword() {
+        Long userId = 1L;
+        String oldHash = passwordEncoder.encode("Password!123");
+        User user = User.builder()
+                .email("withdrawn@gmail.com")
+                .password(oldHash)
+                .nickname("탈퇴회원")
+                .build();
+
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updatePassword(
+                userId,
+                new UpdatePasswordRequest("Password!123", "NewPassword!456")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+
+        assertThat(user.getPassword()).isEqualTo(oldHash);
+    }
+
 }

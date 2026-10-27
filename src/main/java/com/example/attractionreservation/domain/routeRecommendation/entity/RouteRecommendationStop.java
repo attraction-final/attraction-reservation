@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import com.example.attractionreservation.global.util.KstTime;
 //추천 경로에 포한됨 방문 일정 한 건을 저장 ->어트랙션 이름과 슬롯 시각은 추천 당시 값으로 저장
 @Getter
 @Entity
@@ -23,9 +24,11 @@ public class RouteRecommendationStop {
     @JoinColumn(name = "recommendation_id", nullable = false)
     private RouteRecommendation routeRecommendation;
 
+    //방문할 어트랙션의 식별자 ->ID만 보관
     @Column(name = "attraction_id", nullable = false)
     private Long attractionId;
 
+    //방문 일정에서 선택한 탑승 슬롯의 식별자
     @Column(name = "attraction_slot_id", nullable = false)
     private Long attractionSlotId;
 
@@ -92,9 +95,9 @@ public class RouteRecommendationStop {
         stop.estimatedArrivalAt = arrivalAt;
         stop.slotStartAt = slotStartAt;
         stop.slotEndAt = slotEndAt;
-        stop.estimatedWaitMin = (int) Duration.between(arrivalAt, slotStartAt).toMinutes();
-        stop.estimatedRideMin = (int) Duration.between(slotStartAt, slotEndAt).toMinutes();
         //toMinutes() ->초 단위 나머지를 버리고 정수 분 반환
+        stop.estimatedWaitMin = (int) Duration.between(arrivalAt.atZone(KstTime.ZONE), slotStartAt.atZone(KstTime.ZONE)).toMinutes();
+        stop.estimatedRideMin = (int) Duration.between(slotStartAt.atZone(KstTime.ZONE), slotEndAt.atZone(KstTime.ZONE)).toMinutes();
         return stop;
     }
     //이 방문 일정의 부모 추천 경로를 연결

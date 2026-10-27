@@ -1,11 +1,11 @@
 package com.example.attractionreservation.domain.routeRecommendation.algorithm;
 //최적 방문 순서 탐색
 
-import org.springframework.stereotype.Component;
-
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
+import com.example.attractionreservation.global.util.KstTime;
+import org.springframework.stereotype.Component;
 //후보 어트랙션으로 방문 순서와 탑승 슬롯을 결정
 @Component
 public class RouteSearcher {
@@ -82,7 +82,7 @@ public class RouteSearcher {
             //도착 후 슬롯 시작까지 기다릴 시간을 계산한다
             CandidateSlot slot = availableSLot.get();
             int waitMinutes = Math.toIntExact(
-                    Duration.between(arrivalAt, slot.startsAt()).toMinutes()
+                    Duration.between(arrivalAt.atZone(KstTime.ZONE), slot.startsAt().atZone(KstTime.ZONE)).toMinutes()
             );
             //이번에 선택한 다음 방문의 시간표를 만든다
             PlannedVisit visit = new PlannedVisit(

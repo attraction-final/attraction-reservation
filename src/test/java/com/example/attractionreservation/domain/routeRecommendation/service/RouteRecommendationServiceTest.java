@@ -42,6 +42,15 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
+import com.example.attractionreservation.domain.routeRecommendation.repository.StopCount;
+import com.example.attractionreservation.global.response.PageableDto;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -76,7 +85,6 @@ class RouteRecommendationServiceTest {
 
     @Mock
     private AttractionSlotRepository attractionSlotRepository;
-    @Mock
     private RouteRecommendationService routeRecommendationService;
     @Mock
     private ReservationRepository reservationRepository;
@@ -494,5 +502,71 @@ class RouteRecommendationServiceTest {
         assertErrorCode(() -> routeRecommendationService.deleteRouteRecommendation(8L, 1L),
                 ErrorCode.NOT_ROUTE_OWNER);
         assertThat(recommendation.isDeleted()).isFalse();
+    }
+
+    // ---------- 목록 조회 ----------
+
+    @Test
+    @DisplayName("목록 항목에 집계한 방문지 개수를 담고 페이지 정보를 반환한다")
+    void findRouteRecommendations_Recommendations_MapsStopCounts() {
+        // given: 추천 2개. 방문지 개수는 엔티티가 아니라 집계 쿼리 결과(3, 1)를 써야 한다
+        RouteRecommendation first = recommendationOwnedBy(7L);    // id = 1
+        RouteRecommendation second = recommendationOwnedBy(7L);
+        ReflectionTestUtils.setField(second, "id", 2L);
+
+        when(routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(eq(7L), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(first, second), PageRequest.of(0, 10), 2));
+        when(routeRecommendationRepository.countStopsByRecommendationIds(List.of(1L, 2L)))
+                .thenReturn(List.of(new StopCount(1L, 3L), new StopCount(2L, 1L)));
+
+        // when
+        PageableDto<SearchRouteRecommendationSummaryResponse> result =
+                routeRecommendationService.findRouteRecommendations(7L, 0, 10);
+
+        // then
+        assertThat(result.content())
+                .extracting(SearchRouteRecommendationSummaryResponse::totalRecommendedAttractions)
+                .containsExactly(3, 1);
+        assertThat(result.page()).isZero();
+        assertThat(result.size()).isEqualTo(10);
+        assertThat(result.totalElements()).isEqualTo(2);
+        assertThat(result.hasNext()).isFalse();
+    }
+
+    @Test
+    @DisplayName("추천이 없으면 빈 목록을 반환하고 방문지 개수 쿼리를 보내지 않는다")
+    void findRouteRecommendations_Empty_SkipsStopCountQuery() {
+        // given
+        when(routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(eq(7L), any(Pageable.class)))
+                .thenReturn(Page.empty(PageRequest.of(0, 10)));
+
+        // when
+        PageableDto<SearchRouteRecommendationSummaryResponse> result =
+                routeRecommendationService.findRouteRecommendations(7L, 0, 10);
+
+        // then
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
+        verify(routeRecommendationRepository, never()).countStopsByRecommendationIds(any());
+    }
+
+    @Test
+    @DisplayName("최신순(생성 시각 내림차순, 같으면 id 내림차순)과 요청한 페이지로 조회한다")
+    void findRouteRecommendations_PassesNewestFirstPageable() {
+        // given
+        when(routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(eq(7L), any(Pageable.class)))
+                .thenReturn(Page.empty(PageRequest.of(2, 5)));
+
+        // when
+        routeRecommendationService.findRouteRecommendations(7L, 2, 5);
+
+        // then: 리포지토리에 실제로 넘어간 Pageable 을 꺼내서 확인한다
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(routeRecommendationRepository).findAllByUserIdAndDeletedAtIsNull(eq(7L), captor.capture());
+        Pageable pageable = captor.getValue();
+        assertThat(pageable.getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getPageSize()).isEqualTo(5);
+        assertThat(pageable.getSort())
+                .isEqualTo(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
     }
 }

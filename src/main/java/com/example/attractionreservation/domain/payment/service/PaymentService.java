@@ -15,13 +15,15 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
     private final PaymentRepository paymentRepository;
 
     @Transactional
-    public void createPayment(Order order) {
+    public String createPayment(Order order) {
         if (order.getTotalAmount() <= 0) {
             throw new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT);
         }
@@ -29,6 +31,8 @@ public class PaymentService {
         Payment payment = Payment.create(order);
 
         paymentRepository.save(payment);
+
+        return payment.getPgId();
     }
 
     @Transactional(readOnly = true)
@@ -46,7 +50,7 @@ public class PaymentService {
     }
 
     @Transactional
-    public void cancelPayment(Long userId, Long orderId) {
+    public void cancelledByUser(Long userId, Long orderId) {
         Payment found = paymentRepository.findWithLockByOrderId(orderId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
@@ -59,6 +63,51 @@ public class PaymentService {
         }
 
         found.markAsCancelled();
+        found.getOrder().markAsCancelled();
+
+        // TODO: 재고 복구 로직 필요
         paymentRepository.save(found);
+    }
+
+    @Transactional
+    public void lockPaymentByOrderIdIfExists(Long orderId) {
+        // 결제 승인 경로와 잠금 순서를 맞추기 위해 결제 행을 먼저 잠근다.
+        // 여기서는 결제 상태를 변경하지 않는다.
+        paymentRepository.findWithLockByOrderId(orderId);
+    }
+
+    @Transactional
+    public void cancelPendingPaymentIfExists(Long userId, Long orderId) {
+        // 결제 정보가 아직 생성되지 않은 주문도 취소할 수 있다.
+        Payment payment = paymentRepository.findWithLockByOrderId(orderId)
+                .orElse(null);
+
+        if (payment == null) {
+            return;
+        }
+
+        if (!payment.getOrder().getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
+        }
+
+        // 대기 상태가 아닌 결제는 취소하지 않는다.
+        if (payment.getStatus() != PaymentStatus.PENDING) {
+            throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
+        }
+
+        payment.markAsCancelled();
+    }
+
+    // 웹훅처럼 로그인 사용자가 없는 경로에서 사용한다.
+    @Transactional(readOnly = true)
+    public Optional<Payment> findByPgId(String pgId) {
+        return paymentRepository.findByPgId(pgId);
+    }
+
+    @Transactional(readOnly = true)
+    public Payment getOwnedPayment(Long userId, String pgId) {
+        return paymentRepository.findByPgIdAndUserId(pgId, userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
 }

@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.auth.service;
 
+import com.example.attractionreservation.domain.auth.repository.SocialLoginCodeRepository;
+import com.example.attractionreservation.domain.user.entity.AuthProvider;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginRequest;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthLoginServiceResponse;
 import com.example.attractionreservation.domain.auth.dto.CreateAuthRefreshResponse;
@@ -49,6 +51,9 @@ class AuthServiceTest {
     @InjectMocks
     private AuthService authService;
 
+    @Mock
+    private SocialLoginCodeRepository socialLoginCodeRepository;
+
     @Test
     @DisplayName("인증 정보가 유효하고 ACTIVE 회원이면 토큰을 발급하고 Refresh Token을 저장한다.")
     void login_validCredentialsAndActiveUser_returnsTokensAndSavesRefreshToken() {
@@ -57,6 +62,7 @@ class AuthServiceTest {
                 new CreateAuthLoginRequest("test@example.com", "Password!123");
 
         User user = mock(User.class);
+        when(user.getProvider()).thenReturn(AuthProvider.LOCAL);
         when(user.getPassword()).thenReturn("encoded-password");
         when(user.getStatus()).thenReturn(UserStatus.ACTIVE);
         when(user.getId()).thenReturn(1L);
@@ -115,6 +121,7 @@ class AuthServiceTest {
                 new CreateAuthLoginRequest("test@example.com", "WrongPassword");
 
         User user = mock(User.class);
+        when(user.getProvider()).thenReturn(AuthProvider.LOCAL);
         when(user.getPassword()).thenReturn("encoded-password");
 
         when(userRepository.findByEmail(request.email()))
@@ -143,6 +150,7 @@ class AuthServiceTest {
                 new CreateAuthLoginRequest("test@example.com", "Password!123");
 
         User user = mock(User.class);
+        when(user.getProvider()).thenReturn(AuthProvider.LOCAL);
         when(user.getPassword()).thenReturn("encoded-password");
         when(user.getStatus()).thenReturn(UserStatus.INACTIVE);
 
@@ -486,6 +494,161 @@ class AuthServiceTest {
                 refreshTokenRepository,
                 jwtProvider,
                 userRepository,
+                passwordEncoder
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = AuthProvider.class,
+            names = {"KAKAO", "GOOGLE"}
+    )
+    @DisplayName("소셜 회원은 이메일·비밀번호 로그인으로 토큰을 발급받을 수 없다")
+    void login_socialMember_rejected(AuthProvider provider) {
+        var request = new CreateAuthLoginRequest(
+                "social@example.com",
+                "Password!123"
+        );
+
+        User user = User.createSocial(
+                "social@example.com",
+                "소셜회원",
+                provider,
+                "provider-123"
+        );
+
+        when(userRepository.findByEmail(request.email()))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_LOGIN_CREDENTIALS)
+                );
+
+        // 비밀번호 비교와 서비스 토큰 발급 모두 진행하지 않는다.
+        verifyNoInteractions(
+                passwordEncoder,
+                jwtProvider,
+                refreshTokenRepository
+        );
+    }
+
+    @Test
+    @DisplayName("유효한 코드와 ACTIVE 회원이면 JWT를 발급하고 Refresh Token을 저장한다")
+    void exchange_validCode_returnsTokens() {
+        String code = "a".repeat(43);
+
+        User user = User.createSocial(
+                "social@example.com",
+                "소셜회원",
+                AuthProvider.GOOGLE,
+                "google-123"
+        );
+        org.springframework.test.util.ReflectionTestUtils
+                .setField(user, "id", 1L);
+
+        when(socialLoginCodeRepository.consume(code))
+                .thenReturn(Optional.of(1L));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(jwtProvider.createAccessToken(1L)).thenReturn("access-token");
+        when(jwtProvider.createRefreshToken(1L)).thenReturn("refresh-token");
+        when(jwtProvider.getAccessTokenExpirationSeconds()).thenReturn(600L);
+
+        var result = authService.exchangeSocialLoginCode(code);
+
+        assertThat(result.response().accessToken()).isEqualTo("access-token");
+        assertThat(result.response().tokenType()).isEqualTo("Bearer");
+        assertThat(result.response().expiresIn()).isEqualTo(600L);
+        assertThat(result.refreshToken()).isEqualTo("refresh-token");
+
+        verify(refreshTokenRepository).save(1L, "refresh-token");
+        verifyNoInteractions(passwordEncoder);
+    }
+
+    @Test
+    @DisplayName("유효하지 않거나 만료·사용된 코드는 401 오류로 처리한다")
+    void exchange_invalidCode_rejected() {
+        String code = "a".repeat(43);
+        when(socialLoginCodeRepository.consume(code))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.exchangeSocialLoginCode(code))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.SOCIAL_LOGIN_CODE_INVALID)
+                );
+
+        verifyNoInteractions(
+                userRepository,
+                jwtProvider,
+                refreshTokenRepository,
+                passwordEncoder
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = UserStatus.class,
+            names = "ACTIVE",
+            mode = EnumSource.Mode.EXCLUDE
+    )
+    @DisplayName("코드 발급 후 ACTIVE가 아닌 회원은 토큰 교환을 거부한다")
+    void exchange_notActiveMember_rejected(UserStatus status) {
+        String code = "a".repeat(43);
+
+        User user = User.createSocial(
+                "social@example.com",
+                "소셜회원",
+                AuthProvider.GOOGLE,
+                "google-123"
+        );
+
+        org.springframework.test.util.ReflectionTestUtils
+                .setField(user, "status", status);
+
+        when(socialLoginCodeRepository.consume(code))
+                .thenReturn(Optional.of(1L));
+        when(userRepository.findById(1L))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.exchangeSocialLoginCode(code))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.USER_NOT_ACTIVE)
+                );
+
+        // 회원 상태 확인에 실패하면 토큰 생성·저장을 진행하지 않는다.
+        verifyNoInteractions(
+                jwtProvider,
+                refreshTokenRepository,
+                passwordEncoder
+        );
+    }
+
+    @Test
+    @DisplayName("코드에 연결된 회원이 없으면 토큰 교환을 거부한다")
+    void exchange_memberNotFound_rejected() {
+        String code = "a".repeat(43);
+
+        when(socialLoginCodeRepository.consume(code))
+                .thenReturn(Optional.of(1L));
+        when(userRepository.findById(1L))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.exchangeSocialLoginCode(code))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.SOCIAL_LOGIN_CODE_INVALID)
+                );
+
+        verifyNoInteractions(
+                jwtProvider,
+                refreshTokenRepository,
                 passwordEncoder
         );
     }

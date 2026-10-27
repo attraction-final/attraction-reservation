@@ -39,11 +39,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String path = request.getServletPath();
         String method = request.getMethod();
 
-        // 로그인·회원가입은 Access Token이 불필요하고,
-        // 토큰 재발급은 Refresh Token으로 검증하므로 Access Token 검증을 건너뛴다.
+        // 로그인·회원가입·토큰 재발급·소셜 코드 교환은
+        // 각각의 인증 수단을 사용하므로 Access Token 검증을 건너뛴다.
         return "POST".equalsIgnoreCase(method)
                 && ("/api/auth/login".equals(path)
                 || "/api/auth/refresh".equals(path)
+                || "/api/auth/oauth2/exchange".equals(path)
                 || "/api/users/signup".equals(path));
     }
 

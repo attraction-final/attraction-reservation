@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.enums
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.TravelTimeBasis;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -152,7 +153,7 @@ public class RouteRecommendation extends BaseTimeEntity {
        //추천 일정의 종료는 마지막 방문의 탑승 종료 시각
        this.estimatedEndAt =lastStop.getSlotEndAt();
        //전체 소요 시간은 이용 시작부터 마지막 탑승 종료까지 계산
-       this.totalDurationMinutes = (int) Duration.between(startAt, estimatedEndAt).toMinutes();
+       this.totalDurationMinutes = (int) Duration.between(startAt.atZone(KstTime.ZONE), estimatedEndAt.atZone(KstTime.ZONE)).toMinutes();
    }
    //소프트 삭제 여부를 반환 -> 삭제 시각의 유무를 확인
     public boolean isDeleted() {

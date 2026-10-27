@@ -30,6 +30,10 @@ import tools.jackson.databind.ObjectMapper;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
+
 import java.util.List;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
@@ -620,5 +624,139 @@ class AuthControllerTest {
                         List.of(new SimpleGrantedAuthority("ROLE_USER"))
                 )
         );
+    }
+
+    @Test
+    @DisplayName("JWT 없이 소셜 코드를 교환하고 Access Token과 Refresh Token 쿠키를 받는다")
+    void exchange_validCode_returnsTokenAndCookie() throws Exception {
+        String code = "a".repeat(43);
+
+        var response = CreateAuthLoginResponse.of(
+                "social-access-token",
+                600L
+        );
+
+        when(authService.exchangeSocialLoginCode(code))
+                .thenReturn(CreateAuthLoginServiceResponse.of(
+                        response,
+                        "social-refresh-token"
+                ));
+
+        when(jwtProvider.getRefreshTokenExpirationSeconds())
+                .thenReturn(604_800L);
+
+        mockMvc.perform(post("/api/auth/oauth2/exchange")
+                        .servletPath("/api/auth/oauth2/exchange")
+                        .with(issuedCsrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "%s"
+                                }
+                                """.formatted(code)))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        HttpHeaders.CACHE_CONTROL,
+                        "no-store"
+                ))
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken")
+                        .value("social-access-token"))
+                .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.data.expiresIn").value(600))
+                .andExpect(jsonPath("$.data.refreshToken").doesNotExist())
+                .andExpect(jsonPath("$.data.code").doesNotExist())
+                .andExpect(header().string(
+                        HttpHeaders.SET_COOKIE,
+                        allOf(
+                                containsString(
+                                        "refreshToken=social-refresh-token"
+                                ),
+                                containsString("HttpOnly"),
+                                containsString("Secure"),
+                                containsString("SameSite=Lax"),
+                                containsString("Path=/api/auth"),
+                                containsString("Max-Age=604800")
+                        )
+                ));
+
+        verify(authService).exchangeSocialLoginCode(code);
+    }
+
+    @Test
+    @DisplayName("CSRF 토큰이 없으면 소셜 코드 교환을 거부한다")
+    void exchange_withoutCsrf_rejected() throws Exception {
+        mockMvc.perform(post("/api/auth/oauth2/exchange")
+                        .servletPath("/api/auth/oauth2/exchange")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "test-code"
+                                }
+                                """))
+                .andExpect(status().isForbidden());
+
+        // CSRF 검증 실패 시 일회용 코드를 소비하지 않아야 한다.
+        verifyNoInteractions(authService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}",
+            "{\"code\":null}",
+            "{\"code\":\"\"}",
+            "{\"code\":\"   \"}",
+            "{\"code\":"
+    })
+    @DisplayName("코드 누락·빈 값·잘못된 JSON은 400으로 거부한다")
+    void exchange_invalidRequest_returns400(String body) throws Exception {
+        mockMvc.perform(post("/api/auth/oauth2/exchange")
+                        .servletPath("/api/auth/oauth2/exchange")
+                        .with(issuedCsrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        // 요청 검증 실패 시 코드 소비를 진행하지 않는다.
+        verifyNoInteractions(authService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ErrorCode.class,
+            names = {
+                    "SOCIAL_LOGIN_CODE_INVALID",
+                    "USER_NOT_ACTIVE"
+            }
+    )
+    @DisplayName("코드 교환 업무 오류를 해당 HTTP 상태로 반환한다")
+    void exchange_businessError_returnsExpectedStatus(
+            ErrorCode errorCode
+    ) throws Exception {
+        String code = "a".repeat(43);
+
+        when(authService.exchangeSocialLoginCode(code))
+                .thenThrow(new BusinessException(errorCode));
+
+        int expectedStatus =
+                errorCode == ErrorCode.SOCIAL_LOGIN_CODE_INVALID
+                        ? 401
+                        : 403;
+
+        mockMvc.perform(post("/api/auth/oauth2/exchange")
+                        .servletPath("/api/auth/oauth2/exchange")
+                        .with(issuedCsrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "%s"
+                                }
+                                """.formatted(code)))
+                .andExpect(status().is(expectedStatus))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(cookie().doesNotExist("refreshToken"));
+
+        verify(authService).exchangeSocialLoginCode(code);
     }
 }

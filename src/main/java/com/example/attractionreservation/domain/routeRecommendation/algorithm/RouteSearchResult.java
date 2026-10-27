@@ -25,7 +25,7 @@ public int totalDurationMinutes() {
 
  private LocalDateTime estimatedEndAt() {
      if (isEmpty()) {
-         return null;
+        throw new IllegalStateException("빈 경로에는 종료 시각이 없습니다.");
      }
      return visits.get(visits.size() - 1).endsAt();
  }

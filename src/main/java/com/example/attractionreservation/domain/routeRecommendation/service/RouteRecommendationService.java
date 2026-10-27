@@ -25,8 +25,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class RouteRecommendationService {
-    private final Clock clock;
     private final RouteRecommendationRepository routeRecommendationRepository;
+    private final Clock clock;
 
     @Transactional(readOnly = true)
     public SearchRouteRecommendationResponse findRouteRecommendationById(Long userId, Long recommendationId) {

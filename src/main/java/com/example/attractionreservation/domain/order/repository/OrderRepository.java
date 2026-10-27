@@ -42,23 +42,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             @Param("updatedAt") Instant updatedAt
     );
 
-    // 기존 시간 경계 검증 테스트에서 사용하는 일괄 변경 쿼리다.
-    // 서비스의 자동 취소는 아래 대상 조회와 건별 결제 연동을 사용한다.
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("""
-            UPDATE Order o
-            SET o.status = :cancelledStatus,
-                o.updatedAt = :updatedAt
-            WHERE o.status = :pendingStatus
-                AND o.createdAt <= :cutoff
-            """)
-    int cancelExpiredPendingOrders(
-            @Param("pendingStatus") OrderStatus pendingStatus,
-            @Param("cancelledStatus") OrderStatus cancelledStatus,
-            @Param("cutoff") Instant cutoff,
-            @Param("updatedAt") Instant updatedAt
-    );
-
     // 자동 취소 대상을 오래된 순서로 조회하고 주문자 정보도 함께 가져온다.
     @Query("""
             SELECT o

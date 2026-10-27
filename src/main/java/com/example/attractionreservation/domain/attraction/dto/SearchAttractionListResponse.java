@@ -1,8 +1,8 @@
 package com.example.attractionreservation.domain.attraction.dto;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
-import com.example.attractionreservation.domain.attraction.entity.OperationStatus;
-import com.example.attractionreservation.domain.attraction.repository.ReservableSlotView;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
+import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import org.springframework.data.domain.Page;
 
@@ -66,9 +66,9 @@ public record SearchAttractionListResponse(
 
         public static NextSlot from(ReservableSlotView slotView) {
             return new NextSlot(
-                    slotView.getSlotId(),
-                    slotView.getStartsAt(),
-                    slotView.getRemainingCount()
+                    slotView.slotId(),          // getSlotId()         → slotId()
+                    slotView.startsAt(),        // getStartsAt()       → startsAt()
+                    slotView.remainingCount()   // getRemainingCount() → remainingCount()
             );
         }
     }

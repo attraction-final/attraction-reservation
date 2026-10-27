@@ -3,6 +3,7 @@ package com.example.attractionreservation.domain.routeRecommendation.dto;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
+import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.TravelTimeBasis;
@@ -104,7 +105,40 @@ public record SearchRouteRecommendationResponse(
                         exclusion.getReasonMessage()
                 );
             }
+            public static ExcludedAttraction of(Long attractionId, String attractionName, ExclusionReason reason) {
+                return new ExcludedAttraction(attractionId, attractionName, reason.name(), reason.getMessage());
+            }
         }
+
+
+    public static SearchRouteRecommendationResponse none(
+            Long ticketId,
+            LocalDateTime startAt,
+            LocalDateTime endAt,
+            int totalSelectedAttractions,
+            List<ExcludedAttraction> excludedAttractions
+    ) {
+        return new SearchRouteRecommendationResponse(
+                null,
+                ticketId,
+                startAt,
+                endAt,
+                StartLocation.ENTRANCE,
+                TravelTimeBasis.ENTRANCE_FIXED,
+                RouteResultType.NONE,
+                totalSelectedAttractions,
+                0,
+                0, 0, 0, 0,
+                null,
+                null,
+                List.of(),
+                excludedAttractions
+        );
+    }
+
+    public boolean isNone() {
+        return resultType == RouteResultType.NONE;
+    }
     }
 
 

@@ -179,7 +179,7 @@ class PaymentCompensationProcessorTest {
         given(paymentCompensationService.claim(eq(2L), any())).willReturn(Optional.empty());
 
         //when
-        paymentCompensationProcessor.processPending(10);
+        paymentCompensationProcessor.processPending(10, 5);
 
         //then
         verify(paymentCompensationService).claim(eq(2L), any());
@@ -398,17 +398,17 @@ class PaymentCompensationProcessorTest {
     }
 
     @Test
-    @DisplayName("스케줄러는 PG 취소 대상을 처리한 뒤 PG 확인 대기 중인 보상을 조회로 확인한다.")
+    @DisplayName("스케줄러는 PG 취소 대상을 처리한 뒤 PG 확인 대기 중인 보상을 확인 배치 크기만큼 조회로 확인한다.")
     void processPending_pgCheckable_Confirm() {
         //given
         given(paymentCompensationService.findProcessableIds(any(), eq(10))).willReturn(List.of());
-        given(paymentCompensationService.findPgCheckableIds(any(), eq(10))).willReturn(List.of(COMPENSATION_ID));
+        given(paymentCompensationService.findPgCheckableIds(any(), eq(5))).willReturn(List.of(COMPENSATION_ID));
         given(paymentCompensationService.findPgCheckable(eq(COMPENSATION_ID), any())).willReturn(Optional.of(PENDING));
         given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.CANCELLED,
                 new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED))));
 
         //when
-        paymentCompensationProcessor.processPending(10);
+        paymentCompensationProcessor.processPending(10, 5);
 
         //then
         verify(paymentCompensationService).recordPgCancelled(eq(COMPENSATION_ID), eq(PENDING_SINCE), any());

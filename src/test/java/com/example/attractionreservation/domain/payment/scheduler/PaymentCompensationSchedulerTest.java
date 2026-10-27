@@ -23,13 +23,13 @@ class PaymentCompensationSchedulerTest {
     void processPendingCompensations_scheduled_ProcessWithBatchSize() {
         //given
         PaymentCompensationProcessor processor = mock(PaymentCompensationProcessor.class);
-        PaymentCompensationScheduler scheduler = new PaymentCompensationScheduler(processor, 20);
+        PaymentCompensationScheduler scheduler = new PaymentCompensationScheduler(processor, 20, 5);
 
         //when
         scheduler.processPendingCompensations();
 
         //then
-        verify(processor).processPending(20);
+        verify(processor).processPending(20, 5);
     }
 
     @Test
@@ -37,8 +37,8 @@ class PaymentCompensationSchedulerTest {
     void processPendingCompensations_error_Swallowed() {
         //given
         PaymentCompensationProcessor processor = mock(PaymentCompensationProcessor.class);
-        willThrow(new DataAccessResourceFailureException("db down")).given(processor).processPending(20);
-        PaymentCompensationScheduler scheduler = new PaymentCompensationScheduler(processor, 20);
+        willThrow(new DataAccessResourceFailureException("db down")).given(processor).processPending(20, 5);
+        PaymentCompensationScheduler scheduler = new PaymentCompensationScheduler(processor, 20, 5);
 
         //when & then
         assertThatCode(scheduler::processPendingCompensations).doesNotThrowAnyException();

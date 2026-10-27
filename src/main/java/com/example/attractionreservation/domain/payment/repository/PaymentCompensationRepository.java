@@ -33,11 +33,13 @@ public interface PaymentCompensationRepository extends JpaRepository<PaymentComp
                                   Pageable pageable);
 
     // PG 취소 결과를 조회로 확인할 차례인 요청. 조건은 PaymentCompensation.isPgCheckable과 같다.
+    // 한 번에 확인하는 건수가 작으므로 확인 시각이 오래 지난 것부터 고른다. 결과 기록이 실패해 확인 시각이 그대로인 건이
+    // 계속 앞에 뽑혀도 id 순과 달리 다른 건이 밀리지 않는다.
     @Query("""
     SELECT c.id
     FROM PaymentCompensation c
     WHERE c.status = :pgPending AND c.nextRetryAt <= :now
-    ORDER BY c.id
+    ORDER BY c.nextRetryAt, c.id
     """)
     List<Long> findPgCheckableIds(CompensationStatus pgPending, Instant now, Pageable pageable);
 }

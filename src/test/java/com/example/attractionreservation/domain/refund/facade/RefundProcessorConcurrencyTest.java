@@ -10,7 +10,9 @@ import com.example.attractionreservation.domain.payment.entity.WebhookEvent;
 import com.example.attractionreservation.domain.payment.entity.enums.WebhookStatus;
 import com.example.attractionreservation.domain.payment.facade.WebhookEventProcessor;
 import com.example.attractionreservation.domain.payment.port.PaymentGateway;
+import com.example.attractionreservation.domain.payment.port.dto.PaymentCancellationResponse;
 import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayResponse;
+import com.example.attractionreservation.domain.payment.port.enums.GatewayCancellationStatus;
 import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymentStatus;
 import com.example.attractionreservation.domain.refund.entity.Refund;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
@@ -40,6 +42,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -132,7 +136,7 @@ class RefundProcessorConcurrencyTest {
             try {
                 Thread.sleep(PG_LATENCY_MILLIS);
                 pgCalls.add(List.of(invocation.getArgument(2), invocation.getArgument(3)));
-                return null;
+                return succeeded();
             } finally {
                 inFlight.decrementAndGet();
             }
@@ -179,7 +183,7 @@ class RefundProcessorConcurrencyTest {
         // 두 환불을 절반씩 동시에 처리한 뒤, 건너뛴 환불은 스케줄러처럼 이어서 처리한다.
         AtomicInteger turn = new AtomicInteger();
         runConcurrently(() -> refundProcessor.processById(turn.getAndIncrement() % 2 == 0 ? adultRefund : childRefund));
-        refundProcessor.processPending(10);
+        refundProcessor.processPending(10, 10);
 
         //then
         assertThat(maxInFlight.get()).isEqualTo(1);
@@ -206,7 +210,7 @@ class RefundProcessorConcurrencyTest {
             pgCalls.add(List.of(invocation.getArgument(2), invocation.getArgument(3)));
             cancelArrived.countDown();
             webhookDone.await(10, TimeUnit.SECONDS);
-            return null;
+            return succeeded();
         }).given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
 
         //when
@@ -260,6 +264,123 @@ class RefundProcessorConcurrencyTest {
         assertThat(webhookStatus).isEqualTo(WebhookStatus.PROCESSED);
     }
 
+    @Test
+    @DisplayName("앞선 환불이 PG 취소 확정 대기 중이면 같은 결제의 다음 환불은 동시에 처리해도 PG에 보내지 않고, 확정된 뒤 남은 취소 가능 금액으로 보낸다.")
+    void process_previousRefundPgPending_NextRefundWaits() throws Exception {
+        //given
+        // 성인 1장(10,000원) 취소는 PG가 접수만 하고, 어린이 4장(20,000원) 취소는 바로 완료된다.
+        willAnswer(invocation -> {
+            maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(PG_LATENCY_MILLIS);
+                Long amount = invocation.getArgument(2);
+                pgCalls.add(List.of(amount, invocation.getArgument(3)));
+                return amount == 10000L
+                        ? new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED, amount)
+                        : succeeded();
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        }).given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+
+        Long adultRefund = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        refundProcessor.processById(adultRefund);
+        assertThat(findRefund(adultRefund).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
+        Long childRefund = refundService.createRefund(userId, pgId, Map.of(childItemId, 4), "단순 변심", Instant.now());
+
+        //when
+        // 확정 대기 중에 즉시 시도와 스케줄러가 다음 환불을 동시에 처리한다.
+        AtomicInteger turn = new AtomicInteger();
+        runConcurrently(() -> {
+            if (turn.getAndIncrement() % 2 == 0) {
+                refundProcessor.processById(childRefund);
+            } else {
+                refundProcessor.processPending(10, 10);
+            }
+        });
+
+        //then
+        assertThat(pgCalls).containsExactly(List.of(10000L, 50000L));
+        assertThat(findRefund(childRefund).getStatus()).isEqualTo(RefundStatus.REQUESTED);
+
+        //when
+        // PG가 앞선 취소를 완료하고 확인 시각이 되면, 스케줄러가 앞선 환불을 확정한 뒤 다음 환불을 보낸다.
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
+                pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(),
+                List.of(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED, 10000L)))));
+        makePgCheckDue(adultRefund);
+        refundProcessor.processPending(10, 10);
+        refundProcessor.processPending(10, 10);
+
+        //then
+        assertThat(findRefund(adultRefund).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(findRefund(childRefund).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(pgCalls).containsExactly(List.of(10000L, 50000L), List.of(20000L, 40000L));
+        assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+    }
+
+    @Test
+    @DisplayName("확정 대기 환불을 취소 웹훅과 스케줄러가 동시에 확정해도 환불은 한 번만 완료되고 오류 없이 끝난다.")
+    void confirm_webhookAndSchedulerConcurrently_CompleteOnce() throws Exception {
+        //given
+        Long refundId = createPgPendingRefund();
+        // PG 조회에 시간이 걸리게 해 웹훅과 스케줄러의 확인이 겹치게 한다.
+        willAnswer(invocation -> {
+            Thread.sleep(PG_LATENCY_MILLIS);
+            return Optional.of(new PaymentGatewayResponse(
+                    pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(),
+                    List.of(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED, 10000L))));
+        }).given(paymentGateway).getPayment(pgId);
+        makePgCheckDue(refundId);
+        Queue<PaymentSyncResult> syncResults = new ConcurrentLinkedQueue<>();
+
+        //when
+        AtomicInteger turn = new AtomicInteger();
+        runConcurrently(() -> {
+            if (turn.getAndIncrement() % 2 == 0) {
+                syncResults.add(refundProcessor.syncWithPg(pgId));
+            } else {
+                refundProcessor.processPending(10, 10);
+            }
+        });
+
+        //then
+        Refund refund = findRefund(refundId);
+        assertThat(refund.getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(refund.getCompletedAt()).isNotNull();
+        assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(syncResults).hasSize(THREAD_COUNT / 2)
+                .allMatch(result -> result == PaymentSyncResult.REFUND_SYNCED || result == PaymentSyncResult.ALREADY_DONE);
+        assertThat(syncResults).filteredOn(result -> result == PaymentSyncResult.REFUND_SYNCED).hasSizeLessThanOrEqualTo(1);
+        assertThat(pgCalls).containsExactly(List.of(10000L, 50000L));
+    }
+
+    @Test
+    @DisplayName("확정 대기 환불의 취소가 아직 접수 상태면 취소 웹훅은 PROCESSED가 되고 환불은 확인 대기로 남는다(금액으로 잘못 맞추지 않는다).")
+    void processWebhook_pgPendingStillRequested_WebhookProcessed() {
+        //given
+        Long refundId = createPgPendingRefund();
+        // 접수된 취소 금액이 누적 취소 금액에 포함돼 보이는 경우(리스크 A)에도 금액으로 완료하지 않아야 한다.
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
+                pgId, GatewayPaymentStatus.PAID, 50000L, 10000L, Instant.now(),
+                List.of(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED, 10000L)))));
+        Long eventId = transactionTemplate.execute(status -> {
+            WebhookEvent event = WebhookEvent.receive("webhook-1", pgId, "WebhookTransactionCancelPending", "{}");
+            entityManager.persist(event);
+            return event.getId();
+        });
+
+        //when
+        webhookEventProcessor.process(eventId);
+
+        //then
+        WebhookStatus webhookStatus = transactionTemplate.execute(
+                status -> entityManager.find(WebhookEvent.class, eventId).getStatus());
+        assertThat(webhookStatus).isEqualTo(WebhookStatus.PROCESSED);
+        assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
+        assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.PAID);
+    }
+
     private void runConcurrently(Runnable task) throws Exception {
         ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
         CountDownLatch startLatch = new CountDownLatch(1);
@@ -290,6 +411,32 @@ class RefundProcessorConcurrencyTest {
         ReflectionTestUtils.setField(orderItem, "quantity", quantity);
         order.getOrderItems().add(orderItem);
         return orderItem;
+    }
+
+    // 성인 1장(10,000원) 환불을 PG가 접수만 한 상태(PG_PENDING, 취소 내역 cancel-1)로 만든다.
+    private Long createPgPendingRefund() {
+        willAnswer(invocation -> {
+            pgCalls.add(List.of(invocation.getArgument(2), invocation.getArgument(3)));
+            return new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED, 10000L);
+        }).given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+
+        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        refundProcessor.processById(refundId);
+        assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
+        return refundId;
+    }
+
+    private static PaymentCancellationResponse succeeded() {
+        return new PaymentCancellationResponse("cancel-ok", GatewayCancellationStatus.SUCCEEDED);
+    }
+
+    // 확인 대기 환불의 다음 확인 시각을 지금 이전으로 당긴다.
+    private void makePgCheckDue(Long refundId) {
+        transactionTemplate.executeWithoutResult(status -> entityManager
+                .createQuery("update Refund r set r.nextRetryAt = :due where r.id = :id")
+                .setParameter("due", Instant.now().minusSeconds(1))
+                .setParameter("id", refundId)
+                .executeUpdate());
     }
 
     private Refund findRefund(Long refundId) {

@@ -53,6 +53,7 @@ class RefundCommandServiceTest {
 
     private Instant now;
     private Payment payment;
+    private Payment otherPayment;
     private OrderItem adult;
     private OrderItem child;
 
@@ -96,7 +97,8 @@ class RefundCommandServiceTest {
         Optional<ClaimedRefund> claimed = refundCommandService.claim(refundId, now);
 
         //then
-        assertThat(claimed).contains(new ClaimedRefund(refundId, payment.getPgId(), 20000L, "단순 변심", 40000L));
+        assertThat(claimed).contains(new ClaimedRefund(
+                refundId, payment.getPgId(), 20000L, "단순 변심", 40000L, 10000L, 1, null, null));
         Refund found = find(refundId);
         assertThat(found.getStatus()).isEqualTo(RefundStatus.PROCESSING);
         assertThat(found.getAttemptCount()).isEqualTo(1);
@@ -160,7 +162,7 @@ class RefundCommandServiceTest {
         flushAndClear();
 
         //when
-        refundCommandService.recordComplete(refundId, now);
+        refundCommandService.recordComplete(refundId, 1, now);
         flushAndClear();
 
         //then
@@ -183,7 +185,7 @@ class RefundCommandServiceTest {
         flushAndClear();
 
         //when
-        refundCommandService.recordComplete(refundId, now);
+        refundCommandService.recordComplete(refundId, 1, now);
         flushAndClear();
 
         //then
@@ -202,7 +204,7 @@ class RefundCommandServiceTest {
         flushAndClear();
 
         //when
-        refundCommandService.recordComplete(refundId, now);
+        refundCommandService.recordComplete(refundId, 1, now);
         flushAndClear();
 
         //then
@@ -221,7 +223,7 @@ class RefundCommandServiceTest {
         for (int i = 0; i < 5; i++) {
             Instant attemptAt = now.plus(Duration.ofHours(i));
             refundCommandService.claim(refundId, attemptAt);
-            lastStatus = refundCommandService.recordFailure(refundId, "결제 취소에 실패했습니다.", attemptAt);
+            lastStatus = refundCommandService.recordFailure(refundId, i + 1, "결제 취소에 실패했습니다.", attemptAt);
             if (i == 0) {
                 firstStatus = lastStatus;
             }
@@ -240,7 +242,7 @@ class RefundCommandServiceTest {
         Long refundId = saveRefund(RefundStatus.PROCESSING, adult, 1);
 
         //when
-        refundCommandService.recordDead(refundId, "이미 취소된 결제입니다.");
+        refundCommandService.recordDead(refundId, 1, "이미 취소된 결제입니다.");
 
         //then
         Refund found = find(refundId);
@@ -256,7 +258,7 @@ class RefundCommandServiceTest {
         Long refundId = saveRefund(RefundStatus.COMPLETED, adult, 1);
 
         //when & then
-        assertThatThrownBy(() -> refundCommandService.recordDead(refundId, "이미 취소된 결제입니다."))
+        assertThatThrownBy(() -> refundCommandService.recordDead(refundId, 1, "이미 취소된 결제입니다."))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
         assertThat(find(refundId).getStatus()).isEqualTo(RefundStatus.COMPLETED);
@@ -270,7 +272,9 @@ class RefundCommandServiceTest {
         Long retryDue = saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
         saveRefund(RefundStatus.FAILED, child, 1, now);            // 1분 뒤 재시도
         saveRefund(RefundStatus.COMPLETED, child, 1);
-        saveRefund(RefundStatus.PROCESSING, child, 1);             // 방금 점유됨
+        // 방금 점유됨. 같은 결제에 두면 위 후보들이 같은 결제의 PG 취소 중 환불 때문에 빠지므로 다른 결제에 둔다.
+        OrderItem otherItem = createOtherPaymentItem();
+        saveRefund(otherPayment, RefundStatus.PROCESSING, otherItem, 1, now);
         flushAndClear();
 
         //when
@@ -285,6 +289,44 @@ class RefundCommandServiceTest {
     void findProcessableIds_staleProcessingAtBoundary_Included() {
         //given
         Long stale = saveRefund(RefundStatus.PROCESSING, adult, 1);
+        flushAndClear();
+        entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
+                .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
+                .setParameter("id", stale)
+                .executeUpdate();
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(stale);
+    }
+
+    @Test
+    @DisplayName("같은 결제의 다른 환불이 확정 대기 중이면 claim에서 건너뛸 후보이므로 처리 대상으로 조회하지 않는다.")
+    void findProcessableIds_otherRefundPgPending_Excluded() {
+        //given
+        saveRefund(RefundStatus.PG_PENDING, adult, 1);
+        saveRefund(RefundStatus.REQUESTED, child, 1);
+        saveRefund(RefundStatus.FAILED, child, 1, now.minus(Duration.ofMinutes(10)));
+        OrderItem otherItem = createOtherPaymentItem();
+        Long otherPaymentRefund = saveRefund(otherPayment, RefundStatus.REQUESTED, otherItem, 1, now);
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(otherPaymentRefund);
+    }
+
+    @Test
+    @DisplayName("같은 결제에 처리 중으로 멈춘 환불이 있으면 그 환불만 다시 처리 대상으로 조회하고 대기 중인 환불은 뺀다.")
+    void findProcessableIds_otherRefundStaleProcessing_OnlyStale() {
+        //given
+        Long stale = saveRefund(RefundStatus.PROCESSING, adult, 1);
+        saveRefund(RefundStatus.REQUESTED, child, 1);
         flushAndClear();
         entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
                 .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
@@ -418,12 +460,207 @@ class RefundCommandServiceTest {
         assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
     }
 
+    @Test
+    @DisplayName("PG 취소 금액과 같은 환불이 확인 대기(PG_PENDING)면 금액으로 완료하지 않는다(취소 내역 ID로 확정한다).")
+    void syncWithPgCancelledAmount_pgPending_NotSynced() {
+        //given
+        Long pending = saveRefund(RefundStatus.PG_PENDING, adult, 1);   // 10,000원
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
+        assertThat(find(pending).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
+    }
+
+    @Test
+    @DisplayName("같은 결제의 다른 환불이 PG 취소 확정 대기 중이면 점유하지 않고 상태도 바꾸지 않는다.")
+    void claim_otherRefundPgPending_NotClaimed() {
+        //given
+        saveRefund(RefundStatus.PG_PENDING, adult, 1);
+        Long waiting = saveRefund(RefundStatus.REQUESTED, child, 1);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> claimed = refundCommandService.claim(waiting, now);
+
+        //then
+        assertThat(claimed).isEmpty();
+        Refund found = find(waiting);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.REQUESTED);
+        assertThat(found.getAttemptCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("멈춘 처리로 보고 다른 처리가 다시 점유했으면 이전 처리의 늦은 완료 결과는 거부한다.")
+    void recordComplete_reclaimedByOther_Fail() {
+        //given
+        Long refundId = saveRefund(RefundStatus.REQUESTED, adult, 1);
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+        entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
+                .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
+                .setParameter("id", refundId)
+                .executeUpdate();
+        flushAndClear();
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+
+        //when & then
+        assertThatThrownBy(() -> refundCommandService.recordComplete(refundId, 1, now))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+        Refund found = find(refundId);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.PROCESSING);
+        assertThat(found.getAttemptCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("PG가 취소를 접수하면 확인 대기로 기록하고 취소 내역 ID와 1분 뒤 첫 확인 시각을 저장한다.")
+    void recordPgPending_claimed_PgPending() {
+        //given
+        Long refundId = saveRefund(RefundStatus.REQUESTED, adult, 1);
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordPgPending(refundId, 1, "cancel-1", now);
+
+        //then
+        Refund found = find(refundId);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.PG_PENDING);
+        assertThat(found.getPgCancellationId()).isEqualTo("cancel-1");
+        assertThat(found.getPgPendingSince()).isEqualTo(now);
+        assertThat(found.getNextRetryAt()).isEqualTo(now.plus(Duration.ofMinutes(1)));
+    }
+
+    @Test
+    @DisplayName("확인 시각이 지난 확인 대기 환불만 PG 취소 확인 대상으로 조회하고, 처리 대상에는 넣지 않는다.")
+    void findPgCheckableIds_pgPending_OnlyDue() {
+        //given
+        Long due = saveRefund(RefundStatus.PG_PENDING, adult, 1, now.minus(Duration.ofMinutes(10)));
+        saveRefund(RefundStatus.PG_PENDING, child, 1, now);   // 1분 뒤 첫 확인
+        flushAndClear();
+
+        //when
+        List<Long> checkableIds = refundCommandService.findPgCheckableIds(now, 10);
+        List<Long> processableIds = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(checkableIds).containsExactly(due);
+        assertThat(processableIds).isEmpty();
+    }
+
+    @Test
+    @DisplayName("PG 확인 대상은 id 순이 아니라 확인 시각이 오래 지난 환불부터 조회한다.")
+    void findPgCheckableIds_multipleDue_OldestCheckFirst() {
+        //given
+        Long recentlyDue = saveRefund(RefundStatus.PG_PENDING, adult, 1, now.minus(Duration.ofMinutes(5)));
+        Long longOverdue = saveRefund(RefundStatus.PG_PENDING, child, 1, now.minus(Duration.ofMinutes(20)));
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findPgCheckableIds(now, 10);
+        List<Long> firstOnly = refundCommandService.findPgCheckableIds(now, 1);
+
+        //then
+        assertThat(ids).containsExactly(longOverdue, recentlyDue);
+        assertThat(firstOnly).containsExactly(longOverdue);
+    }
+
+    @Test
+    @DisplayName("확인 대상으로 꺼낸 환불에는 완료된 환불 합계, 취소 내역 ID, 확인 대기 시작 시각이 담긴다.")
+    void findPgCheckable_due_ClaimedWithCompletedAmount() {
+        //given
+        saveRefund(RefundStatus.COMPLETED, adult, 1);   // PG에 반영된 10,000원
+        Instant pendingSince = now.minus(Duration.ofMinutes(10));
+        Long refundId = saveRefund(RefundStatus.PG_PENDING, child, 2, pendingSince);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> pending = refundCommandService.findPgCheckable(refundId, now);
+
+        //then
+        assertThat(pending).contains(new ClaimedRefund(refundId, payment.getPgId(), 10000L, "단순 변심",
+                40000L, 10000L, 1, "cancel-" + child.getId(), pendingSince));
+    }
+
+    @Test
+    @DisplayName("결제의 확인 대기 환불을 확인 시각과 관계없이 꺼낸다.")
+    void findPgPendingByPgId_pgPending_Found() {
+        //given
+        Long refundId = saveRefund(RefundStatus.PG_PENDING, adult, 1);   // 1분 뒤 첫 확인
+        saveRefund(RefundStatus.FAILED, child, 1);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> pending = refundCommandService.findPgPendingByPgId(payment.getPgId());
+
+        //then
+        assertThat(pending).map(ClaimedRefund::refundId).contains(refundId);
+    }
+
+    @Test
+    @DisplayName("조회로 PG 취소 완료를 확인하면 환불은 COMPLETED, 결제와 주문은 PARTIALLY_REFUNDED가 된다.")
+    void recordPgCancelled_samePendingCycle_Completed() {
+        //given
+        Long refundId = saveRefund(RefundStatus.PG_PENDING, adult, 1);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordPgCancelled(refundId, now, now.plus(Duration.ofMinutes(5)));
+
+        //then
+        Refund found = find(refundId);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(found.getCompletedAt()).isEqualTo(now.plus(Duration.ofMinutes(5)));
+        Payment foundPayment = findPayment();
+        assertThat(foundPayment.getStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(foundPayment.getOrder().getStatus()).isEqualTo(OrderStatus.PARTIALLY_REFUNDED);
+    }
+
+    @Test
+    @DisplayName("확인한 뒤 새 확인 대기 주기가 됐으면(시작 시각이 다르면) 이전 주기의 확인 결과는 거부한다.")
+    void recordPgCancelled_otherPendingCycle_Fail() {
+        //given
+        Long refundId = saveRefund(RefundStatus.PG_PENDING, adult, 1);
+        flushAndClear();
+
+        //when & then
+        assertThatThrownBy(() -> refundCommandService.recordPgCancelled(refundId, now.minusSeconds(1), now))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_INVALID_STATUS_TRANSITION.getMessage());
+        assertThat(find(refundId).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
+        assertThat(findPayment().getStatus()).isEqualTo(PaymentStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("조회로 PG 취소 실패를 확인하면 FAILED가 되어 취소를 다시 보낼 수 있다.")
+    void recordPgCancelFailed_samePendingCycle_Failed() {
+        //given
+        Long refundId = saveRefund(RefundStatus.PG_PENDING, adult, 1);
+        flushAndClear();
+
+        //when
+        RefundStatus status = refundCommandService.recordPgCancelFailed(refundId, now, "PG 취소 실패 확인", now);
+
+        //then
+        assertThat(status).isEqualTo(RefundStatus.FAILED);
+        assertThat(refundCommandService.findProcessableIds(now.plus(Duration.ofMinutes(1)), 10)).containsExactly(refundId);
+    }
+
     private Long saveRefund(RefundStatus status, OrderItem orderItem, int quantity) {
         return saveRefund(status, orderItem, quantity, now);
     }
 
     private Long saveRefund(RefundStatus status, OrderItem orderItem, int quantity, Instant at) {
-        Refund refund = Refund.create(payment, "단순 변심", at);
+        return saveRefund(payment, status, orderItem, quantity, at);
+    }
+
+    private Long saveRefund(Payment target, RefundStatus status, OrderItem orderItem, int quantity, Instant at) {
+        Refund refund = Refund.create(target, "단순 변심", at);
         refund.addRefundItem(RefundItem.of(orderItem, quantity, orderItem.getQuantity()));
         switch (status) {
             case REQUESTED -> {
@@ -441,11 +678,35 @@ class RefundCommandServiceTest {
                 refund.markAsProcessing();
                 refund.markAsDead("error");
             }
+            case PG_PENDING -> {
+                refund.markAsProcessing();
+                refund.markAsPgPending("cancel-" + orderItem.getId(), at);
+            }
             default -> throw new IllegalArgumentException("지원하지 않는 상태: " + status);
         }
         entityManager.persist(refund);
         entityManager.flush();
         return refund.getId();
+    }
+
+    // 다른 사용자의 결제(성인 10,000원 × 2장)를 만들고 그 주문 상품을 반환한다. 결제는 otherPayment에 담는다.
+    private OrderItem createOtherPaymentItem() {
+        User otherUser = User.builder()
+                .email("other@email.com")
+                .password("password")
+                .nickname("other")
+                .build();
+        entityManager.persist(otherUser);
+
+        Order otherOrder = Order.create(otherUser, 20000);
+        OrderItem orderItem = addOrderItem(otherOrder, adult.getTicketProduct(), 10000, 2);
+        otherOrder.markAsPaid();
+        entityManager.persist(otherOrder);
+
+        otherPayment = Payment.create(otherOrder);
+        otherPayment.markAsPaid(now);
+        entityManager.persist(otherPayment);
+        return orderItem;
     }
 
     // 주문 생성 기능이 없어 주문 상품을 직접 만든다. 주문을 저장하면 cascade로 함께 저장된다.

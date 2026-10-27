@@ -524,6 +524,25 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("결제 조회 응답의 취소 내역 금액을 함께 변환한다.")
+    void getPayment_cancellationTotalAmount_Mapped() {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andRespond(withSuccess("""
+                        { "id": "pg-id", "status": "PARTIAL_CANCELLED", "amount": { "total": 10000, "cancelled": 3000 },
+                          "paidAt": "2026-10-20T01:00:00Z",
+                          "cancellations": [ { "id": "cancel-1", "status": "REQUESTED", "totalAmount": 3000 } ] }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentGatewayResponse response = portOneClient.getPayment(PG_ID).orElseThrow();
+
+        //then
+        assertThat(response.cancellations()).containsExactly(
+                new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED, 3000L));
+    }
+
+    @Test
     @DisplayName("결제 조회 응답에 취소 내역이 없으면 빈 목록으로 변환한다.")
     void getPayment_withoutCancellations_EmptyList() {
         //given

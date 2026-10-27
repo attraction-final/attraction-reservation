@@ -245,7 +245,7 @@ class AdminUserServiceTest {
 
         ReflectionTestUtils.setField(user, "id", 10L);
 
-        when(userRepository.findById(10L))
+        when(userRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(user));
 
         // when
@@ -263,7 +263,7 @@ class AdminUserServiceTest {
 
         // DB 수정 쿼리를 먼저 실행하고 토큰을 폐기하는 순서를 확인한다.
         var inOrder = inOrder(userRepository, refreshTokenRepository);
-        inOrder.verify(userRepository).findById(10L);
+        inOrder.verify(userRepository).findByIdForUpdate(10L);
         inOrder.verify(userRepository).flush();
         inOrder.verify(refreshTokenRepository).delete(10L);
 
@@ -291,7 +291,7 @@ class AdminUserServiceTest {
         ReflectionTestUtils.setField(user, "id", 10L);
         ReflectionTestUtils.setField(user, "status", currentStatus);
 
-        when(userRepository.findById(10L))
+        when(userRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(user));
 
         // when
@@ -312,7 +312,7 @@ class AdminUserServiceTest {
     @DisplayName("상태 변경 대상 회원이 없으면 DB 수정과 토큰 삭제를 하지 않는다")
     void updateUserStatus_missingMember_throwsNotFound() {
         // given
-        when(userRepository.findById(10L))
+        when(userRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -325,7 +325,7 @@ class AdminUserServiceTest {
                         .isEqualTo(ErrorCode.USER_NOT_FOUND)
         );
 
-        verify(userRepository).findById(10L);
+        verify(userRepository).findByIdForUpdate(10L);
         verifyNoMoreInteractions(userRepository);
         verifyNoInteractions(refreshTokenRepository);
     }
@@ -351,7 +351,7 @@ class AdminUserServiceTest {
 
         ReflectionTestUtils.setField(user, "status", currentStatus);
 
-        when(userRepository.findById(10L))
+        when(userRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(user));
 
         // when & then
@@ -365,7 +365,7 @@ class AdminUserServiceTest {
         );
 
         assertThat(user.getStatus()).isEqualTo(currentStatus);
-        verify(userRepository).findById(10L);
+        verify(userRepository).findByIdForUpdate(10L);
         verifyNoMoreInteractions(userRepository);
         verifyNoInteractions(refreshTokenRepository);
     }
@@ -380,7 +380,7 @@ class AdminUserServiceTest {
                 .nickname("상태변경회원")
                 .build();
 
-        when(userRepository.findById(10L))
+        when(userRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(user));
 
         DataAccessResourceFailureException failure =
@@ -407,7 +407,7 @@ class AdminUserServiceTest {
                 .nickname("상태변경회원")
                 .build();
 
-        when(userRepository.findById(10L))
+        when(userRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(user));
 
         DataAccessResourceFailureException failure =

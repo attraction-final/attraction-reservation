@@ -42,6 +42,8 @@ public enum ErrorCode {
 
     // user
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
+    USER_NOT_WITHDRAWABLE(HttpStatus.FORBIDDEN, "현재 회원 상태에서는 탈퇴할 수 없습니다."),
+    USER_WITHDRAWAL_UNUSED_TICKET(HttpStatus.CONFLICT, "미사용 입장권이 있어 탈퇴할 수 없습니다. 환불 후 다시 시도해주세요."),
     CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "유저를 찾을 수 없습니다."),
     USER_STATUS_SAME(HttpStatus.CONFLICT, "현재 회원 상태와 동일합니다."),

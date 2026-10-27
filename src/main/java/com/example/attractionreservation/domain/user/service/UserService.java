@@ -109,7 +109,7 @@ public class UserService {
             Long userId,
             UpdateUserStatusRequest request
     ) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.USER_NOT_FOUND));
 
@@ -148,7 +148,7 @@ public class UserService {
             Long userId,
             UpdateUserRequest request
     ) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.UNAUTHORIZED));
 
@@ -163,7 +163,7 @@ public class UserService {
 
     @Transactional
     public void updatePassword(Long userId, UpdatePasswordRequest request) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.UNAUTHORIZED));
 

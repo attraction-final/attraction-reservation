@@ -1,7 +1,6 @@
 
 package com.example.attractionreservation.domain.user.dto;
 
-import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;

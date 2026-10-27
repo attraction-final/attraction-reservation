@@ -163,4 +163,18 @@ public class AttractionSlot extends BaseTimeEntity {
         this.autoClosed = false;
     }
 
+    public void releaseReservation() {
+        // 중복 복구나 잘못된 데이터로 예약 인원이 음수가 되는 것을 방지한다.
+        if (this.reservedCount == null || this.reservedCount <= 0) {
+            throw new IllegalStateException(
+                    "복구할 예약 인원이 없습니다."
+            );
+        }
+
+        this.reservedCount--;
+
+        // 정원 부족으로 자동 마감된 슬롯만 자리가 생기면 다시 연다.
+        // 관리자 마감·운영 중단·취소 상태는 기존 정책에 따라 유지한다.
+        syncStatusWithRemainingCount();
+    }
 }

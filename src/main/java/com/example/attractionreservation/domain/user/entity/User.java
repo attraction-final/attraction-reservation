@@ -9,6 +9,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
+
 @Entity
 @Table(
         name = "users",
@@ -57,6 +59,10 @@ public class User extends BaseTimeEntity {
     // 제공자가 발급한 고유 회원 ID이며, 일반 회원은 사용하지 않는다.
     @Column(name = "provider_user_id", length = 255)
     private String providerUserId;
+
+    // 기존 회원은 NULL이며, 탈퇴 완료 시각을 UTC 기준으로 기록한다.
+    @Column(name = "withdrawn_at")
+    private Instant withdrawnAt;
 
     @Builder
     private User(String email, String password, String nickname, Role role) {
@@ -123,6 +129,20 @@ public class User extends BaseTimeEntity {
 
     public void updateNickname(String nickname) {
         this.nickname = nickname;
+    }
+
+    public void withdraw(Instant withdrawnAt) {
+        // 상태와 탈퇴 시각을 변경하기 전에 입력 조건을 검증한다.
+        if (this.status != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.USER_NOT_WITHDRAWABLE);
+        }
+
+        if (withdrawnAt == null) {
+            throw new IllegalArgumentException("탈퇴 일시는 필수입니다.");
+        }
+
+        this.status = UserStatus.WITHDRAWN;
+        this.withdrawnAt = withdrawnAt;
     }
 
     public void updatePassword(String encodedPassword) {

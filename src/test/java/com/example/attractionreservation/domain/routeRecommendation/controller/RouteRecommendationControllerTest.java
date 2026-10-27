@@ -40,6 +40,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.mockito.Mockito.doThrow;
+
 @WebMvcTest(RouteRecommendationController.class)
 @Import({
         SecurityConfig.class,
@@ -150,7 +153,7 @@ public class RouteRecommendationControllerTest {
 
 
 
-    //목록 조히
+    //목록 조회
     private PageableDto<SearchRouteRecommendationSummaryResponse> summaryPage() {
         SearchRouteRecommendationSummaryResponse summary = new SearchRouteRecommendationSummaryResponse(
                 1L, 5001L, at("13:00"), at("18:00"),
@@ -220,4 +223,43 @@ public class RouteRecommendationControllerTest {
 
         verifyNoInteractions(routeRecommendationService);
     }
+
+    //삭제
+    @Test
+    @DisplayName("인증된 회원의 추천 경로 이력을 삭제하고 HTTP 200을 반환한다")
+    void deleteRouteRecommendation_authenticated_returnsOk() throws Exception {
+        // when & then
+        mockMvc.perform(delete("/api/route-recommendations/1")
+                        .with(authenticatedMember()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("추천 경로 이력이 삭제되었습니다."));
+
+        verify(routeRecommendationService).deleteRouteRecommendation(1L, 1L);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ErrorCode.class, names = {"ROUTE_RECOMMENDATION_NOT_FOUND", "NOT_ROUTE_OWNER"})
+    @DisplayName("추천 미존재와 타인 추천 삭제를 각각 HTTP 404와 403으로 반환한다")
+    void deleteRouteRecommendation_rejected_returnsExpectedError(ErrorCode errorCode) throws Exception {
+        // given
+        doThrow(new BusinessException(errorCode))
+                .when(routeRecommendationService).deleteRouteRecommendation(1L, 1L);
+
+        // when & then
+        mockMvc.perform(delete("/api/route-recommendations/1")
+                        .with(authenticatedMember()))
+                .andExpect(status().is(errorCode.getStatus().value()))
+                .andExpect(jsonPath("$.message").value(errorCode.getMessage()));
+    }
+
+    @Test
+    @DisplayName("인증 없이 추천 경로 이력을 삭제하면 HTTP 401을 반환한다")
+    void deleteRouteRecommendation_unauthenticated_returnsUnauthorized() throws Exception {
+        mockMvc.perform(delete("/api/route-recommendations/1"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(routeRecommendationService);
+    }
+
 }

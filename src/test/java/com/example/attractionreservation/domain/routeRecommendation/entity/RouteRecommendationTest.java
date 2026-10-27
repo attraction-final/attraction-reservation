@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.enums
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -142,5 +143,38 @@ public class RouteRecommendationTest {
         // when & then
         assertThat(recommendation.isOwnedBy(1L)).isTrue();
         assertThat(recommendation.isOwnedBy(2L)).isFalse();
+    }
+
+    //삭제 테스트
+    @Test
+    @DisplayName("삭제하면 전달받은 시각이 삭제 시각으로 기록된다")
+    void delete_RecordsDeletedAt() {
+        // given
+        RouteRecommendation recommendation = RouteRecommendation.create(
+                1L, 5001L, at("13:00"), at("18:00"), List.of(safari()), List.of());
+        Instant now = Instant.parse("2026-10-20T05:00:00Z");
+
+        // when
+        recommendation.delete(now);
+
+        // then
+        assertThat(recommendation.isDeleted()).isTrue();
+        assertThat(recommendation.getDeletedAt()).isEqualTo(now);
+    }
+
+    @Test
+    @DisplayName("이미 삭제된 추천을 다시 삭제해도 처음 삭제 시각을 유지한다")
+    void delete_AlreadyDeleted_KeepsFirstDeletedAt() {
+        // given
+        RouteRecommendation recommendation = RouteRecommendation.create(
+                1L, 5001L, at("13:00"), at("18:00"), List.of(safari()), List.of());
+        Instant first = Instant.parse("2026-10-20T05:00:00Z");
+        recommendation.delete(first);
+
+        // when
+        recommendation.delete(Instant.parse("2026-10-20T06:00:00Z"));
+
+        // then
+        assertThat(recommendation.getDeletedAt()).isEqualTo(first);
     }
 }

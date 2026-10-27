@@ -5,7 +5,9 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import com.example.attractionreservation.global.util.KstTime;
+import org.springframework.stereotype.Component;
 
+@Component
 public class RouteSearcher {
 
     public RouteSearchResult search(

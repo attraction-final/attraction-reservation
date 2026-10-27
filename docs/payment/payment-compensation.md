@@ -53,6 +53,7 @@ domain/payment
 
 - 보상은 결제 실패 처리와 같은 트랜잭션에서 생성되고 결제 포트(`PaymentGateway`)를 호출하므로 `domain/payment`에 둔다.
 - 범용 `outbox_events` 대신 보상 전용 테이블을 쓴다. Outbox로 보낼 이벤트가 보상 취소 하나뿐이기 때문이다. 다른 외부 호출(부분 환불 등)이 생기면 범용화를 검토한다.
+  - 환불(KAN-51)은 범용화하지 않고 환불 자체를 Outbox로 쓰는 전용 테이블(`refunds`)로 같은 구조(점유 → PG 호출 → 결과 기록, 백오프, 스케줄러)를 따랐다. 환불은 수량·상태 등 고유 데이터가 있어 환불 기록과 PG 취소 요청을 한 행으로 두는 편이 단순하다.
 
 ## 3. 저장 (`payment_compensations`)
 
@@ -183,7 +184,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2          # 웹훅·보상 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
+        size: 3          # 웹훅·보상·환불(KAN-51) 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
 
 payment:
   compensation:
@@ -230,7 +231,7 @@ payment:
 | `PaymentCompensationSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, 설정에 따른 빈 등록 |
 | `PaymentFacadeTest` | Mockito | 금액 불일치 시 보상 요청 후 `processByPgId` 즉시 시도·이미 처리됐으면 생략, 취소된 결제의 PG 결제 완료 시 `approvePayment`의 CANCELLED 응답으로 즉시 시도 후 `PAYMENT_ALREADY_CANCELLED`(중복은 Processor가 건너뜀)·PG 금액을 보상 금액으로 전달, 웹훅 `COMPENSATED` |
 | `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장(원장 CANCELLED면 실패 처리 없이 저장), 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음, `approvePayment`의 취소된 결제 보상 저장·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파 |
-| `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 이미 취소됨 성공 처리, 취소 응답 상태별 반환(SUCCEEDED·REQUESTED·FAILED 예외·UNKNOWN·내역 없음·해석 불가·처리할 수 없는 content-type), 결제 조회의 취소 내역 매핑 |
+| `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 전체 취소의 이미 취소됨 성공 처리 (부분 취소의 이미 취소됨은 예외, KAN-51), 취소 응답 상태별 반환(SUCCEEDED·REQUESTED·FAILED 예외·UNKNOWN·내역 없음·해석 불가·처리할 수 없는 content-type), 결제 조회의 취소 내역 매핑 |
 
 - `PaymentCompensationOutboxTest`는 테스트 메서드 트랜잭션에 묶이지 않도록 `NOT_SUPPORTED`로 실행하고 데이터를 직접 정리한다.
 

@@ -19,7 +19,7 @@ public int totalDurationMinutes() {
  if (isEmpty()){
      return 0;
  }
- return (int) Duration.between(startAt, estimatedEndAt()).toMinutes();
+ return (int) Duration.between(startAt.atZone(KstTime.ZONE), estimatedEndAt().atZone(KstTime.ZONE)).toMinutes();
  }
 
  public LocalDateTime estimatedEndAt() {

@@ -21,8 +21,6 @@ public class TicketProductController {
 
     private final TicketProductService ticketProductService;
 
-    // TODO: 인증 구현 후 인증 검사 추가
-
     // 티켓 상품 목록 조회 (이름 + 상태 + 종류 + 페이징)
     @GetMapping
     public ResponseEntity<ApiResponse<SearchTicketProductListResponse>> getTicketProductAll(
@@ -36,7 +34,7 @@ public class TicketProductController {
         }
 
         Pageable stablePageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
-        Page<SearchTicketProductResponse> result = ticketProductService.getTicketProductAll(condition, stablePageable);
+        Page<SearchTicketProductResponse> result = ticketProductService.findTicketProductAll(condition, stablePageable);
 
         SearchTicketProductListResponse response = SearchTicketProductListResponse.from(result);
 

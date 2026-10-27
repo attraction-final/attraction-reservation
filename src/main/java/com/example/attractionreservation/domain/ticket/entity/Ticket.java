@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -19,6 +20,8 @@ import java.util.UUID;
 @Table(name = "tickets")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Ticket extends BaseTimeEntity {
+
+    private static final LocalTime PARK_CLOSE_TIME = LocalTime.of(22, 0);
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -70,7 +73,11 @@ public class Ticket extends BaseTimeEntity {
 
     // 티켓 입장 처리
     public void entryTicket(Instant now) {
-        ZonedDateTime kstNow = now.atZone(ZoneId.of("Asia/Seoul"));
+        LocalDateTime kstNow = KstTime.toLocalDateTime(now);
+
+        if (kstNow == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_ENTRY_TIME);
+        }
 
         validateEntryStatus();
         validateEntryDate(kstNow.toLocalDate());
@@ -96,13 +103,9 @@ public class Ticket extends BaseTimeEntity {
 
     // 입장권 시간 검증
     private void validateEntryTime(LocalTime currentTime) {
-        LocalTime opensAt = switch (this.type) {
-            case ALL_DAY -> LocalTime.of(10, 0);
-            case AFTERNOON -> LocalTime.of(15, 0);
-        };
-        LocalTime closesAt = LocalTime.of(22, 0);
+        LocalTime opensAt = this.type.getAvailableFrom();
 
-        if (currentTime.isBefore(opensAt) || !currentTime.isBefore(closesAt)) {
+        if (currentTime.isBefore(opensAt) || !currentTime.isBefore(PARK_CLOSE_TIME)) {
             throw new BusinessException(ErrorCode.TICKET_ENTRY_TIME_NOT_ALLOWED);
         }
     }

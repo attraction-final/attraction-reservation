@@ -1,8 +1,11 @@
 package com.example.attractionreservation.domain.order.entity;
 
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -43,6 +46,38 @@ public class Order extends BaseTimeEntity {
 
     public static Order create(User user, int totalAmount) {
         return new Order(user, totalAmount);
+    }
+
+    public void markAsPaid() {
+        if (!this.status.canTransitTo(OrderStatus.COMPLETED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.COMPLETED;
+    }
+
+    public void markAsCancelled() {
+        if (!this.status.canTransitTo(OrderStatus.CANCELLED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.CANCELLED;
+    }
+
+    public void markAsPartiallyRefunded() {
+        if (!this.status.canTransitTo(OrderStatus.PARTIALLY_REFUNDED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.PARTIALLY_REFUNDED;
+    }
+
+    public void markAsRefunded() {
+        if (!this.status.canTransitTo(OrderStatus.REFUNDED)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS_TRANSITION);
+        }
+
+        this.status = OrderStatus.REFUNDED;
     }
 
     public void addOrderItem(TicketProduct ticketProduct, int quantity) {

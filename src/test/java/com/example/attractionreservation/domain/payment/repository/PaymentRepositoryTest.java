@@ -80,6 +80,43 @@ class PaymentRepositoryTest {
     }
 
     @Test
+    @DisplayName("결제 주문의 사용자면 pgId로 결제를 조회한다.")
+    void findByPgIdAndUserId_owner_Found() {
+        //given
+        Payment payment = savePayment(user);
+
+        //when
+        Optional<Payment> found = paymentRepository.findByPgIdAndUserId(payment.getPgId(), user.getId());
+
+        //then
+        assertThat(found).isPresent();
+        assertThat(found.get().getPgId()).isEqualTo(payment.getPgId());
+    }
+
+    @Test
+    @DisplayName("다른 사용자면 pgId로 결제를 조회하지 않는다.")
+    void findByPgIdAndUserId_otherUser_Empty() {
+        //given
+        Payment payment = savePayment(user);
+
+        //when
+        Optional<Payment> found = paymentRepository.findByPgIdAndUserId(payment.getPgId(), otherUser.getId());
+
+        //then
+        assertThat(found).isEmpty();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 pgId면 결제를 조회하지 않는다.")
+    void findByPgIdAndUserId_unknownPgId_Empty() {
+        //when
+        Optional<Payment> found = paymentRepository.findByPgIdAndUserId("unknown-pg-id", user.getId());
+
+        //then
+        assertThat(found).isEmpty();
+    }
+
+    @Test
     @DisplayName("결제 단건 조회 시 주문, 주문 항목, 티켓 상품이 함께 조회된다.")
     void findByIdAndOrderUserId_withOrderItems_FetchesOrderItemsAndTicketProducts() {
         //given

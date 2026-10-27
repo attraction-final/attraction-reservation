@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.dto.UpdatePasswordRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserResponse;
 import com.example.attractionreservation.domain.user.dto.CreateUserRequest;
@@ -282,4 +283,108 @@ class UserServiceTest {
 
         assertThat(user.getNickname()).isEqualTo("기존닉네임");
     }
+
+    @Test
+    void updatePassword_validCurrentPassword_changesPasswordHash() {
+        Long userId = 1L;
+        String oldHash = passwordEncoder.encode("Password!123");
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password(oldHash)
+                .nickname("홍길동")
+                .build();
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        userService.updatePassword(userId, new UpdatePasswordRequest(
+                "Password!123", "NewPassword!456"
+        ));
+
+        String updatedHash = user.getPassword();
+
+        assertThat(updatedHash)
+                .isNotEqualTo(oldHash)
+                .isNotEqualTo("NewPassword!456");
+        assertThat(passwordEncoder.matches("NewPassword!456", updatedHash))
+                .isTrue();
+        assertThat(passwordEncoder.matches("Password!123", updatedHash))
+                .isFalse();
+
+        verify(userRepository).findById(userId);
+        verifyNoMoreInteractions(userRepository);
+    }
+
+    @Test
+    void updatePassword_wrongCurrentPassword_keepsOriginalPassword() {
+        Long userId = 1L;
+        String oldHash = passwordEncoder.encode("Password!123");
+        User user = User.builder()
+                .email("test@gmail.com")
+                .password(oldHash)
+                .nickname("홍길동")
+                .build();
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updatePassword(
+                userId,
+                new UpdatePasswordRequest("WrongPassword!123", "NewPassword!456")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.CURRENT_PASSWORD_MISMATCH)
+                );
+
+        assertThat(user.getPassword()).isEqualTo(oldHash);
+    }
+
+    @Test
+    void updatePassword_missingUser_throwsUnauthorized() {
+        Long userId = 1L;
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updatePassword(
+                userId,
+                new UpdatePasswordRequest("Password!123", "NewPassword!456")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+    }
+
+    @Test
+    void updatePassword_withdrawnUser_keepsOriginalPassword() {
+        Long userId = 1L;
+        String oldHash = passwordEncoder.encode("Password!123");
+        User user = User.builder()
+                .email("withdrawn@gmail.com")
+                .password(oldHash)
+                .nickname("탈퇴회원")
+                .build();
+
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+
+        when(userRepository.findById(userId))
+                .thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updatePassword(
+                userId,
+                new UpdatePasswordRequest("Password!123", "NewPassword!456")
+        ))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.UNAUTHORIZED)
+                );
+
+        assertThat(user.getPassword()).isEqualTo(oldHash);
+    }
+
 }

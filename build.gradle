@@ -49,6 +49,10 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'com.mysql:mysql-connector-j'
     annotationProcessor 'org.projectlombok:lombok'
+
+    // portone 연동
+    implementation 'io.portone:server-sdk:0.24.0'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-redis-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-restdocs'

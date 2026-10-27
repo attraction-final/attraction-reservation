@@ -9,6 +9,9 @@ import com.example.attractionreservation.domain.attractionSlot.repository.Attrac
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import jakarta.persistence.EntityManager;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +28,9 @@ public class AttractionSlotService {
 
     private final AttractionSlotRepository attractionSlotRepository;
     private final AttractionRepository attractionRepository;
+
+    // UPDATE 쿼리 후 최신 DB 조회를 위해 EM 사용
+    private final EntityManager entityManager;
 
     // 슬롯 등록
     @Transactional
@@ -186,5 +192,41 @@ public class AttractionSlotService {
         slot.cancel(); // 실제로 지우지 않고 상태만 CANCELLED (소프트 삭제)
     }
 
+    // 예약 - 해당 슬롯 찾기
+    public AttractionSlot findAttractionSlotById(Long slotId) {
+        return attractionSlotRepository.findById(slotId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
+    }
 
+    // 예약 - 슬롯의 자리 한 개 확보
+    @Transactional
+    public void tryReservationCapacity(Long slotId) {
+        int updatedCount = attractionSlotRepository.tryReserveCapacity(slotId, SlotStatus.OPEN);
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
+        }
+
+        AttractionSlot slot = findAttractionSlotById(slotId);
+
+        // DB에서 증가한 예약 인원을 현재 객체에 반영
+        entityManager.refresh(slot);
+
+        // 마지막 자리가 찼다면 CLOSED, autoClosed=true로 변경
+        slot.syncStatusWithRemainingCount();
+    }
+
+    // 예약 - 취소시 reservedCount -1
+    @Transactional
+    public void releaseReservationCapacity(Long slotId) {
+        int updatedCount = attractionSlotRepository.tryReleaseCapacity(slotId);
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.RESERVATION_CAPACITY_RESTORE_FAILED);
+        }
+
+        AttractionSlot slot = findAttractionSlotById(slotId);
+        entityManager.refresh(slot);
+        slot.syncStatusWithRemainingCount();
+    }
 }

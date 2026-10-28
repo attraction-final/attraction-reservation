@@ -173,6 +173,27 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
         );
     }
 
+    @Override
+    public long countUpcomingByAttractionId(
+            Long attractionId,
+            ReservationStatus reservationStatus,
+            LocalDateTime now
+    ) {
+        Long count = queryFactory
+                .select(reservation.count())
+                .from(reservation)
+                .join(reservation.attractionSlot, attractionSlot)
+                .join(attractionSlot.attraction, attraction)
+                .where(
+                        attraction.id.eq(attractionId),
+                        reservation.status.eq(reservationStatus),
+                        attractionSlot.startsAt.gt(now)
+                )
+                .fetchOne();
+
+        return count != null ? count : 0L;
+    }
+
     private BooleanExpression userIdEq(Long userId) {
         if (userId == null) {
             return null;

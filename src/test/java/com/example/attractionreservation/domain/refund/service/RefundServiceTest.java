@@ -342,8 +342,9 @@ class RefundServiceTest {
     @DisplayName("전체 환불: 부분 환불 뒤에는 남은 미사용 티켓만 환불하고 남은 티켓이 없는 상품은 건너뛴다.")
     void createFullRefund_partiallyRefunded_RefundRemainingOnly() {
         //given
-        givenPayment(payment);
-        List<Ticket> tickets = tickets(adultItem(payment), 2L, 2, TicketStatus.UNUSED);
+        Payment partiallyRefunded = createPayment(PaymentStatus.PARTIALLY_REFUNDED);
+        givenPayment(partiallyRefunded);
+        List<Ticket> tickets = tickets(adultItem(partiallyRefunded), 2L, 2, TicketStatus.UNUSED);
         given(ticketService.findUnusedTicketsForUpdate(anySet())).willReturn(tickets);
         givenRefundedQuantities(List.of(
                 new RefundedQuantity(ADULT_ITEM_ID, 1L),

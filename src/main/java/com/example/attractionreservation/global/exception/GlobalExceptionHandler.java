@@ -28,7 +28,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
         ErrorCode errorCode = exception.getErrorCode();
-        return ResponseEntity.status(errorCode.getStatus()).body(ApiResponse.error(errorCode));
+        // 서비스에서 직접 만든 메시지가 있으면 그 메시지를, 없으면 ErrorCode 기본 메시지를 내보낸다.
+        return ResponseEntity.status(errorCode.getStatus())
+                .body(ApiResponse.error(errorCode, exception.getMessage()));
     }
 
     // @Valid가 적용된 요청 본문의 필드 검증에 실패한 경우

@@ -266,7 +266,7 @@ public class OrderService {
     }
 
     private void validateVisitDate(LocalDate visitDate, LocalDate today) {
-        LocalDate lastDate = today.plusDays(MAX_VISIT_DAYS - 1);
+        LocalDate lastDate = today.plusDays(MAX_VISIT_DAYS - 1L);
 
         if (visitDate.isBefore(today) || visitDate.isAfter(lastDate)) {
             throw new BusinessException(ErrorCode.ORDER_INVALID_VISIT_DATE);

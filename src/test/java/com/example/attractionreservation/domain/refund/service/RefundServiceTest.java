@@ -8,6 +8,7 @@ import com.example.attractionreservation.domain.payment.repository.PaymentReposi
 import com.example.attractionreservation.domain.refund.dto.RefundResponse;
 import com.example.attractionreservation.domain.refund.dto.RefundedQuantity;
 import com.example.attractionreservation.domain.refund.entity.Refund;
+import com.example.attractionreservation.domain.refund.entity.RefundItem;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.repository.RefundItemRepository;
 import com.example.attractionreservation.domain.refund.repository.RefundRepository;
@@ -102,7 +103,7 @@ class RefundServiceTest {
         assertThat(saved.getStatus()).isEqualTo(RefundStatus.REQUESTED);
         assertThat(saved.getRefundAmount()).isEqualTo(35000);
         assertThat(saved.getRefundItems())
-                .extracting(item -> item.getOrderItem().getId(), item -> item.getQuantity())
+                .extracting(item -> item.getOrderItem().getId(), RefundItem::getQuantity)
                 .containsExactlyInAnyOrder(tuple(ADULT_ITEM_ID, 3), tuple(CHILD_ITEM_ID, 1));
     }
 
@@ -165,9 +166,10 @@ class RefundServiceTest {
         List<Ticket> tickets = tickets(adultItem(payment), 1L, 2, TicketStatus.UNUSED);
         givenRefundTickets(tickets);
         givenRefundedQuantities(List.of(new RefundedQuantity(ADULT_ITEM_ID, 2L)));
+        List<Long> ticketIds = ticketIds(tickets);
 
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds(tickets), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_INVALID_QUANTITY.getMessage());
         verify(refundRepository, never()).save(any());
@@ -199,9 +201,10 @@ class RefundServiceTest {
         givenPayment(payment);
         given(ticketService.findRefundTicketsForUpdate(anySet(), anySet()))
                 .willThrow(new BusinessException(ErrorCode.REFUND_INVALID_TICKET));
+        List<Long> ticketIds = List.of(999L);
 
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, List.of(999L), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_INVALID_TICKET.getMessage());
         verify(refundRepository, never()).save(any());
@@ -216,9 +219,10 @@ class RefundServiceTest {
         List<Ticket> tickets = tickets(adultItem(payment), 1L, 1, status);
         givenRefundTickets(tickets);
         givenRefundedQuantities(List.of());
+        List<Long> ticketIds = ticketIds(tickets);
 
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds(tickets), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.TICKET_NOT_REFUNDABLE.getMessage());
         verify(refundRepository, never()).save(any());
@@ -238,8 +242,11 @@ class RefundServiceTest {
     @Test
     @DisplayName("부분 환불: 같은 티켓이 중복되면 결제를 조회하지 않고 거절한다.")
     void createRefund_duplicateTicketIds_Fail() {
+        //given
+        List<Long> ticketIds = List.of(1L, 1L);
+
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, List.of(1L, 1L), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_DUPLICATE_TICKET.getMessage());
         verifyNoInteractions(paymentRepository, ticketService, refundItemRepository, refundRepository);
@@ -250,9 +257,10 @@ class RefundServiceTest {
     void createRefund_otherUser_Fail() {
         //given
         givenPayment(payment);
+        List<Long> ticketIds = List.of(1L);
 
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(OTHER_USER_ID, PG_ID, List.of(1L), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(OTHER_USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
         verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
@@ -263,9 +271,10 @@ class RefundServiceTest {
     void createRefund_paymentNotFound_Fail() {
         //given
         given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.empty());
+        List<Long> ticketIds = List.of(1L);
 
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, List.of(1L), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_NOT_FOUND.getMessage());
         verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
@@ -277,9 +286,10 @@ class RefundServiceTest {
     void createRefund_notRefundablePayment_Fail(PaymentStatus status) {
         //given
         givenPayment(createPayment(status));
+        List<Long> ticketIds = List.of(1L);
 
         //when & then
-        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, List.of(1L), "단순 변심", NOW))
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT.getMessage());
         verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
@@ -323,7 +333,7 @@ class RefundServiceTest {
         assertThat(saved.getStatus()).isEqualTo(RefundStatus.REQUESTED);
         assertThat(saved.getRefundAmount()).isEqualTo(40000);
         assertThat(saved.getRefundItems())
-                .extracting(item -> item.getOrderItem().getId(), item -> item.getQuantity())
+                .extracting(item -> item.getOrderItem().getId(), RefundItem::getQuantity)
                 .containsExactlyInAnyOrder(tuple(ADULT_ITEM_ID, 3), tuple(CHILD_ITEM_ID, 2));
         assertThat(tickets).extracting(Ticket::getStatus).containsOnly(TicketStatus.REFUNDED);
     }
@@ -347,7 +357,7 @@ class RefundServiceTest {
         Refund saved = captureSavedRefund();
         assertThat(saved.getRefundAmount()).isEqualTo(20000);
         assertThat(saved.getRefundItems())
-                .extracting(item -> item.getOrderItem().getId(), item -> item.getQuantity())
+                .extracting(item -> item.getOrderItem().getId(), RefundItem::getQuantity)
                 .containsExactly(tuple(ADULT_ITEM_ID, 2));
     }
 
@@ -368,7 +378,7 @@ class RefundServiceTest {
         Refund saved = captureSavedRefund();
         assertThat(saved.getRefundAmount()).isEqualTo(10000);
         assertThat(saved.getRefundItems())
-                .extracting(item -> item.getOrderItem().getId(), item -> item.getQuantity())
+                .extracting(item -> item.getOrderItem().getId(), RefundItem::getQuantity)
                 .containsExactly(tuple(ADULT_ITEM_ID, 1));
     }
 

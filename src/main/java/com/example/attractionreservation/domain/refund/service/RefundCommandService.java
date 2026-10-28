@@ -11,6 +11,7 @@ import com.example.attractionreservation.domain.refund.entity.Refund;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.repository.RefundItemRepository;
 import com.example.attractionreservation.domain.refund.repository.RefundRepository;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,7 @@ public class RefundCommandService {
     private final RefundRepository refundRepository;
     private final RefundItemRepository refundItemRepository;
     private final PaymentRepository paymentRepository;
+    private final TicketProductService ticketProductService;
 
     @Transactional(readOnly = true)
     public List<Long> findProcessableIds(Instant now, int limit) {
@@ -107,7 +109,7 @@ public class RefundCommandService {
         Payment payment = getPaymentWithLock(refundId);
         Refund refund = getClaimedWithLock(refundId, claimedAttempt);
         refund.markAsComplete(now);
-        updatePaymentAndOrderStatus(payment);
+        updatePaymentAndOrderStatus(payment, refund);
     }
 
     // PG가 취소를 접수했지만 끝나지 않았거나 결과를 알 수 없다. 이후로는 취소를 다시 보내지 않고 조회로 확정한다.
@@ -157,8 +159,10 @@ public class RefundCommandService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void recordPgCancelled(Long refundId, Instant checkedPendingSince, Instant now) {
         Payment payment = getPaymentWithLock(refundId);
-        getPgPendingWithLock(refundId, checkedPendingSince).confirmPgCancelled(now);
-        updatePaymentAndOrderStatus(payment);
+        Refund refund = getPgPendingWithLock(refundId, checkedPendingSince);
+
+        refund.confirmPgCancelled(now);
+        updatePaymentAndOrderStatus(payment, refund);
     }
 
     /**
@@ -216,11 +220,11 @@ public class RefundCommandService {
 
         Refund refund = getWithLock(candidateIds.get(0));
         refund.markAsCompleteByPg(now);
-        updatePaymentAndOrderStatus(payment);
+        updatePaymentAndOrderStatus(payment, refund);
         return PaymentSyncResult.REFUND_SYNCED;
     }
 
-    private void updatePaymentAndOrderStatus(Payment payment) {
+    private void updatePaymentAndOrderStatus(Payment payment, Refund refund) {
         Order order = payment.getOrder();
         if (isAllRefunded(order)) {
             payment.markAsRefunded();
@@ -230,7 +234,8 @@ public class RefundCommandService {
             order.markAsPartiallyRefunded();
         }
 
-        // TODO: 재고 복구 필요
+        // 환불이 COMPLETED로 확정된 이번 환불의 수량만 복구한다. 완료는 환불 당 한 번만 일어나므로 이중 복구되지 않는다.
+        ticketProductService.updateTicketProductsStockIncrease(refund.getQuantityByTicketProductId());
     }
 
     /**

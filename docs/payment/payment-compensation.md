@@ -8,7 +8,7 @@
 ### 이전 구조의 문제
 
 ```
-failPayment (트랜잭션: 결제 FAILED + 주문 취소) → 커밋 → PG 취소 호출
+failPayment (트랜잭션: 결제 FAILED + 주문 취소 + 재고 복구) → 커밋 → PG 취소 호출
 ```
 
 - DB 커밋과 PG 취소를 하나의 트랜잭션으로 묶을 수 없다(dual write).
@@ -18,7 +18,7 @@ failPayment (트랜잭션: 결제 FAILED + 주문 취소) → 커밋 → PG 취�
 ### 방향: 보상 판단과 보상 요청 기록을 같은 트랜잭션에서 커밋
 
 ```
-failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 보상 요청 INSERT → 커밋
+failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 재고 복구 + 보상 요청 INSERT → 커밋
 approvePayment (트랜잭션 1개): 취소된 결제 확인 + 보상 요청 INSERT → 커밋 (결제 상태는 그대로)
   → 즉시 PG 취소 1회 시도 (대부분 여기서 완료)
   → 실패하거나 시도 전 서버 종료 시 스케줄러가 이어받아 재시도

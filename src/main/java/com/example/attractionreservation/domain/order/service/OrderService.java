@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
 import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
@@ -13,6 +14,7 @@ import com.example.attractionreservation.domain.order.repository.OrderRepository
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
@@ -49,6 +51,7 @@ public class OrderService {
     private final PaymentService paymentService;
     private final OrderCancelProcessor orderCancelProcessor;
     private final Clock clock;
+    private final TicketProductService ticketProductService;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -72,7 +75,7 @@ public class OrderService {
                 .collect(Collectors.toSet());
 
         Map<Long, TicketProduct> productsById = ticketProductRepository
-                .findAllById(productIds).stream()
+                .findAllWithUpdateByIdInOrderById(productIds).stream()
                 .collect(Collectors.toMap(
                         TicketProduct::getId,
                         Function.identity()
@@ -86,6 +89,11 @@ public class OrderService {
                 throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
             }
 
+            // 품절 상품은 판매 중지와 구분해 재고 부족으로 응답한다.
+            if (ticketProduct.getStatus() == TicketProductStatus.OUT_OF_STOCK) {
+                throw new BusinessException(ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT);
+            }
+
             if (ticketProduct.getStatus() != TicketProductStatus.ON_SALE) {
                 throw new BusinessException(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE);
             }
@@ -96,6 +104,9 @@ public class OrderService {
                     ticketProduct.getPrice(),
                     item.quantity()
             );
+
+            // 재고 차감
+            ticketProduct.decreaseStock(item.quantity());
 
             orderLines.add(new OrderLine(ticketProduct, item.quantity()));
         }
@@ -112,7 +123,10 @@ public class OrderService {
         // 주문 항목도 함께 저장한 뒤 DB에서 생성한 ID를 응답에 포함한다.
         Order savedOrder = orderRepository.saveAndFlush(order);
 
-        return CreateOrderResponse.from(savedOrder);
+        // 결제창 연동에 쓸 결제를 주문과 같은 트랜잭션에서 만든다. 결제 생성이 실패하면 주문도 롤백된다.
+        String pgId = paymentService.createPayment(savedOrder);
+
+        return CreateOrderResponse.from(savedOrder, pgId);
     }
 
     @Transactional(readOnly = true)
@@ -134,7 +148,7 @@ public class OrderService {
             Long userId,
             Long orderId
     ) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findOrderById(orderId)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.ORDER_NOT_FOUND));
 
@@ -162,8 +176,14 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
         }
 
+        // 주문 티켓 상품 id 및 수량 map 생성
+        Map<Long, Integer> quantitiesByTicketProductId = order.getQuantityByTicketProductId();
+
+        // 재고 복구
+        ticketProductService.updateTicketProductsStockIncrease(quantitiesByTicketProductId);
+
         // 결제 취소가 실패하면 같은 트랜잭션의 주문 취소도 롤백한다.
-        paymentService.cancelPendingPaymentIfExists(userId, orderId);
+        paymentService.cancelledByUser(userId, orderId);
 
         // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
         return UpdateOrderResponse.of(

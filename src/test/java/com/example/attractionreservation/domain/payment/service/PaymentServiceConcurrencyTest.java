@@ -203,7 +203,8 @@ class PaymentServiceConcurrencyTest {
 
         Payment result = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
-        assertThat(findOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
+        // 결제 취소는 주문 상태를 바꾸지 않는다. 주문 취소는 주문 취소 흐름의 책임이다.
+        assertThat(findOrderStatus()).isEqualTo(OrderStatus.PENDING);
     }
 
     @Test

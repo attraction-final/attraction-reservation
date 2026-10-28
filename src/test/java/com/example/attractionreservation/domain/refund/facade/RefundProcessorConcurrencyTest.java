@@ -67,6 +67,7 @@ import static org.mockito.BDDMockito.willThrow;
 class RefundProcessorConcurrencyTest {
 
     private static final int THREAD_COUNT = 6;
+    private static final int INITIAL_STOCK = 100;
     private static final long PG_LATENCY_MILLIS = 300;
 
     @Autowired
@@ -232,6 +233,8 @@ class RefundProcessorConcurrencyTest {
         assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.COMPLETED);
         assertThat(findPaymentStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
         assertThat(refundProcessor.syncWithPg(pgId)).isEqualTo(PaymentSyncResult.ALREADY_DONE);
+        // 웹훅과 PG 응답 처리가 겹쳐도 환불 수량(성인 1장)만큼 한 번만 복구된다.
+        assertThat(findStock()).isEqualTo(INITIAL_STOCK + 1);
     }
 
     @Test
@@ -262,6 +265,7 @@ class RefundProcessorConcurrencyTest {
         WebhookStatus webhookStatus = transactionTemplate.execute(
                 status -> entityManager.find(WebhookEvent.class, eventId).getStatus());
         assertThat(webhookStatus).isEqualTo(WebhookStatus.PROCESSED);
+        assertThat(findStock()).isEqualTo(INITIAL_STOCK + 1);
     }
 
     @Test
@@ -353,6 +357,8 @@ class RefundProcessorConcurrencyTest {
                 .allMatch(result -> result == PaymentSyncResult.REFUND_SYNCED || result == PaymentSyncResult.ALREADY_DONE);
         assertThat(syncResults).filteredOn(result -> result == PaymentSyncResult.REFUND_SYNCED).hasSizeLessThanOrEqualTo(1);
         assertThat(pgCalls).containsExactly(List.of(10000L, 50000L));
+        // 웹훅과 스케줄러가 동시에 확정해도 환불 수량(성인 1장)만큼 한 번만 복구된다.
+        assertThat(findStock()).isEqualTo(INITIAL_STOCK + 1);
     }
 
     @Test
@@ -445,5 +451,11 @@ class RefundProcessorConcurrencyTest {
 
     private PaymentStatus findPaymentStatus() {
         return transactionTemplate.execute(status -> entityManager.find(Payment.class, paymentId).getStatus());
+    }
+
+    // 테스트 데이터에는 티켓 상품이 하나뿐이다.
+    private int findStock() {
+        return transactionTemplate.execute(status ->
+                entityManager.createQuery("select t.stock from TicketProduct t", Integer.class).getSingleResult());
     }
 }

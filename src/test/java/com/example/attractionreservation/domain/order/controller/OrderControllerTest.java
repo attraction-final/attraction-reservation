@@ -75,6 +75,7 @@ class OrderControllerTest {
                 101L,
                 120000,
                 "PENDING",
+                "pg-id",
                 List.of(new CreateOrderResponse.Item(201L, 1L, 60000, 2))
         );
 
@@ -92,6 +93,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.orderId").value(101))
                 .andExpect(jsonPath("$.data.totalAmount").value(120000))
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.pgId").value("pg-id"))
                 .andExpect(jsonPath("$.data.items.length()").value(1))
                 .andExpect(jsonPath("$.data.items[0].id").value(201))
                 .andExpect(jsonPath("$.data.items[0].ticketProductId").value(1))

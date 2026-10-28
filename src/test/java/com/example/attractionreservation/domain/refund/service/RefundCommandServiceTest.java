@@ -13,6 +13,7 @@ import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
@@ -42,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, RefundCommandService.class, QuerydslConfig.class})
+@Import({JpaConfig.class, RefundCommandService.class, TicketProductService.class, QuerydslConfig.class})
 class RefundCommandServiceTest {
 
     @Autowired
@@ -651,6 +652,131 @@ class RefundCommandServiceTest {
         assertThat(refundCommandService.findProcessableIds(now.plus(Duration.ofMinutes(1)), 10)).containsExactly(refundId);
     }
 
+    @Test
+    @DisplayName("일부 상품의 환불을 완료하면 이번 환불의 수량만큼 재고를 복구한다.")
+    void recordComplete_partOfItems_RestoresRefundedQuantity() {
+        //given
+        Long refundId = saveRefund(RefundStatus.REQUESTED, adult, 2);
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordComplete(refundId, 1, now);
+
+        //then
+        assertThat(findProduct().getStock()).isEqualTo(102);
+    }
+
+    @Test
+    @DisplayName("앞서 완료된 환불의 수량은 다시 복구하지 않고 이번 환불의 수량만 복구한다.")
+    void recordComplete_lastItems_RestoresOnlyThisRefundQuantity() {
+        //given
+        saveRefund(RefundStatus.COMPLETED, adult, 3);
+        saveRefund(RefundStatus.COMPLETED, child, 1);
+        Long refundId = saveRefund(RefundStatus.REQUESTED, child, 3);
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordComplete(refundId, 1, now);
+
+        //then
+        assertThat(findProduct().getStock()).isEqualTo(103);
+        assertThat(findPayment().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+    }
+
+    @Test
+    @DisplayName("재고 0으로 품절된 상품은 환불이 완료되면 재고가 복구되고 다시 판매 중이 된다.")
+    void recordComplete_soldOutProduct_ReopensSale() {
+        //given
+        TicketProduct soldOut = adult.getTicketProduct();
+        ReflectionTestUtils.setField(soldOut, "stock", 0);
+        ReflectionTestUtils.setField(soldOut, "status", TicketProductStatus.OUT_OF_STOCK);
+        Long refundId = saveRefund(RefundStatus.REQUESTED, adult, 2);
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordComplete(refundId, 1, now);
+
+        //then
+        TicketProduct found = findProduct();
+        assertThat(found.getStock()).isEqualTo(2);
+        assertThat(found.getStatus()).isEqualTo(TicketProductStatus.ON_SALE);
+    }
+
+    @Test
+    @DisplayName("PG 취소 결과를 기다리는 확인 대기 상태로 기록해도 재고는 복구하지 않는다.")
+    void recordPgPending_claimed_DoesNotRestoreStock() {
+        //given
+        Long refundId = saveRefund(RefundStatus.REQUESTED, adult, 2);
+        refundCommandService.claim(refundId, now);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordPgPending(refundId, 1, "cancel-1", now);
+
+        //then
+        assertThat(findProduct().getStock()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("조회로 PG 취소 완료를 확인하면 재고를 복구한다.")
+    void recordPgCancelled_pgPending_RestoresStock() {
+        //given
+        Long refundId = saveRefund(RefundStatus.PG_PENDING, adult, 2);
+        flushAndClear();
+
+        //when
+        refundCommandService.recordPgCancelled(refundId, now, now);
+
+        //then
+        assertThat(findProduct().getStock()).isEqualTo(102);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"PROCESSING", "FAILED", "DEAD"})
+    @DisplayName("취소 웹훅으로 미완료 환불이 PG에 반영된 것을 확인하면 재고를 복구한다.")
+    void syncWithPgCancelledAmount_oneMatched_RestoresStock(RefundStatus status) {
+        //given
+        saveRefund(status, adult, 1);
+        flushAndClear();
+
+        //when
+        refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(findProduct().getStock()).isEqualTo(101);
+    }
+
+    @Test
+    @DisplayName("웹훅 동기화로 이미 맞은 상태에서는 재고를 다시 복구하지 않는다.")
+    void syncWithPgCancelledAmount_inSync_DoesNotRestoreStock() {
+        //given
+        saveRefund(RefundStatus.COMPLETED, adult, 1);
+        flushAndClear();
+
+        //when
+        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 10000L, now);
+
+        //then
+        assertThat(result).isEqualTo(PaymentSyncResult.ALREADY_DONE);
+        assertThat(findProduct().getStock()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("이미 완료된 환불의 완료를 다시 기록하면 예외가 발생하고 재고를 다시 복구하지 않는다.")
+    void recordComplete_alreadyCompleted_DoesNotRestoreAgain() {
+        //given
+        Long refundId = saveRefund(RefundStatus.COMPLETED, adult, 1);
+        flushAndClear();
+
+        //when & then
+        assertThatThrownBy(() -> refundCommandService.recordComplete(refundId, 1, now))
+                .isInstanceOf(BusinessException.class);
+        assertThat(findProduct().getStock()).isEqualTo(100);
+    }
+
     private Long saveRefund(RefundStatus status, OrderItem orderItem, int quantity) {
         return saveRefund(status, orderItem, quantity, now);
     }
@@ -718,6 +844,11 @@ class RefundCommandServiceTest {
         ReflectionTestUtils.setField(orderItem, "quantity", quantity);
         order.getOrderItems().add(orderItem);
         return orderItem;
+    }
+
+    private TicketProduct findProduct() {
+        flushAndClear();
+        return entityManager.find(TicketProduct.class, adult.getTicketProduct().getId());
     }
 
     private Refund find(Long refundId) {

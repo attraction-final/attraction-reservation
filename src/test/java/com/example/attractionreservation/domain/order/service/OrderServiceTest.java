@@ -80,7 +80,7 @@ class OrderServiceTest {
                 createProduct(20L, 30000, TicketProductStatus.ON_SALE);
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(ticketProductRepository.findAllById(Set.of(10L, 20L)))
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L, 20L)))
                 .thenReturn(List.of(secondProduct, firstProduct));
         when(orderRepository.saveAndFlush(any(Order.class)))
                 .thenAnswer(invocation -> {
@@ -88,6 +88,7 @@ class OrderServiceTest {
                     ReflectionTestUtils.setField(order, "id", 101L);
                     return order;
                 });
+        when(paymentService.createPayment(any(Order.class))).thenReturn("pg-id");
 
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(10L, 2),
@@ -98,11 +99,12 @@ class OrderServiceTest {
         CreateOrderResponse response = orderService.createOrder(1L, request);
 
         // then
-        verify(ticketProductRepository).findAllById(Set.of(10L, 20L));
+        verify(ticketProductRepository).findAllWithUpdateByIdInOrderById(Set.of(10L, 20L));
         verifyNoMoreInteractions(ticketProductRepository);
         assertThat(response.orderId()).isEqualTo(101L);
         assertThat(response.totalAmount()).isEqualTo(150000);
         assertThat(response.status()).isEqualTo("PENDING");
+        assertThat(response.pgId()).isEqualTo("pg-id");
         assertThat(response.items())
                 .extracting(CreateOrderResponse.Item::price)
                 .containsExactly(60000, 30000);
@@ -115,6 +117,8 @@ class OrderServiceTest {
         Order savedOrder = captor.getValue();
 
         assertThat(savedOrder.getUser()).isSameAs(user);
+        // 결제창 연동에 쓸 결제를 저장한 주문으로 함께 만든다.
+        verify(paymentService).createPayment(savedOrder);
         assertThat(savedOrder.getOrderItems()).allSatisfy(item ->
                 assertThat(item.getOrder()).isSameAs(savedOrder));
 
@@ -123,8 +127,31 @@ class OrderServiceTest {
         assertThat(savedOrder.getOrderItems().get(0).getPrice())
                 .isEqualTo(60000);
 
-        assertThat(firstProduct.getStock()).isEqualTo(100);
-        assertThat(secondProduct.getStock()).isEqualTo(100);
+        // 주문 수량만큼 재고가 차감된다.
+        assertThat(firstProduct.getStock()).isEqualTo(98);
+        assertThat(secondProduct.getStock()).isEqualTo(99);
+    }
+
+    @Test
+    @DisplayName("결제 생성에 실패하면 주문 생성도 같은 예외로 실패한다")
+    void createOrder_paymentCreationFailed_throwsException() {
+        // given
+        TicketProduct product = createProduct(10L, 60000, TicketProductStatus.ON_SALE);
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L))).thenReturn(List.of(product));
+        when(orderRepository.saveAndFlush(any(Order.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentService.createPayment(any(Order.class)))
+                .thenThrow(new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT));
+
+        // when & then: 예외가 전파되어야 같은 트랜잭션의 주문 저장도 롤백된다.
+        assertThatThrownBy(() -> orderService.createOrder(1L, createRequest(10L, 1)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.PAYMENT_INVALID_AMOUNT)
+                );
     }
 
     @Test
@@ -147,7 +174,7 @@ class OrderServiceTest {
         // given: 회원은 존재하지만 요청한 상품은 없다.
         when(userRepository.findById(1L))
                 .thenReturn(Optional.of(user));
-        when(ticketProductRepository.findAllById(Set.of(10L)))
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
                 .thenReturn(List.of());
 
         // when & then
@@ -162,7 +189,7 @@ class OrderServiceTest {
     void createOrder_stoppedProduct_throwsConflict() {
         // given
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(ticketProductRepository.findAllById(Set.of(10L)))
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
                 .thenReturn(List.of(
                         createProduct(10L, 60000, TicketProductStatus.STOPPED)
                 ));
@@ -179,7 +206,7 @@ class OrderServiceTest {
     void createOrder_itemAmountOverflow_throwsBadRequest() {
         // given
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(ticketProductRepository.findAllById(Set.of(10L)))
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
                 .thenReturn(List.of(
                         createProduct(
                                 10L,
@@ -200,7 +227,7 @@ class OrderServiceTest {
     void createOrder_totalAmountOverflow_throwsBadRequest() {
         // given
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(ticketProductRepository.findAllById(Set.of(10L)))
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
                 .thenReturn(List.of(
                         createProduct(
                                 10L,
@@ -216,8 +243,116 @@ class OrderServiceTest {
 
         // when & then
         assertOrderRejected(request, ErrorCode.ORDER_AMOUNT_OUT_OF_RANGE);
-        verify(ticketProductRepository).findAllById(Set.of(10L));
+        verify(ticketProductRepository).findAllWithUpdateByIdInOrderById(Set.of(10L));
         verifyNoMoreInteractions(ticketProductRepository);
+    }
+
+    @Test
+    @DisplayName("같은 상품이 여러 항목이면 수량을 누적해 재고를 차감한다")
+    void createOrder_sameProductInMultipleItems_decreasesStockCumulatively() {
+        // given
+        TicketProduct product =
+                createProduct(10L, 60000, 100, TicketProductStatus.ON_SALE);
+        stubOrderCreation(product);
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(10L, 2),
+                new CreateOrderRequest.Item(10L, 3)
+        ));
+
+        // when
+        orderService.createOrder(1L, request);
+
+        // then
+        assertThat(product.getStock()).isEqualTo(95);
+        verify(ticketProductRepository)
+                .findAllWithUpdateByIdInOrderById(Set.of(10L));
+    }
+
+    @Test
+    @DisplayName("마지막 재고까지 주문하면 재고가 0이 되고 품절 상태가 된다")
+    void createOrder_lastStock_changesStatusToOutOfStock() {
+        // given
+        TicketProduct product =
+                createProduct(10L, 60000, 2, TicketProductStatus.ON_SALE);
+        stubOrderCreation(product);
+
+        // when
+        orderService.createOrder(1L, createRequest(10L, 2));
+
+        // then
+        assertThat(product.getStock()).isZero();
+        assertThat(product.getStatus()).isEqualTo(TicketProductStatus.OUT_OF_STOCK);
+    }
+
+    @Test
+    @DisplayName("재고보다 많이 주문하면 주문과 결제를 만들지 않는다")
+    void createOrder_insufficientStock_throwsConflict() {
+        // given
+        TicketProduct product =
+                createProduct(10L, 60000, 1, TicketProductStatus.ON_SALE);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
+                .thenReturn(List.of(product));
+
+        // when & then
+        assertOrderRejected(
+                createRequest(10L, 2),
+                ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT
+        );
+        assertThat(product.getStock()).isEqualTo(1);
+        verifyNoInteractions(paymentService);
+    }
+
+    @Test
+    @DisplayName("같은 상품의 항목별 수량을 합치면 재고를 넘는 경우 주문할 수 없다")
+    void createOrder_cumulativeQuantityExceedsStock_throwsConflict() {
+        // given
+        TicketProduct product =
+                createProduct(10L, 60000, 3, TicketProductStatus.ON_SALE);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
+                .thenReturn(List.of(product));
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(10L, 2),
+                new CreateOrderRequest.Item(10L, 2)
+        ));
+
+        // when & then
+        assertOrderRejected(request, ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT);
+        verifyNoInteractions(paymentService);
+    }
+
+    @Test
+    @DisplayName("품절 상품은 판매 중지가 아니라 재고 부족으로 거절하고 결제를 만들지 않는다")
+    void createOrder_outOfStockProduct_throwsInsufficientStock() {
+        // given
+        TicketProduct product =
+                createProduct(10L, 60000, 0, TicketProductStatus.OUT_OF_STOCK);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
+                .thenReturn(List.of(product));
+
+        // when & then
+        assertOrderRejected(
+                createRequest(10L, 1),
+                ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT
+        );
+        verifyNoInteractions(paymentService);
+    }
+
+    private void stubOrderCreation(TicketProduct product) {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(product.getId())))
+                .thenReturn(List.of(product));
+        when(orderRepository.saveAndFlush(any(Order.class)))
+                .thenAnswer(invocation -> {
+                    Order order = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(order, "id", 101L);
+                    return order;
+                });
+        when(paymentService.createPayment(any(Order.class))).thenReturn("pg-id");
     }
 
     private void assertOrderRejected(
@@ -245,9 +380,18 @@ class OrderServiceTest {
             int price,
             TicketProductStatus status
     ) {
+        return createProduct(productId, price, 100, status);
+    }
+
+    private TicketProduct createProduct(
+            Long productId,
+            int price,
+            int stock,
+            TicketProductStatus status
+    ) {
         TicketProduct product = new TicketProduct(
                 "테스트상품", price, "테스트설명",
-                TicketType.ALL_DAY, 100, status
+                TicketType.ALL_DAY, stock, status
         );
         ReflectionTestUtils.setField(product, "id", productId);
         return product;

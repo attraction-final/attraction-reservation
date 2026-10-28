@@ -8,6 +8,10 @@ import com.example.attractionreservation.domain.payment.entity.PaymentCompensati
 import com.example.attractionreservation.domain.payment.entity.enums.CompensationStatus;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentCompensationRepository;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
@@ -38,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, QuerydslConfig.class})
+@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, TicketProductService.class, QuerydslConfig.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PaymentCompensationOutboxTest {
 
@@ -57,6 +61,7 @@ class PaymentCompensationOutboxTest {
     private TransactionTemplate transactionTemplate;
     private String pgId;
     private Long orderId;
+    private Long productId;
 
     @BeforeEach
     void setUp() {
@@ -69,7 +74,14 @@ class PaymentCompensationOutboxTest {
                     .build();
             entityManager.persist(user);
 
+            // 주문으로 재고 10개 중 2개가 차감된 상태(남은 재고 8)다.
+            TicketProduct ticketProduct = new TicketProduct(
+                    "종일이용권", 5000, "하루 동안 이용 가능한 입장권", TicketType.ALL_DAY, 8, TicketProductStatus.ON_SALE);
+            entityManager.persist(ticketProduct);
+            productId = ticketProduct.getId();
+
             Order order = Order.create(user, 10000);
+            order.addOrderItem(ticketProduct, 2);
             entityManager.persist(order);
 
             Payment payment = Payment.create(order);
@@ -85,7 +97,9 @@ class PaymentCompensationOutboxTest {
         transactionTemplate.executeWithoutResult(status -> {
             entityManager.createQuery("delete from PaymentCompensation").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
+            entityManager.createQuery("delete from OrderItem").executeUpdate();
             entityManager.createQuery("delete from Order").executeUpdate();
+            entityManager.createQuery("delete from TicketProduct").executeUpdate();
             entityManager.createQuery("delete from User").executeUpdate();
         });
     }
@@ -158,6 +172,60 @@ class PaymentCompensationOutboxTest {
         assertThat(compensation.getStatus()).isEqualTo(CompensationStatus.REQUESTED);
         assertThat(compensation.getAmount()).isEqualTo(10000L);
         assertThat(compensation.getReason()).isEqualTo("취소된 주문의 결제");
+    }
+
+    @Test
+    @DisplayName("금액 불일치로 실패 처리하면 결제 실패·주문 취소·보상 요청과 함께 재고도 복구한다.")
+    void failPaymentWithCompensation_pending_RestoresStock() {
+        //when
+        paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치");
+
+        //then
+        assertThat(findStock()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("보상 요청 저장에 실패하면 이미 복구한 재고도 함께 롤백된다.")
+    void failPaymentWithCompensation_compensationFails_StockRollbackTogether() {
+        //when & then
+        assertThatThrownBy(() -> paymentCommandService.failPaymentWithCompensation(pgId, null, "결제 금액 불일치"))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(findStock()).isEqualTo(8);
+    }
+
+    @Test
+    @DisplayName("이미 실패 처리된 결제에 다시 요청해도 재고는 한 번만 복구한다.")
+    void failPaymentWithCompensation_alreadyFailed_RestoresStockOnce() {
+        //given
+        paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치");
+
+        //when
+        paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치");
+
+        //then
+        assertThat(findStock()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("취소된 결제를 승인해 보상 요청만 저장할 때는 재고를 다시 복구하지 않는다.")
+    void approvePayment_cancelled_DoesNotRestoreStock() {
+        //given
+        transactionTemplate.executeWithoutResult(status -> entityManager
+                .createQuery("update Payment p set p.status = :cancelled where p.pgId = :pgId")
+                .setParameter("cancelled", PaymentStatus.CANCELLED)
+                .setParameter("pgId", pgId)
+                .executeUpdate());
+
+        //when
+        paymentCommandService.approvePayment(pgId, Instant.now(), 10000L);
+
+        //then
+        assertThat(findStock()).isEqualTo(8);
+    }
+
+    private int findStock() {
+        return transactionTemplate.execute(status -> entityManager.find(TicketProduct.class, productId).getStock());
     }
 
     private PaymentStatus findPaymentStatus() {

@@ -32,7 +32,7 @@ PaymentController
           │    ├─ PG FAILED           → failPayment → PAYMENT_PG_FAILED (502)
           │    └─ PG 미완료(READY 등)  → PAYMENT_NOT_PAID (409)
           ├─ 금액 불일치
-          │    ├─ failPaymentWithCompensation이 true  → 결제 FAILED·주문 취소·보상 요청 함께 커밋
+          │    ├─ failPaymentWithCompensation이 true  → 결제 FAILED·주문 취소·재고 복구·보상 요청 함께 커밋
           │    │                                        (원장 CANCELLED면 실패 처리 없이 보상 요청만)
           │    │                                        → PaymentCompensationProcessor 즉시 1회 시도 (실패해도 스케줄러 재시도)
           │    ├─ failPaymentWithCompensation이 false → 다른 요청이 이미 처리, 보상 요청 생략
@@ -160,7 +160,8 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
 
 - 승인·실패 시 주문은 상태만 바꾸므로 별도 서비스 계층 대신 `payment.getOrder().markAsPaid()` / `markAsCancelled()`로 같은 트랜잭션에서 변경한다.
 - 계층을 추가해도 `Payment → Order` 엔티티 연관관계가 남아 있는 한 결합도는 줄지 않는다.
-- 주문 쪽 로직이 늘어나면(좌석 확정, 재고 복구, 알림 등) `OrderService` 호출이나 도메인 이벤트(동기 `@EventListener`, 같은 트랜잭션)로 옮긴다.
+- 주문 쪽 로직이 늘어나면(좌석 확정, 알림 등) `OrderService` 호출이나 도메인 이벤트(동기 `@EventListener`, 같은 트랜잭션)로 옮긴다.
+  - 재고 복구는 `OrderService`가 이미 `PaymentService`를 호출하므로 결제 쪽에서 `OrderService`를 부르면 순환 의존이 된다. 그래서 결제 쪽도 `TicketProductService`를 직접 호출한다(4.11).
   - `@TransactionalEventListener(AFTER_COMMIT)`는 결제 PAID·주문 PENDING 불일치를 만들 수 있으므로 쓰지 않는다.
 - 주문 상태 규칙은 `Order`가 가진다 (`OrderStatus.canTransitTo`).
 - 참고: dirty checking은 cascade와 무관하다. 영속성 컨텍스트가 관리하는 엔티티면 연관 엔티티도 커밋 시 UPDATE된다.
@@ -179,7 +180,7 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
 ### 4.8 보상 처리 (금액 불일치, 원장 취소)
 
 - PG에서는 결제됐지만 금액이 원장과 다르면 원장에 반영하지 않고 PG 결제를 취소한다. **Outbox 패턴**으로 구현했다(KAN-39, 상세는 [payment-compensation.md](payment-compensation.md)).
-- 순서: `failPaymentWithCompensation`(결제 FAILED + 주문 취소 + 보상 요청, 한 트랜잭션) → 커밋 후 `PaymentCompensationProcessor`가 즉시 1회 PG 전체 취소 → `PAYMENT_INCORRECT_AMOUNT`(400) 응답.
+- 순서: `failPaymentWithCompensation`(결제 FAILED + 주문 취소 + 재고 복구 + 보상 요청, 한 트랜잭션) → 커밋 후 `PaymentCompensationProcessor`가 즉시 1회 PG 전체 취소 → `PAYMENT_INCORRECT_AMOUNT`(400) 응답.
   - 원장이 `CANCELLED`면 결제 실패 처리 없이 보상 요청만 저장한다(사유 "결제 금액 불일치").
 - 원장 `CANCELLED` + PG `PAID`(금액 일치)는 4.3과 같이 `approvePayment`가 같은 트랜잭션에서 보상 요청을 저장한다(사유 "취소된 주문의 결제").
 - 즉시 시도가 실패해도 보상 요청이 남아 스케줄러가 재시도하므로, **응답은 PG 취소 결과와 무관하다.** 웹훅은 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다.
@@ -221,6 +222,27 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
   - `currentCancellableAmount`(4인자 메서드, KAN-51): 이번 취소 전에 PG에 남아 있어야 할 취소 가능 금액. PG 값과 다르면 PG가 거절하고 `PAYMENT_CANCELLABLE_AMOUNT_MISMATCH`를 던진다. 앞선 취소가 이미 반영됐을 수 있어 재시도하면 안 된다. 기존 3인자 호출(보상 취소)은 이 값을 보내지 않는다.
   - 그 밖에 취소 여부를 확인할 수 없으면 `PAYMENT_CANCELLATION_FAILED`를 던진다.
 - 금액 비교는 `int`(원장)와 `Long`(PG)의 숫자 비교다. `Objects.equals`는 타입이 달라 항상 false이므로 쓰지 않는다.
+
+### 4.11 재고 차감과 복구
+
+재고(`ticket_products.stock`)는 주문을 만들 때 차감하고, 주문이 취소되거나 환불이 완료될 때 복구한다. 차감·복구는 모두 호출한 쪽의 트랜잭션에 참여하므로, 뒤 단계가 실패하면 함께 롤백된다.
+
+| 시점 | 위치 | 동작 |
+|---|---|---|
+| 주문 생성 | `OrderService.createOrder` | 상품을 락으로 조회해 `decreaseStock`. 재고 부족이거나 품절(`OUT_OF_STOCK`)이면 `TICKET_PRODUCT_STOCK_INSUFFICIENT`(409), 그 밖에 판매 중이 아니면(중지·종료·삭제) `ORDER_PRODUCT_NOT_ON_SALE` |
+| 사용자 주문 취소 | `OrderService.updateOrderByCancel` | 조건부 UPDATE(`PENDING` → `CANCELLED`)가 성공한 경우에만 복구 |
+| 만료 자동 취소 | `OrderCancelProcessor.cancelExpiredOrder` | 위와 같이 UPDATE가 성공한 경우에만 복구 |
+| PG 결제 실패·금액 불일치 | `PaymentCommandService.markAsFailedIfPending` | 결제가 `PENDING`이어서 실패 처리한 경우에만 복구 |
+| 환불 완료 | `RefundCommandService.updatePaymentAndOrderStatus` | 환불이 `COMPLETED`가 될 때 **이번 환불의 수량만** 복구 |
+
+- `cancelledByUser`는 **결제만 취소**한다. 주문 취소와 재고 복구는 호출하는 `OrderService`·`OrderCancelProcessor`가 한다. 주문과 결제는 함께 생성되므로 결제가 없으면 `PAYMENT_NOT_FOUND`다.
+- 이중 복구 방지: 복구는 상태 전이가 실제로 성공한 곳에서만 한 번 실행한다. 이미 취소·완료된 주문과 결제는 전이가 거부되거나 건너뛰어 복구하지 않는다. 사용자가 이미 취소한 결제에 PG 결제 완료가 들어와 보상 요청만 저장하는 경우도 복구하지 않는다.
+- 락 순서: 결제 → 주문(또는 환불) → 상품. 여러 상품은 상품 ID 오름차순으로 잠가(`findAllWithUpdateByIdInOrderById`) 데드락을 막는다. 결제 락을 먼저 잡지 않고 주문을 갱신하면 순서가 뒤집히므로 주의한다.
+- 재고가 0이 되면 상품은 `OUT_OF_STOCK`(품절)이 되고, 복구될 때 `ON_SALE`로 돌아온다. 관리자가 중지한 `STOPPED` 상품과 `ENDED`, `DELETED` 상품은 재고가 0이어도 복구로 상태가 바뀌지 않는다. 품절과 수동 중지를 상태로 구분하므로 중지한 상품이 복구 때 다시 열리지 않는다.
+- 아직 관리자 입력(`updateTicketProduct`)에서 `OUT_OF_STOCK`을 직접 지정하거나 재고와 상태가 어긋나게 저장하는 것을 막지 않는다. 관리자 입력 규칙은 상태값 설계가 정리될 때 함께 정한다.
+- 같은 상품이 여러 항목에 들어 있어도 수량을 합산해 처리한다(`Order.getQuantityByTicketProductId`, `Refund.getQuantityByTicketProductId`).
+- 검증: `OrderStockConcurrencyTest`(Testcontainers MySQL)가 동시 주문의 과판매 방지, 상품 순서가 반대인 주문의 데드락, 사용자 취소·만료 취소·결제 실패·결제 승인이 경쟁할 때의 한 번만 복구를 확인한다. 환불은 `RefundCommandServiceTest`, `RefundProcessorConcurrencyTest`가 확인한다.
+- 남은 일: 관리자 상품 수정(`updateTicketProduct`)은 재고를 절대값으로 덮어쓰고 락 조회를 쓰지 않으므로, 주문이 몰리는 중에 수정하면 차감이 덮어써질 수 있다.
 
 ## 5. ErrorCode
 
@@ -276,7 +298,6 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 1. **인증 연동**: 지금은 `userId`를 `@RequestParam`으로 받아 소유자 확인을 우회할 수 있다. `@AuthenticationPrincipal` 등으로 교체 전까지 운영 노출 금지.
 2. **웹훅 배포 준비**: `webhook_events` 테이블 생성, PortOne 콘솔에 웹훅 URL 등록, 인증 적용 시 웹훅 경로 `permitAll`. 상세는 [payment-webhook-plan.md 7장](payment-webhook-plan.md#7-남은-작업).
 3. **보상 배포 준비**: `payment_compensations` 테이블 생성, `DEAD` 보상 요청 확인·수동 환불 절차. 상세는 [payment-compensation.md 8장](payment-compensation.md#8-남은-작업).
-4. **재고 복구**: `cancelledByUser`, `failPayment`에 TODO로 남아 있다.
 
 ### 개선 항목
 
@@ -306,7 +327,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 구현 상세는 [payment-compensation.md](payment-compensation.md)에 있다. 요약:
 
 ```
-failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 보상 요청(payment_compensations) INSERT → 커밋
+failPaymentWithCompensation (트랜잭션 1개): 결제 FAILED + 주문 취소 + 재고 복구 + 보상 요청(payment_compensations) INSERT → 커밋
 approvePayment (트랜잭션 1개): 원장 CANCELLED + PG PAID면 보상 요청만 INSERT → 커밋 (4.3)
   → PaymentCompensationProcessor가 즉시 1회 PG 전체 취소
   → 실패하거나 시도 전 서버 종료 시 PaymentCompensationScheduler(30초)가 재시도 (1·2·4·8분 백오프, 5회 실패 시 DEAD)

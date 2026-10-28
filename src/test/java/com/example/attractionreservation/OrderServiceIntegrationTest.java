@@ -42,6 +42,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.Clock;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -152,6 +153,70 @@ class OrderServiceIntegrationTest {
 
         assertThat(updatedProduct.getPrice()).isEqualTo(70000);
         assertThat(updatedProduct.getStock()).isEqualTo(100);
+
+        // 주문과 같은 트랜잭션에서 결제 대기 결제가 생성되고 응답의 pgId로 찾을 수 있다.
+        Payment savedPayment = paymentRepository.findByPgId(response.pgId())
+                .orElseThrow();
+
+        assertThat(savedPayment.getOrder().getId()).isEqualTo(savedOrder.getId());
+        assertThat(savedPayment.getAmount()).isEqualTo(120000);
+        assertThat(savedPayment.getStatus()).isEqualTo(PaymentStatus.PENDING);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("결제 생성에 실패하면 주문도 저장하지 않는다")
+    void createOrder_paymentCreationFailed_rollsBackOrder() {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+
+        // 서비스 실행 전에 테스트 데이터를 별도 트랜잭션으로 확정한다.
+        Long[] ids = transaction.execute(status -> {
+            User user = userRepository.saveAndFlush(
+                    User.builder()
+                            .email(UUID.randomUUID() + "@test.com")
+                            .password("test-password-hash")
+                            .nickname("결제생성롤백테스트")
+                            .build()
+            );
+
+            // 금액이 0원이면 결제 생성이 거부되므로 결제 생성 실패를 재현할 수 있다.
+            TicketProduct product = ticketProductRepository.saveAndFlush(
+                    new TicketProduct(
+                            "무료이용권",
+                            0,
+                            "결제 생성 실패 재현용 상품",
+                            TicketType.ALL_DAY,
+                            100,
+                            TicketProductStatus.ON_SALE
+                    )
+            );
+
+            return new Long[]{user.getId(), product.getId()};
+        });
+
+        try {
+            CreateOrderRequest request = new CreateOrderRequest(List.of(
+                    new CreateOrderRequest.Item(ids[1], 1)
+            ));
+
+            assertThatThrownBy(() -> orderService.createOrder(ids[0], request))
+                    .isInstanceOfSatisfying(
+                            BusinessException.class,
+                            exception -> assertThat(exception.getErrorCode())
+                                    .isEqualTo(ErrorCode.PAYMENT_INVALID_AMOUNT)
+                    );
+
+            // 실패한 서비스 트랜잭션 밖에서 주문이 남지 않았는지 다시 확인한다.
+            transaction.executeWithoutResult(status ->
+                    assertThat(orderRepository.findAll())
+                            .noneMatch(order -> order.getUser().getId().equals(ids[0]))
+            );
+        } finally {
+            transaction.executeWithoutResult(status -> {
+                ticketProductRepository.deleteById(ids[1]);
+                userRepository.deleteById(ids[0]);
+            });
+        }
     }
 
     @Test
@@ -190,9 +255,10 @@ class OrderServiceIntegrationTest {
         Order pendingOrder = orderRepository.findById(createdOrder.orderId())
                 .orElseThrow();
 
-        Payment payment = paymentRepository.saveAndFlush(
-                Payment.create(pendingOrder)
-        );
+        // 주문 생성 시 함께 만들어진 결제 대기 결제를 사용한다.
+        Payment payment = paymentRepository.findByPgId(createdOrder.pgId())
+                .orElseThrow();
+        assertThat(payment.getOrder().getId()).isEqualTo(pendingOrder.getId());
         Long paymentId = payment.getId();
 
         // when
@@ -271,12 +337,23 @@ class OrderServiceIntegrationTest {
                     user, OrderStatus.COMPLETED, cutoff.minusSeconds(60)
             );
 
+            // 주문은 결제와 함께 생성되므로 취소 처리 대상 주문에도 결제 대기 결제를 만든다.
+            List<Long> paymentIds = new ArrayList<>();
+            for (Long orderId : List.of(expiredId, boundaryId, recentId)) {
+                paymentIds.add(paymentRepository.saveAndFlush(
+                        Payment.create(orderRepository.findById(orderId).orElseThrow())
+                ).getId());
+            }
+
             return new Long[]{
                     user.getId(),
                     expiredId,
                     boundaryId,
                     recentId,
-                    completedId
+                    completedId,
+                    paymentIds.get(0),
+                    paymentIds.get(1),
+                    paymentIds.get(2)
             };
         });
 
@@ -306,7 +383,13 @@ class OrderServiceIntegrationTest {
             assertThat(orderService.updateExpiredOrdersByCancel()).isZero();
         } finally {
             transaction.executeWithoutResult(status -> {
-                for (int i = 1; i < ids.length; i++) {
+                // 결제가 주문을 참조하므로 결제를 먼저 지운다.
+                for (int i = 5; i < ids.length; i++) {
+                    paymentRepository.deleteById(ids[i]);
+                }
+                paymentRepository.flush();
+
+                for (int i = 1; i <= 4; i++) {
                     orderRepository.deleteById(ids[i]);
                 }
 

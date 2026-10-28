@@ -62,10 +62,8 @@ public class PaymentService {
             throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
         }
 
+        // 결제만 취소한다. 주문 취소와 재고 복구는 호출한 주문 취소 흐름에서 처리한다.
         found.markAsCancelled();
-        found.getOrder().markAsCancelled();
-
-        // TODO: 재고 복구 로직 필요
         paymentRepository.save(found);
     }
 
@@ -76,29 +74,7 @@ public class PaymentService {
         paymentRepository.findWithLockByOrderId(orderId);
     }
 
-    @Transactional
-    public void cancelPendingPaymentIfExists(Long userId, Long orderId) {
-        // 결제 정보가 아직 생성되지 않은 주문도 취소할 수 있다.
-        Payment payment = paymentRepository.findWithLockByOrderId(orderId)
-                .orElse(null);
-
-        if (payment == null) {
-            return;
-        }
-
-        if (!payment.getOrder().getUser().getId().equals(userId)) {
-            throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
-        }
-
-        // 대기 상태가 아닌 결제는 취소하지 않는다.
-        if (payment.getStatus() != PaymentStatus.PENDING) {
-            throw new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED);
-        }
-
-        payment.markAsCancelled();
-    }
-
-    // 웹훅처럼 로그인 사용자가 없는 경로에서 사용한다.
+    // 웹훅처럼 로그인 사용자가 없는 경로에서 사용한다. 소유자를 확인하지 않는다.
     @Transactional(readOnly = true)
     public Optional<Payment> findByPgId(String pgId) {
         return paymentRepository.findByPgId(pgId);
@@ -107,7 +83,6 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public Payment getOwnedPayment(Long userId, String pgId) {
         return paymentRepository.findByPgIdAndUserId(pgId, userId)
-                .orElseThrow(() ->
-                        new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
 }

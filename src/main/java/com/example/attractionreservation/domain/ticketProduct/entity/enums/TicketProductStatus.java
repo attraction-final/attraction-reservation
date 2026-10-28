@@ -7,5 +7,6 @@ public enum TicketProductStatus {
     ON_SALE,
     STOPPED,
     ENDED,
-    DELETED
+    DELETED,
+    OUT_OF_STOCK
 }

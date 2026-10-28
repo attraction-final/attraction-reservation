@@ -80,6 +80,9 @@ public class SecurityConfig {
                                 "/api/auth/oauth2/exchange"
                         ).permitAll()
 
+                        // PortOne 웹훅은 사용자 토큰 없이 호출되며, 요청 서명으로 검증한다.
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhooks/portone").permitAll()
+
                         // 관리자 전용 API는 ADMIN 권한이 있는 회원만 접근할 수 있다.
                         .requestMatchers("/api/admin/**").hasRole(ADMIN_ROLE)
 

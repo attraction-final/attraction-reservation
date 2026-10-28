@@ -130,7 +130,7 @@ class RouteRecommendationServiceTest {
         Ticket ticket = mock(Ticket.class, RETURNS_DEEP_STUBS);
         lenient().when(ticket.getId()).thenReturn(TICKET_ID);
         lenient().when(ticket.getOrderItem().getOrder().getUser().getId()).thenReturn(ownerId);
-        lenient().when(ticket.getStatus()).thenReturn(status);
+        lenient().doReturn(status).when(ticket).getStatus();
         lenient().when(ticket.getType()).thenReturn(type);
         lenient().when(ticket.getValidDate()).thenReturn(VISIT_DATE);
         return ticket;

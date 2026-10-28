@@ -59,3 +59,8 @@ payment:
       fixed-delay: 30s   # 재시도 백오프가 1분부터라 웹훅보다 길게 둔다
       batch-size: 20     # 한 번에 처리할 최대 환불 수
       pg-check-batch-size: 5   # 한 번에 확인할 최대 PG_PENDING 수 (확인마다 PG 조회)
+
+ticket:
+  expiration:
+    scheduler:
+      batch-size: 1000

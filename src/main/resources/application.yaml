@@ -64,3 +64,4 @@ ticket:
   expiration:
     scheduler:
       batch-size: 100
+      fixed-delay: 1m

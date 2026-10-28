@@ -3,7 +3,7 @@ package com.example.attractionreservation.domain.routeRecommendation.entity.enum
 import lombok.Getter;
 
 @Getter
-//추천에서 제외된 이유
+//선택한 어트랙션이 추천 경로에서 제외된 이유
 public enum ExclusionReason {
     NOT_OPERATING("현재 운영하지 않는 어트랙션입니다."),
     OUT_OF_TIME_RANGE("선택한 이용 시간 안에 운영하는 슬롯이 없습니다."),

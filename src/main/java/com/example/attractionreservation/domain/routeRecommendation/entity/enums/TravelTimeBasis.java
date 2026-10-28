@@ -1,5 +1,5 @@
 package com.example.attractionreservation.domain.routeRecommendation.entity.enums;
-//이동 시간 계산 방식. 정문 -> 어트랙션 고정값을 쓴다.
+//추천 계산에 사용한 이동 시간의 기준  -> "정문 기준 이동 시간"
 public enum TravelTimeBasis {
     ENTRANCE_FIXED
 }

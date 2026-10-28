@@ -63,4 +63,4 @@ payment:
 ticket:
   expiration:
     scheduler:
-      batch-size: 1000
+      batch-size: 100

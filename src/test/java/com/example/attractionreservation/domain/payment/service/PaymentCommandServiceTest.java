@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentRespon
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
@@ -25,6 +26,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.Optional;
 
@@ -48,6 +50,7 @@ class PaymentCommandServiceTest {
     private static final String PG_ID = "pg-id";
     private static final Instant APPROVED_AT = Instant.parse("2026-10-20T01:00:00Z");
     private static final Long PG_AMOUNT = 10000L;
+    private static final LocalDate VISIT_DATE = LocalDate.of(2026, 10, 21);
 
     @Mock
     private PaymentRepository paymentRepository;
@@ -57,6 +60,9 @@ class PaymentCommandServiceTest {
 
     @Mock
     private TicketProductService ticketProductService;
+
+    @Mock
+    private TicketService ticketService;
 
     @InjectMocks
     private PaymentCommandService paymentCommandService;
@@ -76,6 +82,8 @@ class PaymentCommandServiceTest {
         assertEquals(APPROVED_AT, payment.getPaidAt());
         assertEquals(OrderStatus.COMPLETED, payment.getOrder().getStatus());
         assertEquals(PaymentStatus.PAID, response.status());
+        // 결제 승인 후 주문 기준으로 티켓을 발급한다.
+        verify(ticketService).issueTickets(payment.getOrder());
     }
 
     @Test
@@ -390,7 +398,7 @@ class PaymentCommandServiceTest {
                 .build();
         ReflectionTestUtils.setField(user, "id", USER_ID);
 
-        Payment payment = Payment.create(Order.create(user, 10000));
+        Payment payment = Payment.create(Order.create(user, 10000, VISIT_DATE));
         switch (status) {
             case PENDING -> {
             }

@@ -1,21 +1,22 @@
 package com.example.attractionreservation.domain.ticket.service;
 
+import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.ticket.dto.*;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
-import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
-import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.*;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -67,5 +68,19 @@ public class TicketService {
     public Ticket findByTicketId(Long ticketId) {
         return ticketRepository.findById(ticketId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
+    }
+
+    // 티켓 발급
+    @Transactional
+    public void issueTickets(Order order) {
+        List<Ticket> tickets = new ArrayList<>();
+
+        for (OrderItem orderItem: order.getOrderItems()) {
+            for (int count = 0; count < orderItem.getQuantity(); count++) {
+                tickets.add(new Ticket(order.getVisitDate(), orderItem));
+            }
+        }
+
+        ticketRepository.saveAll(tickets);
     }
 }

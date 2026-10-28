@@ -8,6 +8,7 @@ import com.example.attractionreservation.domain.payment.entity.PaymentCompensati
 import com.example.attractionreservation.domain.payment.entity.enums.CompensationStatus;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentCompensationRepository;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
@@ -17,6 +18,7 @@ import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, TicketProductService.class, QuerydslConfig.class})
+@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, TicketProductService.class, TicketService.class, QuerydslConfig.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PaymentCompensationOutboxTest {
 
@@ -80,7 +83,7 @@ class PaymentCompensationOutboxTest {
             entityManager.persist(ticketProduct);
             productId = ticketProduct.getId();
 
-            Order order = Order.create(user, 10000);
+            Order order = Order.create(user, 10000, LocalDate.now(KstTime.ZONE).plusDays(1));
             order.addOrderItem(ticketProduct, 2);
             entityManager.persist(order);
 

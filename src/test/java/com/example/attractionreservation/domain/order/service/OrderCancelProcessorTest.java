@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.Optional;
 
@@ -206,7 +207,7 @@ class OrderCancelProcessorTest {
                 .build();
         ReflectionTestUtils.setField(user, "id", 1L);
 
-        Order order = Order.create(user, 60000);
+        Order order = Order.create(user, 60000, LocalDate.of(2026, 11, 1));
         ReflectionTestUtils.setField(order, "id", 101L);
         return order;
     }

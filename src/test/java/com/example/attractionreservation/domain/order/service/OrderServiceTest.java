@@ -16,6 +16,7 @@ import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.data.domain.Page;
@@ -30,7 +32,9 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -56,8 +60,15 @@ class OrderServiceTest {
     @Mock
     private PaymentService paymentService;
 
+    // 방문일 검증 기준 시각을 고정한다. (KST 2026-10-14)
+    @Spy
+    private Clock clock =
+            Clock.fixed(Instant.parse("2026-10-14T01:00:00Z"), KstTime.ZONE);
+
     @InjectMocks
     private OrderService orderService;
+
+    private static final LocalDate VISIT_DATE = LocalDate.of(2026, 10, 20);
 
     private User user;
 
@@ -93,7 +104,7 @@ class OrderServiceTest {
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(10L, 2),
                 new CreateOrderRequest.Item(20L, 1)
-        ));
+        ), VISIT_DATE);
 
         // when
         CreateOrderResponse response = orderService.createOrder(1L, request);
@@ -239,7 +250,7 @@ class OrderServiceTest {
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(10L, 1),
                 new CreateOrderRequest.Item(10L, 1)
-        ));
+        ), VISIT_DATE);
 
         // when & then
         assertOrderRejected(request, ErrorCode.ORDER_AMOUNT_OUT_OF_RANGE);
@@ -258,7 +269,7 @@ class OrderServiceTest {
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(10L, 2),
                 new CreateOrderRequest.Item(10L, 3)
-        ));
+        ), VISIT_DATE);
 
         // when
         orderService.createOrder(1L, request);
@@ -317,7 +328,7 @@ class OrderServiceTest {
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(10L, 2),
                 new CreateOrderRequest.Item(10L, 2)
-        ));
+        ), VISIT_DATE);
 
         // when & then
         assertOrderRejected(request, ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT);
@@ -372,7 +383,7 @@ class OrderServiceTest {
     private CreateOrderRequest createRequest(Long productId, int quantity) {
         return new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(productId, quantity)
-        ));
+        ), VISIT_DATE);
     }
 
     private TicketProduct createProduct(
@@ -406,7 +417,7 @@ class OrderServiceTest {
         TicketProduct product =
                 createProduct(10L, 60000, TicketProductStatus.ON_SALE);
 
-        Order order = Order.create(user, 120000);
+        Order order = Order.create(user, 120000, VISIT_DATE);
         order.addOrderItem(product, 2);
 
         ReflectionTestUtils.setField(order, "id", 101L);
@@ -465,7 +476,7 @@ class OrderServiceTest {
     void findOrderById_otherMemberOrder_throwsForbidden() {
         // given: 주문 소유자는 2번 회원이며 요청자는 1번 회원이다.
         ReflectionTestUtils.setField(user, "id", 2L);
-        Order order = Order.create(user, 120000);
+        Order order = Order.create(user, 120000, VISIT_DATE);
 
         when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.of(order));
@@ -486,7 +497,7 @@ class OrderServiceTest {
     @DisplayName("본인 ID와 최신순 페이지 조건으로 조회하고 목록 응답을 반환한다")
     void findOrdersByUserId_validCondition_returnsPage() {
         // given
-        Order order = Order.create(user, 120000);
+        Order order = Order.create(user, 120000, VISIT_DATE);
         ReflectionTestUtils.setField(order, "id", 101L);
         ReflectionTestUtils.setField(
                 order, "createdAt", Instant.parse("2026-10-14T01:00:00Z")

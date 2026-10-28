@@ -34,6 +34,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -74,7 +75,7 @@ class RefundCommandServiceTest {
                 "종일이용권", 10000, "하루 동안 이용 가능한 입장권", TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE);
         entityManager.persist(ticketProduct);
 
-        Order order = Order.create(user, 50000);
+        Order order = Order.create(user, 50000, LocalDate.of(2026, 10, 25));
         adult = addOrderItem(order, ticketProduct, 10000, 3);
         child = addOrderItem(order, ticketProduct, 5000, 4);
         order.markAsPaid();
@@ -824,7 +825,7 @@ class RefundCommandServiceTest {
                 .build();
         entityManager.persist(otherUser);
 
-        Order otherOrder = Order.create(otherUser, 20000);
+        Order otherOrder = Order.create(otherUser, 20000, LocalDate.of(2026, 10, 25));
         OrderItem orderItem = addOrderItem(otherOrder, adult.getTicketProduct(), 10000, 2);
         otherOrder.markAsPaid();
         entityManager.persist(otherOrder);

@@ -28,6 +28,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.temporal.ChronoUnit;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.List;
 import java.util.Map;
@@ -424,7 +425,7 @@ class OrderCancelServiceTest {
         // DB 저장 없이 소유자 비교를 검증하도록 테스트용 ID를 설정한다.
         ReflectionTestUtils.setField(user, "id", userId);
 
-        Order order = Order.create(user, 60000);
+        Order order = Order.create(user, 60000, LocalDate.of(2026, 11, 1));
         ReflectionTestUtils.setField(order, "id", 101L);
         return order;
     }

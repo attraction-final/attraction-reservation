@@ -21,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -546,7 +547,7 @@ class RefundTest {
                 .password("password")
                 .nickname("name")
                 .build();
-        Order created = Order.create(user, totalAmount);
+        Order created = Order.create(user, totalAmount, LocalDate.of(2026, 10, 25));
         ReflectionTestUtils.setField(created, "id", id);
         return created;
     }

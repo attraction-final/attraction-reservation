@@ -79,6 +79,7 @@ public enum ErrorCode {
     ORDER_CANCEL_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인의 주문만 취소할 수 있습니다."),
     ORDER_NOT_CANCELLABLE(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 취소할 수 있습니다."),
     ORDER_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인의 주문만 조회할 수 있습니다."),
+    ORDER_INVALID_VISIT_DATE(HttpStatus.BAD_REQUEST, "방문일은 오늘부터 30일 이내에서 선택해야 합니다."),
 
     // ticket
     INVALID_TICKET_VALID_DATE(HttpStatus.BAD_REQUEST, "입장권 방문일은 필수입니다."),

@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -432,7 +433,7 @@ class PaymentFacadeTest {
                 .build();
         ReflectionTestUtils.setField(user, "id", USER_ID);
 
-        Order order = Order.create(user, 10000);
+        Order order = Order.create(user, 10000, LocalDate.of(2026, 10, 21));
         ReflectionTestUtils.setField(order, "id", ORDER_ID);
         return Payment.create(order);
     }

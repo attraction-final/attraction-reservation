@@ -8,6 +8,7 @@ import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -17,10 +18,9 @@ public class RefundController {
     private final RefundFacade refundFacade;
 
     // 전체 환불
-    // TODO: 인증 추가 시 userId @AuthenticationPrincipal로 변경해야 함
     @PostMapping("/{pgId}/refunds")
     public ResponseEntity<ApiResponse<RefundResponse>> createRefund(
-            @RequestParam("userId") Long userId,
+            @AuthenticationPrincipal Long userId,
             @PathVariable String pgId,
             @Valid @RequestBody CreateRefundRequest request
     ) {
@@ -29,10 +29,9 @@ public class RefundController {
     }
 
     // 부분 환불
-    // TODO: 인증 추가 시 userId @AuthenticationPrincipal로 변경해야 함
     @PostMapping("/{pgId}/refunds/partial")
     public ResponseEntity<ApiResponse<RefundResponse>> createPartialRefund(
-            @RequestParam("userId") Long userId,
+            @AuthenticationPrincipal Long userId,
             @PathVariable String pgId,
             @Valid @RequestBody CreatePartialRefundRequest request
     ) {

@@ -44,4 +44,10 @@ public interface ReservationCustomRepository {
             LocalDateTime nextDay,
             Pageable stablePageable
     );
+
+    long countUpcomingByAttractionId(
+            Long attractionId,
+            ReservationStatus reservationStatus,
+            LocalDateTime now
+    );
 }

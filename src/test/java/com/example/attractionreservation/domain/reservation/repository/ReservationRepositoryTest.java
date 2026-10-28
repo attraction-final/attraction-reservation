@@ -485,6 +485,79 @@ class ReservationRepositoryTest {
                 exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_SORT_PROPERTY));
     }
 
+    @Test
+    @DisplayName("해당 어트랙션의 미래 RESERVED 예약을 회원 구분 없이 집계한다")
+    void countUpcomingByAttractionId_FutureReservations_ReturnsCount() {
+        // given
+        createReservation(owner, attraction, START.plusMinutes(1), ReservationStatus.RESERVED);
+        createReservation(otherUser, attraction, START.plusHours(1), ReservationStatus.RESERVED);
+        createReservation(owner, otherAttraction, START.plusMinutes(1), ReservationStatus.RESERVED);
+        flushAndClear();
+
+        // when
+        long result = reservationRepository.countUpcomingByAttractionId(
+                attraction.getId(), ReservationStatus.RESERVED, START
+        );
+
+        // then
+        assertThat(result).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReservationStatus.class, names = "RESERVED", mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("미래 예약이어도 요청한 RESERVED 상태가 아니면 집계하지 않는다")
+    void countUpcomingByAttractionId_OtherStatus_ReturnsZero(ReservationStatus status) {
+        // given
+        createReservation(owner, attraction, START.plusHours(1), status);
+        flushAndClear();
+
+        // when
+        long result = reservationRepository.countUpcomingByAttractionId(
+                attraction.getId(), ReservationStatus.RESERVED, START
+        );
+
+        // then
+        assertThat(result).isZero();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"-1, 0", "0, 0", "1, 1"})
+    @DisplayName("현재 구현의 이용 예정 기준은 시작 시각이 기준 시각보다 이후인 예약이다")
+    void countUpcomingByAttractionId_StartBoundary_ReturnsExpected(int offsetMinutes, long expected) {
+        // given
+        // startsAt > now 기준의 회귀 테스트이며, 팀 정책이 바뀌면 기대값도 함께 변경한다.
+        createReservation(owner, attraction, START.plusMinutes(offsetMinutes), ReservationStatus.RESERVED);
+        flushAndClear();
+
+        // when
+        long result = reservationRepository.countUpcomingByAttractionId(
+                attraction.getId(), ReservationStatus.RESERVED, START
+        );
+
+        // then
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("해당 어트랙션에 예약이 없거나 어트랙션이 존재하지 않으면 0건을 반환한다")
+    void countUpcomingByAttractionId_NoMatchingReservations_ReturnsZero() {
+        // given
+        createReservation(owner, otherAttraction, START.plusHours(1), ReservationStatus.RESERVED);
+        flushAndClear();
+
+        // when
+        long emptyCount = reservationRepository.countUpcomingByAttractionId(
+                attraction.getId(), ReservationStatus.RESERVED, START
+        );
+        long missingCount = reservationRepository.countUpcomingByAttractionId(
+                Long.MAX_VALUE, ReservationStatus.RESERVED, START
+        );
+
+        // then
+        assertThat(emptyCount).isZero();
+        assertThat(missingCount).isZero();
+    }
+
     private PageRequest page(int number, int size) {
         return PageRequest.of(number, size, Sort.by(Sort.Direction.ASC, "id"));
     }

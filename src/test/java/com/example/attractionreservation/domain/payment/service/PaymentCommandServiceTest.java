@@ -100,6 +100,8 @@ class PaymentCommandServiceTest {
         assertEquals(PaymentStatus.PAID, payment.getStatus());
         assertEquals(APPROVED_AT, payment.getPaidAt());
         assertEquals(APPROVED_AT, response.paidAt());
+        // 이미 발급했으므로 티켓을 다시 발급하지 않는다.
+        verifyNoInteractions(ticketService);
     }
 
     @Test
@@ -114,6 +116,7 @@ class PaymentCommandServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_ALREADY_PROCESSED.getMessage());
         assertEquals(PaymentStatus.FAILED, payment.getStatus());
+        verifyNoInteractions(ticketService);
     }
 
     @Test
@@ -131,6 +134,7 @@ class PaymentCommandServiceTest {
         assertEquals(PaymentStatus.CANCELLED, response.status());
         assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
         verify(paymentCompensationService).saveCompensatingEvent(PG_ID, PG_AMOUNT, "취소된 주문의 결제");
+        verifyNoInteractions(ticketService);
     }
 
     @Test
@@ -147,6 +151,7 @@ class PaymentCommandServiceTest {
         //then
         assertEquals(PaymentStatus.CANCELLED, response.status());
         verify(paymentCompensationService, never()).saveCompensatingEvent(anyString(), any(), anyString());
+        verifyNoInteractions(ticketService);
     }
 
     @Test

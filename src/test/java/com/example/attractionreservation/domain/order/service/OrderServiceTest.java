@@ -21,6 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -351,6 +353,47 @@ class OrderServiceTest {
                 ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT
         );
         verifyNoInteractions(paymentService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-10-13", "2026-11-13"})
+    @DisplayName("방문일이 오늘 이전이거나 오늘부터 30일 이후면 주문과 결제를 만들지 않는다")
+    void createOrder_visitDateOutOfRange_throwsBadRequest(LocalDate visitDate) {
+        // given: 오늘은 KST 2026-10-14이고 허용 범위는 2026-10-14 ~ 2026-11-12이다.
+        TicketProduct product = createProduct(10L, 60000, TicketProductStatus.ON_SALE);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L)))
+                .thenReturn(List.of(product));
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(10L, 1)
+        ), visitDate);
+
+        // when & then
+        assertOrderRejected(request, ErrorCode.ORDER_INVALID_VISIT_DATE);
+        assertThat(product.getStock()).isEqualTo(100);
+        verifyNoInteractions(paymentService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-10-14", "2026-11-12"})
+    @DisplayName("방문일이 오늘이거나 오늘부터 29일 뒤면 주문을 저장한다")
+    void createOrder_visitDateBoundary_savesOrder(LocalDate visitDate) {
+        // given: 오늘은 KST 2026-10-14이다.
+        TicketProduct product = createProduct(10L, 60000, TicketProductStatus.ON_SALE);
+        stubOrderCreation(product);
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new CreateOrderRequest.Item(10L, 1)
+        ), visitDate);
+
+        // when
+        orderService.createOrder(1L, request);
+
+        // then
+        ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
+        verify(orderRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getVisitDate()).isEqualTo(visitDate);
     }
 
     private void stubOrderCreation(TicketProduct product) {

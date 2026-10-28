@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 @Service
@@ -82,5 +83,23 @@ public class TicketService {
         }
 
         ticketRepository.saveAll(tickets);
+    }
+
+    // 환불 - 요청한 티켓을 잠가서 조회한다. 없거나 해당 주문 상품의 티켓이 아니면 예외가 발생한다.
+    @Transactional
+    public List<Ticket> findRefundTicketsForUpdate(Collection<Long> orderItemIds, Collection<Long> ticketIds) {
+        List<Ticket> tickets = ticketRepository.findAllByIdInAndOrderItemIdInForUpdate(ticketIds, orderItemIds);
+
+        if (tickets.size() != ticketIds.size()) {
+            throw new BusinessException(ErrorCode.REFUND_INVALID_TICKET);
+        }
+
+        return tickets;
+    }
+
+    // 환불 - 주문 상품들의 미사용 티켓을 잠가서 조회한다.
+    @Transactional
+    public List<Ticket> findUnusedTicketsForUpdate(Collection<Long> orderItemIds) {
+        return ticketRepository.findAllByOrderItemIdInAndStatusForUpdate(orderItemIds, TicketStatus.UNUSED);
     }
 }

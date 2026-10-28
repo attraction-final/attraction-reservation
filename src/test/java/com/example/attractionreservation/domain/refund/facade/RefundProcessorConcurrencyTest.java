@@ -17,12 +17,14 @@ import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymen
 import com.example.attractionreservation.domain.refund.entity.Refund;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.service.RefundService;
+import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,10 +39,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -95,10 +97,10 @@ class RefundProcessorConcurrencyTest {
     private Long userId;
     private String pgId;
     private Long paymentId;
-    private Long adultItemId;
-    private Long childItemId;
+    private List<Long> adultTicketIds;
+    private List<Long> childTicketIds;
 
-    // 성인 10,000원 × 3장, 어린이 5,000원 × 4장 = 50,000원 결제
+    // 성인 10,000원 × 3장, 어린이 5,000원 × 4장 = 50,000원 결제. 장수만큼 티켓이 발급되어 있다.
     @BeforeEach
     void setUp() {
         transactionTemplate.executeWithoutResult(status -> {
@@ -114,7 +116,8 @@ class RefundProcessorConcurrencyTest {
             entityManager.persist(ticketProduct);
 
             // 주문 생성 기능이 없어 주문 상품을 직접 만든다. 주문을 저장하면 cascade로 함께 저장된다.
-            Order order = Order.create(user, 50000);
+            LocalDate visitDate = LocalDate.now(KstTime.ZONE);
+            Order order = Order.create(user, 50000, visitDate);
             OrderItem adult = addOrderItem(order, ticketProduct, 10000, 3);
             OrderItem child = addOrderItem(order, ticketProduct, 5000, 4);
             order.markAsPaid();
@@ -124,11 +127,12 @@ class RefundProcessorConcurrencyTest {
             payment.markAsPaid(Instant.now());
             entityManager.persist(payment);
 
+            adultTicketIds = issueTickets(adult, visitDate);
+            childTicketIds = issueTickets(child, visitDate);
+
             userId = user.getId();
             pgId = payment.getPgId();
             paymentId = payment.getId();
-            adultItemId = adult.getId();
-            childItemId = child.getId();
         });
 
         // PG 취소: 동시에 몇 건이 PG에 가 있는지 기록하고, 응답에 시간이 걸리게 한다.
@@ -151,6 +155,7 @@ class RefundProcessorConcurrencyTest {
             entityManager.createQuery("delete from RefundItem").executeUpdate();
             entityManager.createQuery("delete from Refund").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
+            entityManager.createQuery("delete from Ticket").executeUpdate();
             entityManager.createQuery("delete from OrderItem").executeUpdate();
             entityManager.createQuery("delete from Order").executeUpdate();
             entityManager.createQuery("delete from TicketProduct").executeUpdate();
@@ -162,7 +167,7 @@ class RefundProcessorConcurrencyTest {
     @DisplayName("즉시 시도와 스케줄러가 같은 환불을 동시에 처리해도 PG 취소는 한 번만 보낸다.")
     void process_sameRefundConcurrently_CancelOnce() throws Exception {
         //given
-        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        Long refundId = refundService.createRefund(userId, pgId, List.of(adultTicketIds.get(0)), "단순 변심", Instant.now());
 
         //when
         runConcurrently(() -> refundProcessor.processById(refundId));
@@ -177,8 +182,8 @@ class RefundProcessorConcurrencyTest {
     @DisplayName("같은 결제의 환불 두 건을 동시에 처리해도 PG에는 한 번에 하나씩 가고, PG 취소 가능 금액은 앞선 환불을 뺀 값이다.")
     void process_twoRefundsOfSamePayment_OneAtATime() throws Exception {
         //given
-        Long adultRefund = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
-        Long childRefund = refundService.createRefund(userId, pgId, Map.of(childItemId, 4), "단순 변심", Instant.now());
+        Long adultRefund = refundService.createRefund(userId, pgId, List.of(adultTicketIds.get(0)), "단순 변심", Instant.now());
+        Long childRefund = refundService.createRefund(userId, pgId, childTicketIds, "단순 변심", Instant.now());
 
         //when
         // 두 환불을 절반씩 동시에 처리한 뒤, 건너뛴 환불은 스케줄러처럼 이어서 처리한다.
@@ -200,7 +205,7 @@ class RefundProcessorConcurrencyTest {
     @DisplayName("PG 취소 응답을 기다리는 사이 취소 웹훅이 먼저 완료 처리해도 환불은 한 번만 완료되고 오류 없이 끝난다.")
     void syncWithPg_whileCancelInFlight_CompleteOnce() throws Exception {
         //given
-        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        Long refundId = refundService.createRefund(userId, pgId, List.of(adultTicketIds.get(0)), "단순 변심", Instant.now());
         given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(new PaymentGatewayResponse(
                 pgId, GatewayPaymentStatus.PARTIAL_CANCELLED, 50000L, 10000L, Instant.now(), List.of())));
 
@@ -242,7 +247,7 @@ class RefundProcessorConcurrencyTest {
     void processWebhook_cancelledButRecordedFailed_RefundCompleted() {
         //given
         // PG 응답이 타임아웃 나 실패로 기록됐지만 PG에는 취소가 반영된 상황
-        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        Long refundId = refundService.createRefund(userId, pgId, List.of(adultTicketIds.get(0)), "단순 변심", Instant.now());
         willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
                 .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
         refundProcessor.processById(refundId);
@@ -287,10 +292,10 @@ class RefundProcessorConcurrencyTest {
             }
         }).given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
 
-        Long adultRefund = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        Long adultRefund = refundService.createRefund(userId, pgId, List.of(adultTicketIds.get(0)), "단순 변심", Instant.now());
         refundProcessor.processById(adultRefund);
         assertThat(findRefund(adultRefund).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
-        Long childRefund = refundService.createRefund(userId, pgId, Map.of(childItemId, 4), "단순 변심", Instant.now());
+        Long childRefund = refundService.createRefund(userId, pgId, childTicketIds, "단순 변심", Instant.now());
 
         //when
         // 확정 대기 중에 즉시 시도와 스케줄러가 다음 환불을 동시에 처리한다.
@@ -419,6 +424,17 @@ class RefundProcessorConcurrencyTest {
         return orderItem;
     }
 
+    // 주문 상품의 수량만큼 티켓을 발급하고 ID를 반환한다. 트랜잭션 안에서 호출한다.
+    private List<Long> issueTickets(OrderItem orderItem, LocalDate visitDate) {
+        List<Long> ticketIds = new ArrayList<>();
+        for (int count = 0; count < orderItem.getQuantity(); count++) {
+            Ticket ticket = new Ticket(visitDate, orderItem);
+            entityManager.persist(ticket);
+            ticketIds.add(ticket.getId());
+        }
+        return ticketIds;
+    }
+
     // 성인 1장(10,000원) 환불을 PG가 접수만 한 상태(PG_PENDING, 취소 내역 cancel-1)로 만든다.
     private Long createPgPendingRefund() {
         willAnswer(invocation -> {
@@ -426,7 +442,7 @@ class RefundProcessorConcurrencyTest {
             return new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.REQUESTED, 10000L);
         }).given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
 
-        Long refundId = refundService.createRefund(userId, pgId, Map.of(adultItemId, 1), "단순 변심", Instant.now());
+        Long refundId = refundService.createRefund(userId, pgId, List.of(adultTicketIds.get(0)), "단순 변심", Instant.now());
         refundProcessor.processById(refundId);
         assertThat(findRefund(refundId).getStatus()).isEqualTo(RefundStatus.PG_PENDING);
         return refundId;

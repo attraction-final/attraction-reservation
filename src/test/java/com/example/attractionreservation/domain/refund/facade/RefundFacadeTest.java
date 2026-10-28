@@ -2,7 +2,6 @@ package com.example.attractionreservation.domain.refund.facade;
 
 import com.example.attractionreservation.domain.refund.dto.CreatePartialRefundRequest;
 import com.example.attractionreservation.domain.refund.dto.CreateRefundRequest;
-import com.example.attractionreservation.domain.refund.dto.RefundItemRequest;
 import com.example.attractionreservation.domain.refund.dto.RefundResponse;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.service.RefundService;
@@ -17,7 +16,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,13 +62,13 @@ class RefundFacadeTest {
     }
 
     @Test
-    @DisplayName("부분 환불은 상품별 환불 수량으로 저장한 뒤 PG 취소를 즉시 한 번 시도하고, 처리 후 환불 상태를 반환한다.")
+    @DisplayName("부분 환불은 요청한 티켓 ID로 저장한 뒤 PG 취소를 즉시 한 번 시도하고, 처리 후 환불 상태를 반환한다.")
     void createPartialRefund_saved_ProcessThenReturnStatus() {
         //given
         CreatePartialRefundRequest request = new CreatePartialRefundRequest(
-                List.of(new RefundItemRequest(100L, 2), new RefundItemRequest(200L, 1)), "단순 변심");
+                List.of(1L, 2L, 3L), "단순 변심");
         RefundResponse failed = new RefundResponse(1L, 25000, RefundStatus.FAILED);
-        given(refundService.createRefund(eq(USER_ID), eq(PG_ID), eq(Map.of(100L, 2, 200L, 1)), eq("단순 변심"), any()))
+        given(refundService.createRefund(eq(USER_ID), eq(PG_ID), eq(List.of(1L, 2L, 3L)), eq("단순 변심"), any()))
                 .willReturn(1L);
         given(refundService.findRefundById(1L)).willReturn(failed);
 
@@ -105,8 +103,8 @@ class RefundFacadeTest {
     void createPartialRefund_saveFailed_NotProcessed() {
         //given
         CreatePartialRefundRequest request = new CreatePartialRefundRequest(
-                List.of(new RefundItemRequest(100L, 5)), "단순 변심");
-        given(refundService.createRefund(eq(USER_ID), eq(PG_ID), eq(Map.of(100L, 5)), eq("단순 변심"), any()))
+                List.of(1L), "단순 변심");
+        given(refundService.createRefund(eq(USER_ID), eq(PG_ID), eq(List.of(1L)), eq("단순 변심"), any()))
                 .willThrow(new BusinessException(ErrorCode.REFUND_INVALID_QUANTITY));
 
         //when & then
@@ -118,16 +116,18 @@ class RefundFacadeTest {
     }
 
     @Test
-    @DisplayName("같은 주문 상품이 중복되면 환불을 저장하지 않고 거절한다.")
-    void createPartialRefund_duplicateOrderItem_Fail() {
+    @DisplayName("같은 티켓이 중복되면 환불을 저장하지 않고 PG 취소도 시도하지 않는다.")
+    void createPartialRefund_duplicateTicket_Fail() {
         //given
-        CreatePartialRefundRequest request = new CreatePartialRefundRequest(
-                List.of(new RefundItemRequest(100L, 1), new RefundItemRequest(100L, 1)), "단순 변심");
+        CreatePartialRefundRequest request = new CreatePartialRefundRequest(List.of(1L, 1L), "단순 변심");
+        given(refundService.createRefund(eq(USER_ID), eq(PG_ID), eq(List.of(1L, 1L)), eq("단순 변심"), any()))
+                .willThrow(new BusinessException(ErrorCode.REFUND_DUPLICATE_TICKET));
 
         //when & then
         assertThatThrownBy(() -> refundFacade.createPartialRefund(USER_ID, PG_ID, request))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.REFUND_DUPLICATE_ORDER_ITEM.getMessage());
-        verifyNoInteractions(refundService, refundProcessor);
+                .hasMessage(ErrorCode.REFUND_DUPLICATE_TICKET.getMessage());
+        verifyNoInteractions(refundProcessor);
+        verify(refundService, never()).findRefundById(any());
     }
 }

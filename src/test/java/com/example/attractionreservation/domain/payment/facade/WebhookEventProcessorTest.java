@@ -142,6 +142,8 @@ class WebhookEventProcessorTest {
 
         //then
         assertThat(output).contains("최대 시도 초과, 수동 확인 필요").doesNotContain("재시도 예정");
+        assertThat(output.getAll().lines().filter(line -> line.contains("최대 시도 초과, 수동 확인 필요")))
+                .singleElement().asString().contains("ERROR");
     }
 
     @Test

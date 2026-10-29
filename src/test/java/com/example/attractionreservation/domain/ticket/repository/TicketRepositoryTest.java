@@ -492,7 +492,7 @@ class TicketRepositoryTest {
         return ticket;
     }
     
-    @
+    @Test
     @DisplayName("환불용 조회는 요청한 티켓 중 지정한 주문 상품의 티켓만 반환한다")
     void findAllByIdInAndOrderItemIdInForUpdate_OtherOrderTicket_Excluded() {
         // given

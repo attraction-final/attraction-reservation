@@ -121,7 +121,7 @@ public class RefundService {
         }
 
         // 한 주문의 티켓은 모두 주문의 입장일로 발급되므로 주문 입장일로 판단한다. 입장일 전날(KST)까지만 환불할 수 있다.
-        LocalDate requestedDate = KstTime.toLocalDateTime(requestedAt).toLocalDate();
+        LocalDate requestedDate = LocalDate.ofInstant(requestedAt, KstTime.ZONE);
         if (!requestedDate.isBefore(payment.getOrder().getVisitDate())) {
             throw new BusinessException(ErrorCode.REFUND_DEADLINE_PASSED);
         }

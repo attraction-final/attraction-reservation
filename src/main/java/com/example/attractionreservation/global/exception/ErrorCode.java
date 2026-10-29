@@ -79,6 +79,7 @@ public enum ErrorCode {
     ORDER_CANCEL_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인의 주문만 취소할 수 있습니다."),
     ORDER_NOT_CANCELLABLE(HttpStatus.CONFLICT, "결제 대기 상태의 주문만 취소할 수 있습니다."),
     ORDER_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인의 주문만 조회할 수 있습니다."),
+    ORDER_INVALID_VISIT_DATE(HttpStatus.BAD_REQUEST, "방문일은 오늘부터 30일 이내에서 선택해야 합니다."),
 
     // ticket
     INVALID_TICKET_VALID_DATE(HttpStatus.BAD_REQUEST, "입장권 방문일은 필수입니다."),
@@ -93,6 +94,8 @@ public enum ErrorCode {
     TICKET_RESERVATION_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓 방문일과 슬롯 날짜가 일치하지 않습니다."),
     TICKET_RESERVATION_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "티켓 이용 가능 시간에 포함되지 않는 슬롯입니다."),
     INVALID_TICKET_ENTRY_TIME(HttpStatus.BAD_REQUEST, "입장 처리 시각은 필수입니다."),
+    INVALID_TICKET_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 변경입니다."),
+    TICKET_NOT_REFUNDABLE(HttpStatus.CONFLICT, "미사용 티켓만 환불할 수 있습니다."),
 
     // routeRecommendation
     ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다."),
@@ -145,6 +148,8 @@ public enum ErrorCode {
     REFUND_NOT_REFUNDABLE_PAYMENT(HttpStatus.CONFLICT, "환불할 수 없는 결제 상태입니다."),
     REFUND_INVALID_ORDER_ITEM(HttpStatus.BAD_REQUEST, "해당 주문의 주문 상품이 아닙니다."),
     REFUND_DUPLICATE_ORDER_ITEM(HttpStatus.BAD_REQUEST, "같은 주문 상품을 중복해서 환불할 수 없습니다."),
+    REFUND_INVALID_TICKET(HttpStatus.BAD_REQUEST, "해당 주문의 티켓이 아닙니다."),
+    REFUND_DUPLICATE_TICKET(HttpStatus.BAD_REQUEST, "같은 티켓을 중복해서 환불할 수 없습니다."),
     REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다.");
 
     private final HttpStatus status;

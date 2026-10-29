@@ -606,7 +606,7 @@ class ReservationRepositoryTest {
                 "종일 이용권", 50000, "테스트 상품 설명", TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE
         );
         entityManager.persist(product);
-        Order order = Order.create(user, 50000);
+        Order order = Order.create(user, 50000, DAY);
         entityManager.persist(order);
         OrderItem item = BeanUtils.instantiateClass(OrderItem.class);
         ReflectionTestUtils.setField(item, "order", order);

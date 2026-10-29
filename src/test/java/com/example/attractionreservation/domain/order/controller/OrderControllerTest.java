@@ -32,6 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -55,6 +56,8 @@ class OrderControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    private static final LocalDate VISIT_DATE = LocalDate.of(2026, 11, 1);
+
     @MockitoBean
     private OrderService orderService;
 
@@ -70,7 +73,7 @@ class OrderControllerTest {
         // given
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(1L, 2)
-        ));
+        ), VISIT_DATE);
         CreateOrderResponse response = new CreateOrderResponse(
                 101L,
                 120000,
@@ -120,16 +123,17 @@ class OrderControllerTest {
     }
 
     @ParameterizedTest
-    @DisplayName("주문 항목이나 상품 ID 또는 수량이 유효하지 않으면 HTTP 400을 반환한다")
+    @DisplayName("주문 항목, 상품 ID, 수량 또는 방문일이 유효하지 않으면 HTTP 400을 반환한다")
     @ValueSource(strings = {
             "{}",
-            "{\"items\":[]}",
-            "{\"items\":[null]}",
-            "{\"items\":[{\"quantity\":1}]}",
-            "{\"items\":[{\"ticketProductId\":0,\"quantity\":1}]}",
-            "{\"items\":[{\"ticketProductId\":1}]}",
-            "{\"items\":[{\"ticketProductId\":1,\"quantity\":0}]}",
-            "{\"items\":[{\"ticketProductId\":1,\"quantity\":-1}]}"
+            "{\"items\":[],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[null],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[{\"quantity\":1}],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[{\"ticketProductId\":0,\"quantity\":1}],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[{\"ticketProductId\":1}],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[{\"ticketProductId\":1,\"quantity\":0}],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[{\"ticketProductId\":1,\"quantity\":-1}],\"visitDate\":\"2026-11-01\"}",
+            "{\"items\":[{\"ticketProductId\":1,\"quantity\":1}]}"
     })
     void createOrder_invalidInput_returnsBadRequest(String body)
             throws Exception {
@@ -264,7 +268,8 @@ class OrderControllerTest {
                             "ticketProductId": 1,
                             "quantity": 2
                         }
-                    ]
+                    ],
+                    "visitDate": "2026-11-01"
                 }
                 """;
     }

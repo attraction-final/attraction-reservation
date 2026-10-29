@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.payment.dto.ConfirmPaymentRespon
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -21,6 +22,7 @@ public class PaymentCommandService {
     private final PaymentRepository paymentRepository;
     private final PaymentCompensationService paymentCompensationService;
     private final TicketProductService ticketProductService;
+    private final TicketService ticketService;
 
     /**
      * PG에서 결제 완료가 확인된 결제를 결제 완료 처리하고 주문도 결제 완료로 변경한다.
@@ -68,6 +70,9 @@ public class PaymentCommandService {
         payment.markAsPaid(paidAt);
         payment.getOrder().markAsPaid();
         paymentRepository.save(payment);
+
+        // 결제 승인 후 티켓 발급
+        ticketService.issueTickets(payment.getOrder());
 
         return ConfirmPaymentResponse.from(payment);
     }

@@ -15,11 +15,13 @@ import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +55,7 @@ public class RefundService {
      *                           같은 티켓이 중복되면 {@code REFUND_DUPLICATE_TICKET},
      *                           결제가 없거나 다른 사용자의 결제면 {@code PAYMENT_NOT_FOUND},
      *                           결제 완료·부분 환불 상태가 아니면 {@code REFUND_NOT_REFUNDABLE_PAYMENT},
+     *                           입장일 당일 이후(KST)면 {@code REFUND_DEADLINE_PASSED},
      *                           없는 티켓이거나 해당 주문의 티켓이 아니면 {@code REFUND_INVALID_TICKET},
      *                           환불 가능 수량을 넘으면 {@code REFUND_INVALID_QUANTITY},
      *                           미사용 티켓이 아니면 {@code TICKET_NOT_REFUNDABLE}
@@ -68,7 +71,7 @@ public class RefundService {
             throw new BusinessException(ErrorCode.REFUND_DUPLICATE_TICKET);
         }
 
-        Payment payment = getRefundablePayment(userId, pgId);
+        Payment payment = getRefundablePayment(userId, pgId, requestedAt);
         List<Ticket> tickets = ticketService.findRefundTicketsForUpdate(orderItemIds(payment), uniqueTicketIds);
 
         return saveRefund(payment, tickets, reason, requestedAt);
@@ -81,11 +84,12 @@ public class RefundService {
      * @return 저장한 환불 ID
      * @throws BusinessException 결제가 없거나 다른 사용자의 결제면 {@code PAYMENT_NOT_FOUND},
      *                           결제 완료·부분 환불 상태가 아니면 {@code REFUND_NOT_REFUNDABLE_PAYMENT},
+     *                           입장일 당일 이후(KST)면 {@code REFUND_DEADLINE_PASSED},
      *                           환불할 미사용 티켓이 하나도 없으면 {@code REFUND_INVALID_QUANTITY}
      */
     @Transactional
     public Long createFullRefund(Long userId, String pgId, String reason, Instant requestedAt) {
-        Payment payment = getRefundablePayment(userId, pgId);
+        Payment payment = getRefundablePayment(userId, pgId, requestedAt);
         List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
 
         if (tickets.isEmpty()) {
@@ -102,8 +106,8 @@ public class RefundService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.REFUND_NOT_FOUND));
     }
 
-    // 결제를 잠그고 본인 결제인지, 환불할 수 있는 상태인지 확인한다.
-    private Payment getRefundablePayment(Long userId, String pgId) {
+    // 결제를 잠그고 본인 결제인지, 환불할 수 있는 상태인지, 환불 기한 안인지 확인한다.
+    private Payment getRefundablePayment(Long userId, String pgId, Instant requestedAt) {
         Payment payment = paymentRepository.findWithLockByPgId(pgId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
@@ -114,6 +118,12 @@ public class RefundService {
 
         if (payment.getStatus() != PaymentStatus.PAID && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
             throw new BusinessException(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
+        }
+
+        // 한 주문의 티켓은 모두 주문의 입장일로 발급되므로 주문 입장일로 판단한다. 입장일 전날(KST)까지만 환불할 수 있다.
+        LocalDate requestedDate = KstTime.toLocalDateTime(requestedAt).toLocalDate();
+        if (!requestedDate.isBefore(payment.getOrder().getVisitDate())) {
+            throw new BusinessException(ErrorCode.REFUND_DEADLINE_PASSED);
         }
 
         return payment;

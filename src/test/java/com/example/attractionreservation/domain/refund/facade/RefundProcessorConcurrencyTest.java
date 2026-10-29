@@ -116,7 +116,7 @@ class RefundProcessorConcurrencyTest {
             entityManager.persist(ticketProduct);
 
             // 주문 생성 기능이 없어 주문 상품을 직접 만든다. 주문을 저장하면 cascade로 함께 저장된다.
-            LocalDate visitDate = LocalDate.now(KstTime.ZONE);
+            LocalDate visitDate = LocalDate.now(KstTime.ZONE).plusDays(1);
             Order order = Order.create(user, 50000, visitDate);
             OrderItem adult = addOrderItem(order, ticketProduct, 10000, 3);
             OrderItem child = addOrderItem(order, ticketProduct, 5000, 4);

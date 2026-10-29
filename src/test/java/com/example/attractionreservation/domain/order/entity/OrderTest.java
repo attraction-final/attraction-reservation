@@ -10,6 +10,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDate;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -137,6 +139,6 @@ class OrderTest {
                 .password("password")
                 .nickname("name")
                 .build();
-        return Order.create(user, 10000);
+        return Order.create(user, 10000, LocalDate.of(2026, 11, 1));
     }
 }

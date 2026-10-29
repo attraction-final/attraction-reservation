@@ -24,6 +24,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -361,7 +362,7 @@ class PaymentCustomRepositoryImplTest {
     }
 
     private Payment savePayment(User owner, int amount) {
-        Order order = em.persist(Order.create(owner, amount));
+        Order order = em.persist(Order.create(owner, amount, LocalDate.of(2026, 10, 21)));
         return em.persist(Payment.create(order));
     }
 

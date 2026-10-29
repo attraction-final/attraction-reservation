@@ -18,6 +18,7 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
+import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -149,7 +150,7 @@ class PaymentRepositoryTest {
     }
 
     private Payment savePayment(User owner) {
-        Order order = em.persist(Order.create(owner, 10000));
+        Order order = em.persist(Order.create(owner, 10000, LocalDate.of(2026, 10, 21)));
         return em.persist(Payment.create(order));
     }
 

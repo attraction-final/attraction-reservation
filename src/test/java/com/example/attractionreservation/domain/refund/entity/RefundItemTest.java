@@ -15,6 +15,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.time.LocalDate;
+
 class RefundItemTest {
 
     @Test
@@ -75,7 +77,7 @@ class RefundItemTest {
                 .password("password")
                 .nickname("name")
                 .build();
-        Order order = Order.create(user, price * quantity);
+        Order order = Order.create(user, price * quantity, LocalDate.of(2026, 10, 25));
 
         OrderItem orderItem = BeanUtils.instantiateClass(OrderItem.class);
         ReflectionTestUtils.setField(orderItem, "order", order);

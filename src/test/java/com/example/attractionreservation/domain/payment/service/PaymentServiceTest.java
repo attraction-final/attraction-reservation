@@ -27,6 +27,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -43,6 +44,7 @@ class PaymentServiceTest {
     private static final Long USER_ID = 1L;
     private static final Long ORDER_ID = 10L;
     private static final Instant APPROVED_AT = Instant.parse("2026-10-20T01:00:00Z");
+    private static final LocalDate VISIT_DATE = LocalDate.of(2026, 10, 21);
 
     @Mock
     private PaymentRepository paymentRepository;
@@ -60,7 +62,8 @@ class PaymentServiceTest {
                         .password("password")
                         .nickname("name")
                         .build(),
-                10000
+                10000,
+                VISIT_DATE
         );
 
         //when
@@ -88,7 +91,8 @@ class PaymentServiceTest {
                         .password("password")
                         .nickname("name")
                         .build(),
-                0
+                0,
+                VISIT_DATE
         );
 
         //when&then
@@ -107,7 +111,8 @@ class PaymentServiceTest {
                         .password("password")
                         .nickname("name")
                         .build(),
-                -1
+                -1,
+                VISIT_DATE
         );
 
         //when&then
@@ -268,7 +273,7 @@ class PaymentServiceTest {
                 .build();
         ReflectionTestUtils.setField(user, "id", userId);
 
-        Order order = Order.create(user, 10000);
+        Order order = Order.create(user, 10000, VISIT_DATE);
         return Payment.create(order);
     }
 

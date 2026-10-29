@@ -16,6 +16,7 @@ import com.example.attractionreservation.domain.ticketProduct.repository.TicketP
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -92,6 +94,8 @@ class OrderStockConcurrencyTest {
             // 결제 승인과 취소가 경쟁하면 보상 요청이 저장될 수 있으므로 함께 정리한다.
             entityManager.createQuery("delete from PaymentCompensation").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
+            // 결제 승인이 이기면 주문 항목을 참조하는 티켓이 발급되므로 먼저 지운다.
+            entityManager.createQuery("delete from Ticket").executeUpdate();
             entityManager.createQuery("delete from OrderItem").executeUpdate();
             entityManager.createQuery("delete from Order").executeUpdate();
             entityManager.createQuery("delete from TicketProduct").executeUpdate();
@@ -141,11 +145,11 @@ class OrderStockConcurrencyTest {
         CreateOrderRequest forward = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(firstProductId, 1),
                 new CreateOrderRequest.Item(secondProductId, 1)
-        ));
+        ), validVisitDate());
         CreateOrderRequest reverse = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(secondProductId, 1),
                 new CreateOrderRequest.Item(firstProductId, 1)
-        ));
+        ), validVisitDate());
 
         List<Callable<?>> tasks = new ArrayList<>();
         for (int count = 0; count < 10; count++) {
@@ -314,7 +318,12 @@ class OrderStockConcurrencyTest {
     private CreateOrderRequest createRequest(Long productId, int quantity) {
         return new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(productId, quantity)
-        ));
+        ), validVisitDate());
+    }
+
+    // 방문일 검증 범위(오늘 ~ 오늘+29일) 안의 날짜를 사용한다.
+    private LocalDate validVisitDate() {
+        return LocalDate.now(KstTime.ZONE).plusDays(1);
     }
 
     // 취소 작업 중 이긴 쪽(최대 1건)을 뺀 나머지는 모두 ORDER_NOT_CANCELLABLE로 거절돼야 한다.

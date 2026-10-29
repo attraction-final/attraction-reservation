@@ -4,12 +4,15 @@ import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.payment.entity.Payment;
+import com.example.attractionreservation.domain.ticket.entity.Ticket;
+import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,9 +26,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -54,8 +57,9 @@ class RefundServiceConcurrencyTest {
     private Long userId;
     private String pgId;
     private Long orderItemId;
+    private List<Long> ticketIds;
 
-    // 10,000원 × 3장 주문의 결제 완료 상태
+    // 10,000원 × 3장 주문의 결제 완료 상태. 티켓 3장이 발급되어 있다.
     @BeforeEach
     void setUp() {
         transactionTemplate.executeWithoutResult(status -> {
@@ -71,7 +75,8 @@ class RefundServiceConcurrencyTest {
             entityManager.persist(ticketProduct);
 
             // 주문 생성 기능이 없어 주문 상품을 직접 만든다. 주문을 저장하면 cascade로 함께 저장된다.
-            Order order = Order.create(user, 30000);
+            LocalDate visitDate = LocalDate.now(KstTime.ZONE);
+            Order order = Order.create(user, 30000, visitDate);
             OrderItem orderItem = BeanUtils.instantiateClass(OrderItem.class);
             ReflectionTestUtils.setField(orderItem, "order", order);
             ReflectionTestUtils.setField(orderItem, "ticketProduct", ticketProduct);
@@ -84,9 +89,17 @@ class RefundServiceConcurrencyTest {
             payment.markAsPaid(Instant.now());
             entityManager.persist(payment);
 
+            List<Ticket> tickets = new ArrayList<>();
+            for (int count = 0; count < 3; count++) {
+                Ticket ticket = new Ticket(visitDate, orderItem);
+                entityManager.persist(ticket);
+                tickets.add(ticket);
+            }
+
             userId = user.getId();
             pgId = payment.getPgId();
             orderItemId = orderItem.getId();
+            ticketIds = tickets.stream().map(Ticket::getId).toList();
         });
     }
 
@@ -96,6 +109,7 @@ class RefundServiceConcurrencyTest {
             entityManager.createQuery("delete from RefundItem").executeUpdate();
             entityManager.createQuery("delete from Refund").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
+            entityManager.createQuery("delete from Ticket").executeUpdate();
             entityManager.createQuery("delete from OrderItem").executeUpdate();
             entityManager.createQuery("delete from Order").executeUpdate();
             entityManager.createQuery("delete from TicketProduct").executeUpdate();
@@ -106,16 +120,23 @@ class RefundServiceConcurrencyTest {
     @Test
     @DisplayName("같은 주문 상품에 부분 환불 요청이 동시에 들어와도 주문 수량을 넘겨 환불되지 않는다.")
     void createRefund_concurrentRequests_NoOverRefund() throws Exception {
+        //given
+        // 티켓 3장 중 서로 다른 2장씩 요청한다. 어떤 두 요청도 티켓이 겹치므로 한 건만 성공해야 한다.
+        AtomicInteger requestIndex = new AtomicInteger();
+
         //when
-        // 주문 수량 3장에 2장씩 요청하므로 한 건만 성공해야 한다.
-        ConcurrentResult result = runConcurrently(() ->
-                refundService.createRefund(userId, pgId, Map.of(orderItemId, 2), "단순 변심", Instant.now()));
+        ConcurrentResult result = runConcurrently(() -> {
+            int index = requestIndex.getAndIncrement();
+            List<Long> requestTicketIds = List.of(ticketIds.get(index % 3), ticketIds.get((index + 1) % 3));
+            return refundService.createRefund(userId, pgId, requestTicketIds, "단순 변심", Instant.now());
+        });
 
         //then
         assertThat(result.unexpectedErrors()).isEmpty();
         assertThat(result.successCount()).isEqualTo(1);
         assertThat(result.rejectedCount()).isEqualTo(THREAD_COUNT - 1);
         assertThat(findRefundedQuantity()).isEqualTo(2L);
+        assertThat(countRefundedTickets()).isEqualTo(2L);
     }
 
     @Test
@@ -130,6 +151,7 @@ class RefundServiceConcurrencyTest {
         assertThat(result.successCount()).isEqualTo(1);
         assertThat(result.rejectedCount()).isEqualTo(THREAD_COUNT - 1);
         assertThat(findRefundedQuantity()).isEqualTo(3L);
+        assertThat(countRefundedTickets()).isEqualTo(3L);
     }
 
     // 같은 요청을 동시에 보내고, 성공·환불 수량 오류(REFUND_INVALID_QUANTITY)·그 밖의 오류를 센다.
@@ -179,6 +201,15 @@ class RefundServiceConcurrencyTest {
                 .createQuery("select coalesce(sum(ri.quantity), 0) from RefundItem ri where ri.orderItem.id = :orderItemId",
                         Long.class)
                 .setParameter("orderItemId", orderItemId)
+                .getSingleResult());
+    }
+
+    private Long countRefundedTickets() {
+        return transactionTemplate.execute(status -> entityManager
+                .createQuery("select count(t) from Ticket t where t.orderItem.id = :orderItemId and t.status = :status",
+                        Long.class)
+                .setParameter("orderItemId", orderItemId)
+                .setParameter("status", TicketStatus.REFUNDED)
                 .getSingleResult());
     }
 

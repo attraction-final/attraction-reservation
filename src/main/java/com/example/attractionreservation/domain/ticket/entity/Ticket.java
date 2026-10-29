@@ -87,6 +87,23 @@ public class Ticket extends BaseTimeEntity {
         this.enteredAt = now;
     }
 
+    // 티켓 환불 처리. 미사용 티켓만 환불할 수 있다.
+    public void refund() {
+        if (this.status != TicketStatus.UNUSED) {
+            throw new BusinessException(ErrorCode.TICKET_NOT_REFUNDABLE);
+        }
+
+        statusTransition(TicketStatus.REFUNDED);
+    }
+
+    public void statusTransition(TicketStatus newStatus) {
+        if (!this.status.canTransitTo(newStatus)) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_STATUS_TRANSITION);
+        }
+
+        this.status = newStatus;
+    }
+
     // 입장 상태 검증
     private void validateEntryStatus() {
         if (this.status != TicketStatus.UNUSED) {

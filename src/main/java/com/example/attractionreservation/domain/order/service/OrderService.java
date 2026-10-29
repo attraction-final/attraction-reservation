@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Propagation;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +53,8 @@ public class OrderService {
     private final OrderCancelProcessor orderCancelProcessor;
     private final Clock clock;
     private final TicketProductService ticketProductService;
+
+    private static final int MAX_VISIT_DAYS = 30;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -80,6 +83,9 @@ public class OrderService {
                         TicketProduct::getId,
                         Function.identity()
                 ));
+
+        // 방문일 검증
+        validateVisitDate(request.visitDate(), LocalDate.now(clock));
 
         for (CreateOrderRequest.Item item : request.items()) {
             TicketProduct ticketProduct =
@@ -111,7 +117,7 @@ public class OrderService {
             orderLines.add(new OrderLine(ticketProduct, item.quantity()));
         }
 
-        Order order = Order.create(user, totalAmount);
+        Order order = Order.create(user, totalAmount, request.visitDate());
 
         for (OrderLine orderLine : orderLines) {
             order.addOrderItem(
@@ -256,6 +262,14 @@ public class OrderService {
             return Math.addExact(totalAmount, itemAmount);
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.ORDER_AMOUNT_OUT_OF_RANGE);
+        }
+    }
+
+    private void validateVisitDate(LocalDate visitDate, LocalDate today) {
+        LocalDate lastDate = today.plusDays(MAX_VISIT_DAYS - 1L);
+
+        if (visitDate.isBefore(today) || visitDate.isAfter(lastDate)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_VISIT_DATE);
         }
     }
 

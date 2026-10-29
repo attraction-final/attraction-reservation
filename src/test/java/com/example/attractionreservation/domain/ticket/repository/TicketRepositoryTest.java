@@ -33,6 +33,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -489,6 +491,46 @@ class TicketRepositoryTest {
         ReflectionTestUtils.setField(ticket, "validDate", validDate);
         return ticket;
     }
+    
+    @
+    @DisplayName("환불용 조회는 요청한 티켓 중 지정한 주문 상품의 티켓만 반환한다")
+    void findAllByIdInAndOrderItemIdInForUpdate_OtherOrderTicket_Excluded() {
+        // given
+        Long firstOrderItemId = findOrderItemId(firstTicketId);
+
+        // when
+        List<Ticket> result = ticketRepository.findAllByIdInAndOrderItemIdInForUpdate(
+                Set.of(firstTicketId, otherUserTicketId),
+                Set.of(firstOrderItemId)
+        );
+
+        // then
+        assertThat(result)
+                .extracting(Ticket::getId)
+                .containsExactly(firstTicketId);
+    }
+
+    @Test
+    @DisplayName("환불용 상태 조회는 지정한 주문 상품의 티켓 중 해당 상태인 티켓만 반환한다")
+    void findAllByOrderItemIdInAndStatusForUpdate_OtherStatus_Excluded() {
+        // given
+        Set<Long> orderItemIds = Set.of(findOrderItemId(firstTicketId), findOrderItemId(secondTicketId));
+
+        // when
+        List<Ticket> result = ticketRepository.findAllByOrderItemIdInAndStatusForUpdate(
+                orderItemIds,
+                TicketStatus.UNUSED
+        );
+
+        // then
+        assertThat(result)
+                .extracting(Ticket::getId)
+                .containsExactly(firstTicketId);
+    }
+
+    private Long findOrderItemId(Long ticketId) {
+        return entityManager.find(Ticket.class, ticketId).getOrderItem().getId();
+    }
 
     private Page<Ticket> search(
             Long ownerId,
@@ -529,7 +571,7 @@ class TicketRepositoryTest {
         );
         entityManager.persist(product);
 
-        Order order = Order.create(user, 50000);
+        Order order = Order.create(user, 50000, LocalDate.of(2026, 10, 25));
         entityManager.persist(order);
 
         OrderItem orderItem = BeanUtils.instantiateClass(OrderItem.class);

@@ -11,6 +11,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -40,14 +41,18 @@ public class Order extends BaseTimeEntity {
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
 
-    private Order(User user, int totalAmount) {
+    @Column(name = "visit_date", nullable = false)
+    private LocalDate visitDate;
+
+    private Order(User user, int totalAmount, LocalDate visitDate) {
         this.user = user;
         this.totalAmount = totalAmount;
         this.status = OrderStatus.PENDING;
+        this.visitDate = visitDate;
     }
 
-    public static Order create(User user, int totalAmount) {
-        return new Order(user, totalAmount);
+    public static Order create(User user, int totalAmount, LocalDate visitDate) {
+        return new Order(user, totalAmount, visitDate);
     }
 
     public void markAsPaid() {

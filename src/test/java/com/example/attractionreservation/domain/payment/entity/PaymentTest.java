@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class PaymentTest {
 
     private static final Instant PAID_AT = Instant.parse("2026-10-20T01:00:00Z");
+    private static final LocalDate VISIT_DATE = LocalDate.of(2026, 10, 21);
 
     @Test
     @DisplayName("결제 금액이 0보다 크면 결제 원장을 생성할 수 있다.")
@@ -27,7 +29,8 @@ class PaymentTest {
                         .password("password")
                         .nickname("name")
                         .build(),
-                10000
+                10000,
+                VISIT_DATE
         );
 
         //when
@@ -48,7 +51,8 @@ class PaymentTest {
                         .password("password")
                         .nickname("name")
                         .build(),
-                0
+                0,
+                VISIT_DATE
         );
 
         //when
@@ -317,7 +321,8 @@ class PaymentTest {
                         .password("password")
                         .nickname("name")
                         .build(),
-                10000
+                10000,
+                VISIT_DATE
         );
         return Payment.create(order);
     }

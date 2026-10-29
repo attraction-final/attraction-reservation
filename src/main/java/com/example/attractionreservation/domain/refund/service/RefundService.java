@@ -11,6 +11,8 @@ import com.example.attractionreservation.domain.refund.entity.RefundItem;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.repository.RefundItemRepository;
 import com.example.attractionreservation.domain.refund.repository.RefundRepository;
+import com.example.attractionreservation.domain.ticket.entity.Ticket;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -18,9 +20,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -35,75 +39,60 @@ public class RefundService {
     private final RefundRepository refundRepository;
     private final RefundItemRepository refundItemRepository;
     private final PaymentRepository paymentRepository;
+    private final TicketService ticketService;
 
     /**
-     * 결제 완료된 주문의 선택한 상품을 환불 요청한다(부분 환불). PG 취소는 하지 않고 REQUESTED로 저장한다.
+     * 결제 완료된 주문의 선택한 티켓을 환불 요청한다(부분 환불). PG 취소는 하지 않고 REQUESTED로 저장한다.
      *
-     * <p>환불 가능 수량은 주문 수량에서 이미 요청된 환불 수량을 뺀 값이다.
-     * 결제를 비관적 락으로 조회한 뒤 합계를 구하므로, 같은 결제에 환불 요청이 동시에 들어와도 초과 환불되지 않는다.
+     * <p>티켓을 주문 상품별로 묶어 환불 수량으로 만들고, 티켓은 바로 REFUNDED로 바꾼다.
+     * 결제 → 티켓 순서로 비관적 락을 잡으므로, 같은 결제나 같은 티켓에 환불 요청이 동시에 들어와도 중복 환불되지 않는다.
      *
-     * @param refundQuantities 주문 상품 ID별 환불 수량
+     * @param ticketIds 환불할 티켓 ID
      * @return 저장한 환불 ID
-     * @throws BusinessException 환불할 상품이 없으면 {@code INVALID_INPUT_VALUE},
+     * @throws BusinessException 환불할 티켓이 없으면 {@code INVALID_INPUT_VALUE},
+     *                           같은 티켓이 중복되면 {@code REFUND_DUPLICATE_TICKET},
      *                           결제가 없거나 다른 사용자의 결제면 {@code PAYMENT_NOT_FOUND},
      *                           결제 완료·부분 환불 상태가 아니면 {@code REFUND_NOT_REFUNDABLE_PAYMENT},
-     *                           주문에 없는 상품이면 {@code REFUND_INVALID_ORDER_ITEM},
-     *                           수량이 0 이하이거나 환불 가능 수량을 넘으면 {@code REFUND_INVALID_QUANTITY}
+     *                           없는 티켓이거나 해당 주문의 티켓이 아니면 {@code REFUND_INVALID_TICKET},
+     *                           환불 가능 수량을 넘으면 {@code REFUND_INVALID_QUANTITY},
+     *                           미사용 티켓이 아니면 {@code TICKET_NOT_REFUNDABLE}
      */
     @Transactional
-    public Long createRefund(Long userId, String pgId, Map<Long, Integer> refundQuantities,
-                             String reason, Instant requestedAt) {
-        if (refundQuantities == null || refundQuantities.isEmpty()) {
+    public Long createRefund(Long userId, String pgId, List<Long> ticketIds, String reason, Instant requestedAt) {
+        if (ticketIds == null || ticketIds.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
         }
 
+        Set<Long> uniqueTicketIds = new HashSet<>(ticketIds);
+        if (uniqueTicketIds.size() != ticketIds.size()) {
+            throw new BusinessException(ErrorCode.REFUND_DUPLICATE_TICKET);
+        }
+
         Payment payment = getRefundablePayment(userId, pgId);
-        Map<Long, OrderItem> orderItems = payment.getOrder().getOrderItems().stream()
-                .collect(Collectors.toMap(OrderItem::getId, Function.identity()));
-        Map<Long, Long> refundedQuantities = findRefundedQuantities(refundQuantities.keySet());
+        List<Ticket> tickets = ticketService.findRefundTicketsForUpdate(orderItemIds(payment), uniqueTicketIds);
 
-        Refund refund = Refund.create(payment, reason, requestedAt);
-        refundQuantities.forEach((orderItemId, quantity) -> {
-            OrderItem orderItem = orderItems.get(orderItemId);
-            if (orderItem == null) {
-                throw new BusinessException(ErrorCode.REFUND_INVALID_ORDER_ITEM);
-            }
-
-            refund.addRefundItem(RefundItem.of(orderItem, quantity, refundableQuantity(orderItem, refundedQuantities)));
-        });
-
-        return refundRepository.save(refund).getId();
+        return saveRefund(payment, tickets, reason, requestedAt);
     }
 
     /**
-     * 결제 완료된 주문의 남은 환불 가능 수량 전부를 환불 요청한다(전체 환불). PG 취소는 하지 않고 REQUESTED로 저장한다.
-     * 남은 수량이 없는 상품은 건너뛴다.
+     * 결제 완료된 주문의 남은 미사용 티켓 전부를 환불 요청한다(전체 환불). PG 취소는 하지 않고 REQUESTED로 저장한다.
+     * 입장했거나 이미 환불된 티켓은 건너뛴다.
      *
      * @return 저장한 환불 ID
      * @throws BusinessException 결제가 없거나 다른 사용자의 결제면 {@code PAYMENT_NOT_FOUND},
      *                           결제 완료·부분 환불 상태가 아니면 {@code REFUND_NOT_REFUNDABLE_PAYMENT},
-     *                           환불할 수량이 하나도 없으면 {@code REFUND_INVALID_QUANTITY}
+     *                           환불할 미사용 티켓이 하나도 없으면 {@code REFUND_INVALID_QUANTITY}
      */
     @Transactional
     public Long createFullRefund(Long userId, String pgId, String reason, Instant requestedAt) {
         Payment payment = getRefundablePayment(userId, pgId);
-        List<OrderItem> orderItems = payment.getOrder().getOrderItems();
-        Map<Long, Long> refundedQuantities = findRefundedQuantities(
-                orderItems.stream().map(OrderItem::getId).collect(Collectors.toSet()));
+        List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
 
-        Refund refund = Refund.create(payment, reason, requestedAt);
-        for (OrderItem orderItem : orderItems) {
-            int refundableQuantity = refundableQuantity(orderItem, refundedQuantities);
-            if (refundableQuantity > 0) {
-                refund.addRefundItem(RefundItem.of(orderItem, refundableQuantity, refundableQuantity));
-            }
-        }
-
-        if (refund.getRefundItems().isEmpty()) {
+        if (tickets.isEmpty()) {
             throw new BusinessException(ErrorCode.REFUND_INVALID_QUANTITY);
         }
 
-        return refundRepository.save(refund).getId();
+        return saveRefund(payment, tickets, reason, requestedAt);
     }
 
     @Transactional(readOnly = true)
@@ -128,6 +117,32 @@ public class RefundService {
         }
 
         return payment;
+    }
+
+    // 티켓을 주문 상품별 수량으로 묶어 환불 상품을 만들고 티켓을 환불 처리한다.
+    // 환불 가능 수량(주문 수량 − 요청된 환불 수량)도 다시 확인해 티켓 상태와 환불 수량이 어긋나지 않게 한다.
+    private Long saveRefund(Payment payment, List<Ticket> tickets, String reason, Instant requestedAt) {
+        Map<Long, OrderItem> orderItems = payment.getOrder().getOrderItems().stream()
+                .collect(Collectors.toMap(OrderItem::getId, Function.identity()));
+        Map<Long, Long> ticketCounts = tickets.stream()
+                .collect(Collectors.groupingBy(ticket -> ticket.getOrderItem().getId(), TreeMap::new, Collectors.counting()));
+        Map<Long, Long> refundedQuantities = findRefundedQuantities(ticketCounts.keySet());
+
+        Refund refund = Refund.create(payment, reason, requestedAt);
+        ticketCounts.forEach((orderItemId, count) -> {
+            OrderItem orderItem = orderItems.get(orderItemId);
+            refund.addRefundItem(RefundItem.of(orderItem, count.intValue(), refundableQuantity(orderItem, refundedQuantities)));
+        });
+
+        tickets.forEach(Ticket::refund);
+
+        return refundRepository.save(refund).getId();
+    }
+
+    private Set<Long> orderItemIds(Payment payment) {
+        return payment.getOrder().getOrderItems().stream()
+                .map(OrderItem::getId)
+                .collect(Collectors.toSet());
     }
 
     private Map<Long, Long> findRefundedQuantities(Set<Long> orderItemIds) {

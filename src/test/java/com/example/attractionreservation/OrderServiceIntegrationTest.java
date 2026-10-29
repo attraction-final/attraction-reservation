@@ -12,6 +12,7 @@ import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
@@ -38,6 +39,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.Clock;
@@ -108,7 +110,7 @@ class OrderServiceIntegrationTest {
 
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(productId, 2)
-        ));
+        ), validVisitDate());
 
         // when
         CreateOrderResponse response = orderService.createOrder(userId, request);
@@ -197,7 +199,7 @@ class OrderServiceIntegrationTest {
         try {
             CreateOrderRequest request = new CreateOrderRequest(List.of(
                     new CreateOrderRequest.Item(ids[1], 1)
-            ));
+            ), validVisitDate());
 
             assertThatThrownBy(() -> orderService.createOrder(ids[0], request))
                     .isInstanceOfSatisfying(
@@ -249,7 +251,7 @@ class OrderServiceIntegrationTest {
                 userId,
                 new CreateOrderRequest(List.of(
                         new CreateOrderRequest.Item(productId, 2)
-                ))
+                ), validVisitDate())
         );
 
         Order pendingOrder = orderRepository.findById(createdOrder.orderId())
@@ -429,7 +431,7 @@ class OrderServiceIntegrationTest {
                 userId,
                 new CreateOrderRequest(List.of(
                         new CreateOrderRequest.Item(productId, 2)
-                ))
+                ), validVisitDate())
         );
 
         entityManager.flush();
@@ -468,12 +470,17 @@ class OrderServiceIntegrationTest {
         );
     }
 
+    // 방문일 검증 범위(오늘 ~ 오늘+29일) 안의 날짜를 사용한다.
+    private LocalDate validVisitDate() {
+        return LocalDate.now(KstTime.ZONE).plusDays(1);
+    }
+
     private Long saveOrderForExpirationTest(
             User user,
             OrderStatus status,
             Instant createdAt
     ) {
-        Order order = Order.create(user, 60000);
+        Order order = Order.create(user, 60000, validVisitDate());
 
         // 상태별 자동 취소 조건을 검증하기 위한 테스트 데이터를 구성한다.
         ReflectionTestUtils.setField(order, "status", status);
@@ -511,7 +518,7 @@ class OrderServiceIntegrationTest {
             );
 
             Order order = orderRepository.saveAndFlush(
-                    Order.create(user, 10000)
+                    Order.create(user, 10000, validVisitDate())
             );
 
             // 결제 상태 검증에서 실패하도록 완료된 결제를 연결한다.
@@ -679,7 +686,7 @@ class OrderServiceIntegrationTest {
 
         CreateOrderRequest request = new CreateOrderRequest(List.of(
                 new CreateOrderRequest.Item(product.getId(), 1)
-        ));
+        ), validVisitDate());
 
         Long memberId = member.getId();
 

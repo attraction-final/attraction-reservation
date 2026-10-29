@@ -27,7 +27,7 @@ public class TicketExpirationService {
         Instant now = clock.instant();
 
         // KST로 변환
-        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime currentTime = LocalDateTime.ofInstant(now, KstTime.ZONE);
 
         LocalDate closedDate = currentTime.toLocalDate();
         if (currentTime.toLocalTime().isBefore(LocalTime.of(22, 0))) {

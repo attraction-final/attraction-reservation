@@ -86,6 +86,11 @@ class AttractionSlotServiceTest {
                 .extracting("errorCode").isEqualTo(errorCode);
     }
 
+    // 관리자 수정·상태 변경·삭제는 잠금 조회(findByIdForUpdate)를 쓴다
+    private void givenSlotForUpdate(AttractionSlot slot) {
+        given(attractionSlotRepository.findByIdForUpdate(slot.getId())).willReturn(Optional.of(slot));
+    }
+
     @Nested
     @DisplayName("예약용 슬롯 조회")
     class FindForReservation {
@@ -254,7 +259,7 @@ class AttractionSlotServiceTest {
         @DisplayName("성공: 종료 시각 계산, OPEN, 잔여=정원")
         void success() {
             Attraction attraction = createAttraction(OperationStatus.OPERATING);
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+            given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
             given(attractionSlotRepository.countOverlappingSlots(eq(1L), any(), any())).willReturn(0L);
             given(attractionSlotRepository.save(any(AttractionSlot.class)))
                     .willAnswer(invocation -> invocation.getArgument(0));
@@ -271,7 +276,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 어트랙션 없음")
         void attractionNotFound() {
-            given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+            given(attractionRepository.findActiveByIdForUpdate(99L)).willReturn(Optional.empty());
 
             assertErrorCode(() -> attractionSlotService.createAttractionSlot(
                     99L, new CreateAttractionSlotRequest(TOMORROW.atTime(14, 0), 20)), ErrorCode.ATTRACTION_NOT_FOUND);
@@ -280,7 +285,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 지난 시각")
         void past() {
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+            given(attractionRepository.findActiveByIdForUpdate(1L))
                     .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
 
             LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
@@ -291,7 +296,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 종료가 22:00을 넘음")
         void outOfOperatingHours() {
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+            given(attractionRepository.findActiveByIdForUpdate(1L))
                     .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
 
             assertErrorCode(() -> attractionSlotService.createAttractionSlot(
@@ -302,7 +307,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 다른 슬롯과 시간 겹침, 저장하지 않음")
         void overlap() {
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L))
+            given(attractionRepository.findActiveByIdForUpdate(1L))
                     .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
             given(attractionSlotRepository.countOverlappingSlots(eq(1L), any(), any())).willReturn(1L);
 
@@ -446,8 +451,8 @@ class AttractionSlotServiceTest {
         @DisplayName("성공: 시작·종료 시각 변경")
         void success() {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
-            givenSlot(slot);
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(slot.getAttraction()));
+            givenSlotForUpdate(slot);
+            given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(slot.getAttraction()));
             given(attractionSlotRepository.countOverlappingSlotsExcludingSlotId(eq(1L), eq(31L), any(), any()))
                     .willReturn(0L);
 
@@ -461,7 +466,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 슬롯 없음")
         void notFound() {
-            given(attractionSlotRepository.findById(99L)).willReturn(Optional.empty());
+            given(attractionSlotRepository.findByIdForUpdate(99L)).willReturn(Optional.empty());
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
                     99L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_NOT_FOUND);
@@ -470,7 +475,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 예약이 있는 슬롯")
         void hasReservations() {
-            givenSlot(createTomorrowSlot(1, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(1, SlotStatus.OPEN));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
@@ -481,7 +486,7 @@ class AttractionSlotServiceTest {
         @DisplayName("실패: 이미 종료된 슬롯")
         void ended() {
             LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
-            givenSlot(createSlot(31L, yesterday, 20, 0, SlotStatus.OPEN));
+            givenSlotForUpdate(createSlot(31L, yesterday, 20, 0, SlotStatus.OPEN));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
@@ -492,8 +497,8 @@ class AttractionSlotServiceTest {
         @DisplayName("실패: 다른 슬롯과 겹침")
         void overlap() {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
-            givenSlot(slot);
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(slot.getAttraction()));
+            givenSlotForUpdate(slot);
+            given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(slot.getAttraction()));
             given(attractionSlotRepository.countOverlappingSlotsExcludingSlotId(eq(1L), eq(31L), any(), any()))
                     .willReturn(1L);
 
@@ -507,8 +512,8 @@ class AttractionSlotServiceTest {
         // 예약 0명, 내일 14:00 OPEN 슬롯 + 어트랙션 조회까지 준비 (시간 검사 직전 단계까지 통과시키기 위함)
         private AttractionSlot givenModifiableSlotWithAttraction() {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
-            givenSlot(slot);
-            given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(slot.getAttraction()));
+            givenSlotForUpdate(slot);
+            given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(slot.getAttraction()));
             return slot;
         }
 
@@ -546,7 +551,7 @@ class AttractionSlotServiceTest {
         @DisplayName("실패: CANCELLED 슬롯 → SLOT_ALREADY_CANCELLED, 어트랙션 조회·겹침 검사 안 함")
         void cancelled() {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.CANCELLED);
-            givenSlot(slot);
+            givenSlotForUpdate(slot);
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
@@ -567,7 +572,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("성공: 정원 증가")
         void success() {
-            givenSlot(createTomorrowSlot(12, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(12, SlotStatus.OPEN));
 
             UpdateAttractionSlotCapacityResponse response =
                     attractionSlotService.updateAttractionSlotCapacity(31L, new UpdateAttractionSlotCapacityRequest(25));
@@ -580,7 +585,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 예약 인원보다 작게")
         void belowReserved() {
-            givenSlot(createTomorrowSlot(12, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(12, SlotStatus.OPEN));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
                     31L, new UpdateAttractionSlotCapacityRequest(11)), ErrorCode.SLOT_CAPACITY_BELOW_RESERVED);
@@ -589,7 +594,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 취소된 슬롯")
         void cancelled() {
-            givenSlot(createTomorrowSlot(0, SlotStatus.CANCELLED));
+            givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.CANCELLED));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
                     31L, new UpdateAttractionSlotCapacityRequest(30)), ErrorCode.SLOT_ALREADY_CANCELLED);
@@ -600,7 +605,7 @@ class AttractionSlotServiceTest {
         @DisplayName("잔여가 있는 수동 CLOSED 슬롯: 정원을 늘려도 CLOSED 유지 (사용자에게 다시 노출 안 됨)")
         void manualClosedStaysClosed() {
             AttractionSlot slot = createTomorrowSlot(12, SlotStatus.OPEN);
-            givenSlot(slot);
+            givenSlotForUpdate(slot);
 
             // 1. 관리자가 상태 변경 API로 직접 마감
             attractionSlotService.updateAttractionSlotStatus(31L, new UpdateAttractionSlotStatusRequest("CLOSED"));
@@ -622,7 +627,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("성공: OPEN → SUSPENDED (예약 없음)")
         void success() {
-            givenSlot(createTomorrowSlot(0, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.OPEN));
 
             UpdateAttractionSlotStatusResponse response = attractionSlotService.updateAttractionSlotStatus(
                     31L, new UpdateAttractionSlotStatusRequest("SUSPENDED"));
@@ -641,7 +646,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 현재 상태와 같음")
         void same() {
-            givenSlot(createTomorrowSlot(0, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.OPEN));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
                     31L, new UpdateAttractionSlotStatusRequest("OPEN")), ErrorCode.SLOT_STATUS_SAME);
@@ -650,7 +655,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 잔여 0인데 OPEN으로")
         void openWhenFull() {
-            givenSlot(createTomorrowSlot(20, SlotStatus.CLOSED));
+            givenSlotForUpdate(createTomorrowSlot(20, SlotStatus.CLOSED));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
                     31L, new UpdateAttractionSlotStatusRequest("OPEN")), ErrorCode.SLOT_FULL);
@@ -659,7 +664,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 예약이 있는데 SUSPENDED로")
         void suspendWithReservations() {
-            givenSlot(createTomorrowSlot(3, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(3, SlotStatus.OPEN));
 
             assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
                     31L, new UpdateAttractionSlotStatusRequest("SUSPENDED")), ErrorCode.SLOT_HAS_RESERVATIONS);
@@ -675,7 +680,7 @@ class AttractionSlotServiceTest {
         @DisplayName("성공: 상태가 CANCELLED로 바뀜")
         void success() {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
-            givenSlot(slot);
+            givenSlotForUpdate(slot);
 
             attractionSlotService.deleteAttractionSlot(31L);
 
@@ -685,7 +690,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 이미 취소됨")
         void alreadyCancelled() {
-            givenSlot(createTomorrowSlot(0, SlotStatus.CANCELLED));
+            givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.CANCELLED));
 
             assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(31L), ErrorCode.SLOT_ALREADY_CANCELLED);
         }
@@ -693,7 +698,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 예약이 있음")
         void hasReservations() {
-            givenSlot(createTomorrowSlot(1, SlotStatus.OPEN));
+            givenSlotForUpdate(createTomorrowSlot(1, SlotStatus.OPEN));
 
             assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(31L), ErrorCode.SLOT_HAS_RESERVATIONS);
         }

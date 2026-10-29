@@ -36,7 +36,7 @@ public class AttractionSlotService {
     @Transactional
     public CreateAttractionSlotResponse createAttractionSlot(Long attractionId, CreateAttractionSlotRequest request) {
         // 1. 삭제되지 않은 어트랙션 조회
-        Attraction attraction = findActiveAttraction(attractionId);
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
 
         // 2. 종료 시각 계산 후 시간 규칙 검사
         LocalDateTime startsAt = request.startsAt();
@@ -111,7 +111,7 @@ public class AttractionSlotService {
 
         // 종료 시각 계산에 어트랙션 소요 시간이 필요
         Long attractionId = slot.getAttraction().getId();
-        Attraction attraction = findActiveAttraction(attractionId);
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
 
         LocalDateTime newStartsAt = request.startsAt();
         LocalDateTime newEndsAt = calculateEndsAt(newStartsAt, attraction.getDurationMinutes());
@@ -127,8 +127,15 @@ public class AttractionSlotService {
         return UpdateAttractionSlotTimeResponse.from(slot);
     }
 
+    // ★ 추가
+    // 등록·시간 수정 전용: 같은 어트랙션의 시간표를 한 명씩 고치도록 어트랙션 행을 잠근다
+    private Attraction findActiveAttractionForUpdate(Long attractionId) {
+        return attractionRepository.findActiveByIdForUpdate(attractionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND));
+    }
+
     private AttractionSlot findSlot(Long slotId) {
-        return attractionSlotRepository.findById(slotId)
+        return attractionSlotRepository.findByIdForUpdate(slotId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
     }
 

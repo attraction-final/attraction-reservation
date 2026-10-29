@@ -144,6 +144,7 @@ global/config/SchedulingConfig          @EnableScheduling
 | 원장 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED` → 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리 | `REFUND_SYNC_REQUIRED` (기록되지 않음) | 아래 세 줄 중 하나 |
 | ↳ PG 취소 금액 = 완료 환불 합계 | `ALREADY_DONE` | `PROCESSED` |
 | ↳ 차이와 같은 미완료 환불 1건을 PG 기준 완료 | `REFUND_SYNCED` | `PROCESSED` |
+| ↳ PG 취소 금액 < 완료 환불 합계 (조회 이후 다른 환불 완료) | 예외 전파 (`REFUND_PG_CANCELLED_AMOUNT_STALE`) | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
 | ↳ 그 밖(외부 취소 등) | `REFUND_MISMATCH` | **즉시 `DEAD`** + error 로그 (수동 확인) |
 | PG 결제 완료, 금액 일치 → 승인 | `APPROVED` | `PROCESSED` |
 | PG 미완료(`PAYMENT_NOT_PAID`) | `NOT_PAID` | `PROCESSED` |
@@ -156,7 +157,7 @@ global/config/SchedulingConfig          @EnableScheduling
 - `NOT_PAID`를 `PROCESSED`로 두는 이유: READY 등의 웹훅은 할 일이 없고, 이후 결제 완료 시 Paid 웹훅이 따로 온다.
 - `COMPENSATED`는 PG 취소 결과와 무관하다. 보상 요청이 결제 실패와 함께 커밋되고, 즉시 시도가 실패해도 보상 Outbox가 재시도한다([payment-compensation.md](payment-compensation.md)). 웹훅 쪽에서 보상 실패를 추적하지 않는다.
 - **재시도하지 않고 바로 `DEAD`로 보내는 경우**
-  - `REFUND_MISMATCH`: PG 취소 금액과 환불 기록을 자동으로 맞출 수 없다. 재시도해도 결과가 같다(refund-requirements.md 5-3).
+  - `REFUND_MISMATCH`: PG 취소 금액과 환불 기록을 자동으로 맞출 수 없다. 재시도해도 결과가 같다(refund-requirements.md 5-3). 차이가 음수인 경우는 조회 시점 차이일 수 있어 여기 해당하지 않고 재시도한다.
   - `STATE_CONFLICT`: `approvePayment`가 락 안에서 PAID·FAILED·CANCELLED를 걸러낸 뒤의 전이 실패라 재시도해도 결과가 같다. 정상 흐름에서는 생기지 않는다.
     - 원장 `CANCELLED` + PG Paid는 여기에 해당하지 않는다. `COMPENSATED`로 보상 요청을 저장한다(payment-approval.md 4.3).
 - **Processor의 예외 처리**
@@ -188,7 +189,7 @@ payment:
 | `WebhookEventSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, `enabled` 설정에 따른 빈 등록 |
 | `PaymentFacadeTest` | Mockito | `syncPayment` 결과별(금액 불일치·원장 CANCELLED 시 보상 즉시 시도, 상태 충돌, 결제 완료·환불된 결제의 `REFUND_SYNC_REQUIRED` 포함), 재시도 필요 오류 전파 |
 | `RefundProcessorTest` | Mockito | `syncWithPg`: PG 취소 금액 전달, 취소 금액 없음은 0, PG에 결제 없으면 예외 |
-| `RefundCommandServiceTest` | `@DataJpaTest` | 환불 동기화 결과별(차이 0, 미완료 환불 1건 일치·마지막 환불, `REQUESTED`만·2건 이상·일치 없음·음수는 `REFUND_MISMATCH`) |
+| `RefundCommandServiceTest` | `@DataJpaTest` | 환불 동기화 결과별(차이 0, 미완료 환불 1건 일치·마지막 환불, `REQUESTED`만·2건 이상·일치 없음은 `REFUND_MISMATCH`, 음수는 재시도 오류) |
 | `RefundProcessorConcurrencyTest` | `@SpringBootTest` + MySQL | 취소 웹훅 처리로 실패 기록된 환불 완료(웹훅 → DB), PG 취소 응답 대기 중 웹훅이 먼저 완료해도 1번만 완료 |
 
 - DB는 `Instant`를 마이크로초로 반올림해 저장한다. 시각 경계를 비교하는 테스트는 `now`를 밀리초로 잘라 쓴다.

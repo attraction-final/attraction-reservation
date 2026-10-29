@@ -108,6 +108,24 @@ class WebhookEventProcessorTest {
     }
 
     @Test
+    @DisplayName("PG 취소 금액이 완료 환불보다 작으면 수동 확인(DEAD)으로 넘기지 않고 실패로 기록해 다시 조회한다.")
+    void process_refundSyncStale_RecordFailure() {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.REFUND_SYNC_REQUIRED);
+        given(refundProcessor.syncWithPg(PG_ID))
+                .willThrow(new BusinessException(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE));
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        verify(webhookEventCommandService).recordFailure(
+                eq(EVENT_ID), eq(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE.getMessage()), any());
+        verify(webhookEventCommandService, never()).recordResult(anyLong(), any(), any());
+    }
+
+    @Test
     @DisplayName("점유하지 못한 웹훅은 결제를 동기화하지 않는다.")
     void process_notClaimed_Skip() {
         //given

@@ -449,17 +449,17 @@ class RefundCommandServiceTest {
     }
 
     @Test
-    @DisplayName("PG 취소 금액이 완료된 환불 금액보다 적으면 불일치로 본다.")
-    void syncWithPgCancelledAmount_lessThanCompleted_Mismatch() {
+    @DisplayName("PG 취소 금액이 완료된 환불 금액보다 적으면 조회 시점 차이로 보고 재시도가 필요한 오류를 던진다.")
+    void syncWithPgCancelledAmount_lessThanCompleted_ThrowStale() {
         //given
-        saveRefund(RefundStatus.COMPLETED, adult, 1);
+        Long completed = saveRefund(RefundStatus.COMPLETED, adult, 1);
         flushAndClear();
 
-        //when
-        PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 0L, now);
-
-        //then
-        assertThat(result).isEqualTo(PaymentSyncResult.REFUND_MISMATCH);
+        //when & then
+        assertThatThrownBy(() -> refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 0L, now))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE.getMessage());
+        assertThat(find(completed).getStatus()).isEqualTo(RefundStatus.COMPLETED);
     }
 
     @Test

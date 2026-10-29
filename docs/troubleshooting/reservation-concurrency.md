@@ -1,8 +1,8 @@
 # 예약 동시성 트러블슈팅 기록
 
-> **KAN-87 · 진행 중**
+> **KAN-87 · 코드 및 테스트 검증 완료 / 기존 DB 적용 미실행**
 >
-> 실제 MySQL에서 두 가지 문제를 재현했다. 동일 회원·동일 슬롯 요청 10개가 모두 성공했고, 같은 회원이 시간이 겹치는 서로 다른 슬롯에 보낸 요청 2개도 모두 성공했다. 해결 방식 적용과 개선 후 검증은 아직 진행하지 않았다.
+> 실제 MySQL에서 중복·시간 충돌을 재현한 뒤 회원 행 잠금과 활성 예약 DB 유니크 제약을 적용했다. 최신 XML에서 동시성·회귀·rollback 테스트 6개와 DB 제약 테스트 4개를 포함한 예약 도메인 175개 테스트의 통과를 확인했다. 기존 DB에 적용할 migration SQL은 작성했지만 실행하지 않았다.
 
 ## 1. 진행 현황
 
@@ -10,9 +10,16 @@
 | --- | --- | --- |
 | 동일 슬롯 중복 예약 재현 | 완료 | 동일 회원의 요청 10개가 모두 성공 |
 | 서로 다른 슬롯의 시간 충돌 재현 | 완료 | 겹치는 두 슬롯의 요청이 모두 성공, 각 슬롯 인원 1명 |
-| 해결 방식 비교 및 선택 | 미진행 | 동일 슬롯 중복과 다른 슬롯 시간 충돌을 함께 고려 |
-| 해결 적용 및 회귀 검증 | 미진행 | 기존 재현 테스트로 개선 전후 비교 |
-| 취소 후 재예약 검증 | 미진행 | 중복 방지 장치가 정상 재예약을 막지 않는지 확인 |
+| 해결 방식 비교 및 선택 | 완료 | 두 요청이 공유하는 회원 행의 비관적 잠금 선택 |
+| 회원 잠금 적용 및 재현 테스트 재검증 | 통과 확인 | 동일 슬롯 요청 10개 중 성공 1개, 겹치는 슬롯 요청 2개 중 성공 1개 |
+| 활성 예약 DB 유니크 제약 | 통과 확인 | Generated Column과 유니크 제약 매핑, 실제 MySQL 직접 저장 검증 |
+| 시간 미충돌 동시 예약 | 통과 확인 | 같은 회원의 겹치지 않는 두 슬롯 예약 모두 성공 |
+| 취소 후 재예약 검증 | 통과 확인 | 취소 이력 유지, 새 예약 생성, 최종 예약 인원 1명 |
+| 다른 회원의 동일 슬롯 동시 예약 | 통과 확인 | 성공·활성 예약·예약 인원 각각 2 |
+| 정원 확보 후 실패 시 rollback | 통과 확인 | save 호출에 실패 주입, 실패 전 인원 1 → rollback 후 0 |
+| 예약 도메인 기존 테스트 | 통과 확인 | 최신 XML 집계: 21개 클래스, 175개 테스트, 실패·오류·건너뜀 0 |
+| migration SQL 작성 | 완료 | 사전 확인·컬럼 및 제약 추가·적용 결과 확인 SQL 작성 |
+| 기존 DB 적용 및 migration 실행 검증 | 미실행 | 로컬 DB에는 테이블 없음. Entity 기반 생성 테스트와 별도 작업 |
 
 이 문서에는 **테스트로 확인한 사실**, **코드에 근거한 분석**, **앞으로 검증할 사항**을 구분해 누적한다. 아직 수행하지 않은 테스트는 완료로 기록하지 않는다.
 
@@ -54,9 +61,9 @@
 | [ReservationService.java](../../src/main/java/com/example/attractionreservation/domain/reservation/service/ReservationService.java) | `createReservation()`, 110–131줄 | 중복·충돌 검사 후 정원 확보 및 저장 |
 | [ReservationCustomRepositoryImpl.java](../../src/main/java/com/example/attractionreservation/domain/reservation/repository/ReservationCustomRepositoryImpl.java) | `existsReservedByUser_IdAndSlot_Id()`, `existsTimeConflictReservation()` | 실제 DB에서 중복·시간 충돌 조회 |
 | [AttractionSlotService.java](../../src/main/java/com/example/attractionreservation/domain/attractionSlot/service/AttractionSlotService.java) | `tryReservationCapacity()` | 조건부 UPDATE 후 엔티티 refresh |
-| [Reservation.java](../../src/main/java/com/example/attractionreservation/domain/reservation/entity/Reservation.java) | 테이블 매핑 | 활성 예약 중복을 막는 DB 제약은 엔티티에 선언되지 않음 |
+| [Reservation.java](../../src/main/java/com/example/attractionreservation/domain/reservation/entity/Reservation.java) | 테이블 매핑 | 최초 재현 시 활성 예약 중복 제약 없음. 이후 Generated Column과 유니크 제약 추가 |
 
-실제 운영 DB에 별도로 적용된 제약은 확인하지 않았다. 이번 재현은 엔티티 매핑으로 생성된 Testcontainers DB에서 수행됐다.
+실제 운영 DB에 별도로 적용된 제약은 확인하지 않았다. 최초 재현은 변경 전 엔티티 매핑으로 생성된 Testcontainers DB에서 수행됐다. 이후 추가한 활성 예약 제약과 검증 결과는 6.7절에 기록한다.
 
 ## 3. 재현 ① 동일 회원·동일 슬롯 동시 예약
 
@@ -197,7 +204,7 @@ tests=1, skipped=0, failures=1, errors=0
 
 ## 4. 해결 설계 시 유지할 조건
 
-아직 해결 방식을 선택하거나 운영 코드를 변경하지 않았다. 다음 조건을 만족하는 방식을 비교한다.
+회원 행 잠금을 적용했으며, 아래 조건을 기준으로 설계와 후속 검증을 진행한다. 적용 내용과 확인한 결과는 6장에 기록한다.
 
 - 동일 회원·동일 슬롯의 활성 예약 중복을 막는다.
 - 동일 회원의 시간이 겹치는 다른 슬롯 예약도 막는다.
@@ -306,37 +313,333 @@ XML 보고서의 시작 시각은 `2026-10-29T10:37:30.909Z`, KST로는 `2026-10
 | 실제 활성 예약 수 | 10 | 2 |
 | 정원 UPDATE 대상 | 같은 슬롯 행 | 서로 다른 슬롯 행 |
 | 위반한 회원 예약 규칙 | 동일 슬롯 중복 금지 | 활성 예약 간 시간 중복 금지 |
-| 다음 검증 | 해결 후 성공 1건 | 해결 후 성공 1건 및 시간 충돌 거절 1건 |
+| 개선 후 확인 기준 | 성공 1건 | 성공 1건 및 시간 충돌 거절 1건 |
 
-중복 취소, 취소와 생성의 경합, 취소 후 정상 재예약, 다른 회원의 동시 예약은 아직 검증하지 않았다. 이번 결과로 동시성 문제 전반이 검증됐다고 판단하지 않는다.
+두 번째 재현 시점에는 취소 후 정상 재예약과 다른 회원의 동시 예약을 아직 검증하지 않았다. 이후 추가한 회귀 테스트 결과는 6.5절에 기록한다. 중복 취소와 취소·생성 경합은 여전히 미검증이며, 이번 결과로 동시성 문제 전반이 검증됐다고 판단하지 않는다.
 
 ## 6. 개선 적용 및 재검증 기록
 
-**상태: 미진행.** 해결 방식을 선택하고 구현한 뒤 작성한다.
+### 6.1 선택한 방식: 회원 행의 PESSIMISTIC_WRITE
 
-| 기록 항목 | 작성할 내용 |
+두 문제 모두 **같은 회원이 동시에 활성 예약을 생성한다**는 공통점이 있다. 중복·시간 충돌 검사 전에 해당 회원 행을 잠가, 같은 회원의 예약 생성 요청이 순서대로 진행되도록 했다.
+
+| 검토 대상 | 이번 작업에서의 판단 |
 | --- | --- |
-| 검토한 대안 | 각 방식의 적용 범위, 장단점, 선택·제외 이유 |
-| 선택한 방식 | 동일 슬롯 중복과 시간 충돌을 각각 어떻게 방어하는지 |
-| 코드·DB 변경 | 수정 파일, 적용한 제약 또는 동시성 제어, commit |
-| 개선 후 결과 | 같은 조건의 테스트 로그와 DB 상태 |
-| 회귀 검증 | 취소 후 재예약, 다른 회원의 정상 예약, 실패 시 정원 rollback |
-| 남은 한계 | 아직 재현·검증하지 않은 경합과 후속 작업 |
+| 기존 예약 행 잠금 | 최초 예약 시 조회되는 예약 행이 없을 수 있다. 존재하지 않는 구간의 잠금은 DB·isolation level에 따른 별도 설계가 필요하다. |
+| 슬롯 행 잠금 | 같은 슬롯의 요청은 조정할 수 있지만, 서로 다른 슬롯의 시간 충돌을 함께 보호하기 어렵다. |
+| 회원 행 잠금 | 예약 전에 존재하고 두 요청이 공유하는 행이다. 동일 회원의 예약 검사를 순서대로 진행하는 기준으로 선택했다. |
+| 동일 회원·슬롯 DB 유니크 제약 | 중복 예약의 별도 방어 장치로 검토가 필요하다. 다른 슬롯의 시간 충돌까지 해결하지는 못한다. |
 
-### 완료 체크리스트
+잠금 대상 비교는 코드 구조를 바탕으로 검토한 내용이다. 각 대안을 구현해 성능이나 처리량을 비교한 실험은 아직 수행하지 않았다.
+
+회원 행을 잠근다고 관련 예약 행이 자동으로 모두 잠기는 것은 아니다. **예약 생성 경로가 같은 회원 잠금을 먼저 획득한다는 공통 절차**로 검증과 저장을 조정한다. 다른 회원은 다른 행을 잠그지만, 같은 슬롯을 선택하면 슬롯 정원 UPDATE에서는 경합할 수 있다.
+
+### 6.2 적용한 코드와 transaction 범위
+
+적용 commit: `58b29bd2965559435e26bd4e94327746869ec626`
+
+| 파일 | 변경 또는 유지한 내용 |
+| --- | --- |
+| `UserRepository.java` | 기존 `findByIdForUpdate()` 재사용. `PESSIMISTIC_WRITE`로 회원 ID에 해당하는 행 조회. 탈퇴·예약의 순차 처리를 설명하도록 주석 보완 |
+| `UserService.java` | `findByUserId()`에서 일반 `findById()` 대신 `findByIdForUpdate()` 호출 |
+| `ReservationService.java` | 기존 `createReservation()`의 쓰기 transaction과 회원 조회 위치 유지. 동시성 TODO 주석 제거 |
+
+`createReservation()`의 transaction 안에서 회원 잠금을 획득한다. 회원 조회가 끝났다고 잠금이 해제되는 것이 아니라, 예약 생성 transaction의 commit 또는 rollback 시점까지 유지된다.
+
+```text
+요청 A: 회원 잠금 획득 → 중복·충돌 검사 → 정원 확보 → 예약 저장 → commit·잠금 해제
+요청 B: 같은 회원 잠금 대기 → 잠금 획득 → 앞선 예약을 반영한 검사 → 예약 거절
+```
+
+위 흐름은 적용한 제어 방식을 설명한 것이다. 요청별 대기 시간이나 모든 SQL 실행 순서를 별도로 계측하지는 않았다. 대기 후 조회가 앞선 예약을 확인하는지는 실제 DB의 transaction 설정과 함께 검증해야 한다.
+
+### 6.3 개선 전후 비교
+
+사용자는 회원 잠금 적용 후 **두 테스트 모두 통과**했다고 확인했다. 이 절을 최초 기록할 때 남아 있던 XML·HTML에는 시간 충돌 테스트 1개만 기록되어 있었다. 따라서 아래 표는 **직접 읽은 로그와 사용자 통과 보고를 구분**한다.
+
+| 항목 | 개선 전 | 개선 후 | 개선 후 근거 |
+| --- | --- | --- | --- |
+| 동일 슬롯 요청 10개의 성공 수 | 10 | 1 | 사용자 통과 보고 및 테스트 기대값 |
+| 동일 슬롯 활성 예약·reservedCount | 각각 10 | 각각 1 | 사용자 통과 보고 및 테스트 기대값 |
+| 겹치는 다른 슬롯 요청 2개의 성공 수 | 2 | 1 | 최신 XML·출력 로그 직접 확인 |
+| 겹치는 두 슬롯의 활성 예약 수 | 2 | 1 | 최신 XML·출력 로그 직접 확인 |
+| 두 슬롯 reservedCount 합계 | 2 | 1 | 최신 XML·출력 로그 직접 확인 |
+| 시간 충돌 실패 요청 | 0 | 1 | 최신 출력 로그와 통과한 ErrorCode assertion 확인 |
+
+시간 충돌 테스트의 개선 후 실제 출력:
+
+```text
+시간 충돌 동시 예약 결과: 요청=2, 성공=1, 활성 예약=1, 슬롯A=0, 슬롯B=1, reservedCount합계=1, 실패=[com.example.attractionreservation.global.exception.BusinessException: 다른 예약과 탑승 시간이 겹칩니다.]
+```
+
+시간 충돌 테스트의 개선 후 기록 당시 XML 결과:
+
+```text
+tests=1, skipped=0, failures=0, errors=0
+timestamp=2026-10-29T13:04:18.330Z
+```
+
+KST 기준 시작 시각은 `2026-10-29 22:04:18.330`이다. 이 timestamp는 보고서의 실제 실행 시각이며, Service에서 사용하는 테스트 기준 시각은 여전히 14:00 KST로 고정되어 있다.
+
+이번 실행에서는 슬롯 B 예약이 성공하고 슬롯 A 예약이 거절됐다. 동시 요청 중 어느 슬롯이 성공하는지는 고정하지 않으며, **둘 중 하나만 성공하고 나머지는 시간 충돌로 거절되는지**가 검증 기준이다.
+
+이 절을 최초 기록할 때는 동일 슬롯 테스트의 개선 후 로그 원문이 보고서에 남아 있지 않았다. 이후 전체 실행에서 확인한 실제 결과는 6.9절에 추가했다. 문서 갱신 과정에서 테스트를 다시 실행하지 않았다.
+
+### 6.4 확인된 효과와 남은 검증
+
+현재 재현 시나리오에서는 회원 단위 잠금 적용 후 중복·시간 충돌 방지의 기대값을 만족했다. 다만 두 테스트의 통과를 예약 동시성 전반의 해결이나 처리량 개선으로 확대 해석하지 않는다.
+
+- **DB 제약:** 회원 잠금 이후 활성 예약 유니크 제약을 Entity에 추가하고 실제 MySQL 검증 테스트 4개를 통과했다. 기존 DB에 migration SQL을 적용하는 작업은 별도로 남아 있다.
+- **정상 흐름 회귀:** 시간 미충돌 동시 예약, 취소 후 재예약, 다른 회원의 정상 동시 예약은 아래 6.5절의 조건에서 통과를 확인했다. 다른 회원의 정상 예약 테스트는 정원 20명에 요청 2개이므로 정원 부족 시 동작까지 검증하지는 않는다.
+- **rollback:** 중복·시간 충돌 거절은 정원 확보 전에 발생한다. 이와 별도로 정원 확보 후 save 호출에 실패를 주입해 인원 복구를 확인했다. 실제 DB INSERT 실패·commit 실패를 주입한 테스트는 아니다.
+- **다른 경합:** 중복 취소, 취소와 생성, 탈퇴와 생성의 동시 실행은 검증하지 않았다.
+- **transaction 설정과 운영 DB:** 실제 session isolation level을 기록하고, 잠금 획득 전 조회 유무 등 향후 변경이 조회 결과에 미치는 영향을 검토해야 한다.
+- **시간 경계:** 현재 코드는 잠금 획득 전에 `now`를 구한다. 잠금 대기가 예약 마감 시각을 넘는 경우의 시간 판단은 이번 테스트에서 검증하지 않았다.
+- **성능:** 회원 행을 사용하는 다른 변경 작업과의 경합, 잠금 대기·timeout, 처리량은 아직 측정하지 않았다.
+
+### 6.5 추가 회귀 테스트 결과
+
+회원 잠금으로 잘못된 예약을 막는 것뿐 아니라, **허용되어야 하는 예약 흐름을 계속 허용하는지** 확인했다. 세 테스트 모두 사용자가 통과했다고 확인했다.
+
+이 절을 최초 기록한 시점의 HEAD는 `93fcabcbe624b6fa12eb9f8926f7c64e24ea38a9`이며, 당시 테스트 파일에 미커밋 변경은 없었다. 아래는 그 시점의 개별 실행 기록이다. 이후 클래스 전체 및 예약 도메인 전체 통과 결과는 6.9절에 추가했다.
+
+| 시나리오 | 조건 | 통과 시 확인한 값 | 근거 |
+| --- | --- | --- | --- |
+| 같은 회원의 시간 미충돌 동시 예약 | 16:00–16:30, 17:00–17:30에 요청 1개씩 | 성공 2개, 활성 예약 2건, 슬롯별 인원 1명, 예외 없음 | 사용자 통과 보고 및 테스트 assertion |
+| 취소 후 같은 슬롯 재예약 | 예약 생성 → 사용자 취소 → 새 예약 생성 | 취소 직후 인원 0명, 최종 활성 예약 1건·인원 1명, 취소 이력 포함 총 2건 | 사용자 통과 보고 및 테스트 assertion |
+| 서로 다른 회원의 동일 슬롯 동시 예약 | 각자의 IN_USE 티켓으로 정원 20명인 같은 슬롯에 요청 1개씩 | 성공 2개, 회원별 활성 예약 1건, 슬롯 인원 2명, 예외 없음 | 사용자 통과 보고 및 최신 XML·로그 직접 확인 |
+
+#### A. 시간이 겹치지 않는 정상 예약
+
+```java
+createReservation_SameUserAndNonOverlappingSlotsConcurrently_BothSucceed()
+```
+
+같은 회원 행 잠금으로 두 요청을 순서대로 처리하더라도, 시간이 겹치지 않으면 두 요청 모두 허용되는지 확인한다. 회원의 복수 활성 예약을 불필요하게 금지하지 않는다는 회귀 검증이다.
+
+#### B. 취소 이력을 유지한 재예약
+
+```java
+createReservation_AfterCancellationSameSlot_CreatesNewReservation()
+```
+
+각 Service 호출이 별도 transaction으로 commit된 다음 단계를 실행하는 **순차 흐름**이다. 취소와 생성의 동시 경합 테스트는 아니다.
+
+통과한 assertion은 기존 예약의 `CANCELLED` 상태·취소 시각 보존, 새 ID·새 예약 번호의 `RESERVED` 예약 생성, 새 예약의 취소 시각 없음, 총 이력 2건과 활성 예약 1건을 확인한다. 향후 활성 예약 유니크 제약을 적용해도 취소 이력이 새 예약을 막지 않아야 한다는 회귀 기준으로 유지한다.
+
+A·B 테스트의 출력 원문은 이 절을 최초 기록할 때 남아 있지 않아 사용자 통과 보고로 기록했다. 이후 전체 실행의 XML에서 직접 확인한 실제 출력은 6.9절에 추가했다.
+
+#### C. 다른 회원의 정상 동시 예약
+
+```java
+createReservation_DifferentUsersAndSameSlotConcurrently_BothSucceed()
+```
+
+별도 ACTIVE 회원과 해당 회원 소유의 IN_USE 티켓을 준비하고, 두 회원이 같은 슬롯을 예약한다. 도우미가 요청별 회원 ID와 요청 DTO를 받아 독립된 transaction으로 실제 Service를 호출한다.
+
+같은 슬롯의 정원 UPDATE는 경합할 수 있지만, 정원이 충분하면 두 요청 모두 정상적으로 완료돼야 한다. 회원별 활성 예약이 정확히 1건씩인지도 DB에서 확인한다.
+
+최신 XML에서 직접 확인한 출력:
+
+```text
+다른 회원 동시 예약 결과: 요청=2, 성공=2, 활성 예약=2, 예약회원=[2, 1], reservedCount=2, 실패=[]
+```
+
+```text
+tests=1, skipped=0, failures=0, errors=0
+timestamp=2026-10-29T14:17:26.586Z
+```
+
+KST 시작 시각은 `2026-10-29 23:17:26.586`이다. 이 실행에서도 Service의 테스트 기준 시각은 14:00 KST로 고정되어 있다. 출력의 회원 ID와 순서는 해당 실행의 값이며, 특정 회원이 먼저 성공해야 한다는 조건은 없다.
+
+이 테스트의 통과는 다른 회원의 정상 예약을 허용한다는 근거다. 서로 다른 회원이 전혀 대기하지 않거나 병렬 성능이 개선됐다는 의미는 아니며, 잠금 대기 시간은 별도로 측정하지 않았다.
+
+#### 다시 실행할 때
+
+세 테스트를 포함한 클래스 전체 실행 명령은 다음과 같다. 문서 갱신 과정에서는 실행하지 않았다.
+
+```bash
+./gradlew test --tests "*ReservationConcurrencyIntegrationTest" --rerun-tasks
+```
+
+### 6.6 정원 확보 후 저장 실패 시 rollback
+
+테스트 메서드:
+
+```java
+createReservation_SaveFailsAfterCapacityAcquired_RollsBackCapacity()
+```
+
+실제 Service와 MySQL의 정원 확보 UPDATE를 사용한다. `ReservationRepository`는 Spy로 두고 이 테스트의 `save()` 호출에만 예외를 주입한다.
+
+1. 저장 직전 같은 transaction에서 DB의 reservedCount를 조회한다.
+2. 예약 저장 호출에서 의도적으로 `IllegalStateException`을 발생시킨다.
+3. Service transaction 종료 후 새로운 transaction에서 DB 상태를 조회한다.
+4. 실패 직전 인원 1명, rollback 후 인원 0명·잔여 정원 20명·남은 예약 0건을 검증한다.
+
+최신 XML의 실제 출력:
+
+```text
+예약 저장 실패 롤백 결과: 실패직전인원=1, 롤백후인원=0, 남은예약=0
+```
+
+**판정:** 정원 확보 UPDATE와 후속 저장 호출이 동일한 예약 생성 transaction에 묶여, 후속 RuntimeException 발생 시 정원 증가도 rollback됐다.
+
+**범위:** 순차적인 실패 복구 테스트다. 실제 INSERT의 DB 제약 위반이나 연결 단절·commit 실패를 재현한 것은 아니다. Spy 추가 후 클래스의 나머지 테스트가 함께 통과하는지도 확인했다.
+
+### 6.7 활성 예약 DB Unique Constraint
+
+#### 회원 잠금에 더해 DB 제약을 추가한 이유
+
+회원 잠금은 같은 회원의 요청이 중복·시간 충돌 검사를 순서대로 수행하도록 한다. DB 제약은 이 잠금과 Service 검사를 거치지 않는 저장 경로에서도 **동일 회원·슬롯의 활성 예약 중복 저장 자체를 거절**하는 역할을 맡는다.
+
+이는 BR-RSV-03·31의 활성 예약 기준 유니크 요구사항을 DB 수준에서 구현하기 위한 보완이다. 서로 다른 슬롯의 시간 충돌은 이 제약만으로 막을 수 없으므로 회원 잠금과 충돌 검사를 유지한다.
+
+#### Generated Column과 NULL을 사용한 설계
+
+Entity에 `active_reservation`을 읽기 전용 `Integer`로 매핑했다. INSERT·UPDATE 값은 JPA가 직접 쓰지 않고 DB가 아래 식으로 계산한다.
+
+```sql
+CASE WHEN reservation_status = 'RESERVED' THEN 1 ELSE NULL END
+```
+
+유니크 제약 이름과 컬럼 조합:
+
+```text
+uk_reservations_user_slot_active
+(user_id, attraction_slot_id, active_reservation)
+```
+
+| 예약 상태 | 보조 값 | 같은 회원·슬롯에서의 의미 |
+| --- | --- | --- |
+| RESERVED | 1 | 같은 조합의 활성 예약은 1건만 허용 |
+| 나머지 상태 | NULL | MySQL 유니크 키의 NULL 허용 특성으로 과거 이력 여러 건 허용 |
+
+비활성 값을 0으로 두면 `(회원, 슬롯, 0)`도 중복으로 판정되어 두 번째 취소 이력이 막힌다. `(회원, 슬롯, 상태)` 조합의 단순 유니크도 여러 CANCELLED 이력을 막기 때문에 사용하지 않았다.
+
+DB 계산값이 JPA 필드에 즉시 반영되도록 하는 별도 설정은 추가하지 않았다. 테스트에서는 `flush()` 후 `refresh()`로 실제 계산된 값을 읽어 확인한다.
+
+#### DB 제약 자체를 검증하는 테스트 4개
+
+파일: [ReservationUniqueConstraintIntegrationTest.java](../../src/test/java/com/example/attractionreservation/domain/reservation/repository/ReservationUniqueConstraintIntegrationTest.java)
+
+Service·회원 잠금을 사용하지 않고 실제 MySQL에 Repository로 직접 저장한다. 따라서 회원 잠금에 가려지지 않은 DB 제약 자체를 확인할 수 있다.
+
+| 테스트 메서드 | 확인한 동작 |
+| --- | --- |
+| `saveAndFlush_SameUserAndSlotReservedTwice_ThrowsUniqueConstraintViolation()` | 첫 활성 예약의 보조 값 1, 두 번째 저장은 해당 제약 이름을 포함한 DataIntegrityViolationException 발생 |
+| `saveAndFlush_RepeatedCancellationAndRebooking_PreservesHistoryAndOneActiveReservation()` | 두 번 취소 후 새 예약 허용, 상태 CANCELLED·CANCELLED·RESERVED 및 보조 값 NULL·NULL·1 |
+| `saveAndFlush_DifferentUsersSameSlot_AllowsBothActiveReservations()` | 다른 회원은 같은 슬롯에 활성 예약을 각각 저장 가능 |
+| `saveAndFlush_SameUserDifferentSlots_AllowsBothActiveReservations()` | 같은 회원은 다른 슬롯에 활성 예약을 각각 저장 가능 |
+
+실제 로그:
+
+```text
+활성 예약 DB 제약 결과: 첫 예약 active=1, 중복 저장 거절, 제약=uk_reservations_user_slot_active
+반복 취소 후 DB 제약 결과: 전체=3, 상태=[CANCELLED, CANCELLED, RESERVED], 보조값=[null, null, 1]
+```
+
+최신 XML: `tests=4, skipped=0, failures=0, errors=0`.
+
+이 테스트들은 스키마 제약을 검증하므로 Service의 정원 증가 처리를 실행하지 않는다. 이 테스트의 예약 건수로 슬롯 reservedCount 정합성까지 판단하지 않는다. COMPLETED·NO_SHOW 각각의 계산값이나 회원 잠금 없이 직접 저장하는 동시 INSERT 경합은 별도 테스트하지 않았다.
+
+### 6.8 migration SQL 준비와 실제 DB 적용 상태
+
+파일: [kan-87-reservation-active-unique-migration.sql](../sql/kan-87-reservation-active-unique-migration.sql)
+
+일반 실행 설정은 `ddl-auto: validate`이므로 Entity 변경만으로 기존 DB에 컬럼과 제약이 추가되지 않는다. 기존 `reservations` 테이블에 변경사항을 적용할 SQL을 별도로 작성했다.
+
+| 순서 | SQL의 역할 |
+| --- | --- |
+| 1 | 대상 DB와 기존 테이블 구조 확인 |
+| 2 | 동일 회원·슬롯의 RESERVED 중복 조회 |
+| 3 | Generated Column과 유니크 제약을 하나의 ALTER TABLE로 추가 |
+| 4 | SHOW CREATE TABLE·SHOW INDEX로 계산식과 제약 확인 |
+| 5 | 상태별 보조 값 계산 결과 조회 |
+
+사용자가 연결한 로컬 `attraction_reservation` DB에서 중복 조회를 시도했으나 `Table 'attraction_reservation.reservations' doesn't exist` 오류가 발생했다. 이후 사용자가 테이블 목록이 비어 있다고 확인했다. 이는 **중복 데이터 0건을 조회한 결과가 아니라 테이블 자체가 없는 상태**다.
+
+따라서 이 DB에 migration을 실행하지 않았다. 스크립트는 기존 테이블이 있고 대상 컬럼·제약이 없는 스키마용이며, 빈 DB의 전체 테이블을 초기화하는 SQL이 아니다.
+
+**검증 구분:** 통과한 DB 테스트는 Testcontainers의 `create-drop` 설정으로 Entity에서 생성한 스키마를 검증했다. 작성한 migration SQL을 변경 전 스키마에 실행한 검증이나 실제 운영 DB 적용은 수행하지 않았다.
+
+스크립트는 단계별 확인 후 실행하도록 작성했다. 사전 SELECT가 중복을 반환해도 이후 문장을 자동 중단하지는 않는다. 실제 적용 시 예약 쓰기 중지·백업·중복 처리 판단과 적용 순서를 함께 관리해야 한다.
+
+### 6.9 최종 테스트 결과와 검증 근거
+
+사용자가 다음 순서로 실행하고 통과를 확인했다.
+
+```bash
+# 동시성·회귀·rollback 6개 + DB 제약 4개
+./gradlew test --tests "*ReservationConcurrencyIntegrationTest" --tests "*ReservationUniqueConstraintIntegrationTest" --rerun-tasks
+
+# 예약 도메인 전체
+./gradlew test --tests "com.example.attractionreservation.domain.reservation.*" --rerun-tasks
+```
+
+문서 갱신 시점에 `build/test-results/test/`의 XML을 읽어 예약 도메인 suite를 집계했다.
+
+| 범위 | 클래스 수 | 테스트 수 | 실패 | 오류 | 건너뜀 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 예약 도메인 전체 | 21 | 175 | 0 | 0 | 0 |
+| 위 전체 실행에 포함된 동시성·회귀·rollback 클래스 | 1 | 6 | 0 | 0 | 0 |
+| 위 전체 실행에 포함된 DB 제약 클래스 | 1 | 4 | 0 | 0 | 0 |
+
+아래 두 클래스의 10개는 175개에 포함된 값이며 별도로 더하지 않는다. 프로젝트 전체 테스트 실행 결과는 아니다.
+
+같은 최신 보고서에서 직접 확인한 주요 값:
+
+| 검증 | 실제 로그로 확인한 결과 |
+| --- | --- |
+| 동일 회원·동일 슬롯 요청 10개 | 성공 1, 활성 예약 1, reservedCount 1, 나머지 9개는 중복 예약 예외 |
+| 동일 회원·겹치는 다른 슬롯 요청 2개 | 성공 1, 활성 예약 1, 슬롯 A 1·B 0, 나머지 1개는 시간 충돌 예외 |
+| 동일 회원·겹치지 않는 다른 슬롯 요청 2개 | 성공 2, 활성 예약 2, 슬롯별 인원 1 |
+| 취소 후 재예약 | 기존 예약 3 CANCELLED, 새 예약 4 RESERVED, 총 이력 2, 취소 직후 인원 0·최종 1 |
+| 다른 회원·동일 슬롯 요청 2개 | 성공 2, 활성 예약 2, 예약 인원 2 |
+| 정원 확보 후 save 실패 | 실패 직전 인원 1, rollback 후 인원 0, 남은 예약 0 |
+
+동일 슬롯 테스트는 9개의 중복 예약 예외를 출력했다. 예외 목록을 줄인 요약은 다음과 같다.
+
+```text
+요청=10, 성공=1, 활성 예약=1, reservedCount=1
+실패 요청 9개: BusinessException / 이미 예약한 슬롯입니다.
+```
+
+회귀 테스트 원문 출력도 확보했다.
+
+```text
+취소 후 재예약 결과: 기존예약=3(CANCELLED), 새예약=4(RESERVED), 전체이력=2, 활성예약=1, 취소직후인원=0, 최종인원=1
+시간 미충돌 동시 예약 결과: 요청=2, 성공=2, 활성 예약=2, 슬롯A=1, 슬롯B=1, reservedCount합계=2, 실패=[]
+```
+
+기존 절에서 사용자 통과 보고로만 기록했던 항목도 이번 최신 XML에서 확인했다. 이전 개별 실행 기록은 보존하고 이번 결과를 추가했다. 예약 ID와 승리한 슬롯은 실행에 따라 달라질 수 있으며 검증의 고정값이 아니다.
+
+기록 시점 HEAD는 `f425373c6bd4b1cb7e03ee22cdd08cda8d01fac6`이다. Generated Column·제약의 Entity 변경과 SQL, 새 DB 제약 테스트는 아직 미커밋 상태이므로 이 HEAD만으로 최종 검증 코드를 복원할 수 없다.
+
+최신 DB 제약 suite 시작 시각은 `2026-10-29T15:59:13.560Z`(KST 2026-10-30 00:59:13.560), 동시성 suite 시작 시각은 `2026-10-29T15:59:31.980Z`(KST 2026-10-30 00:59:31.980)다. 문서 작성 과정에서는 테스트를 다시 실행하지 않고 사용자가 실행한 XML을 읽었다.
+
+### 6.10 완료 체크리스트
 
 - [x] 동일 회원·동일 슬롯 동시 요청 재현
 - [x] 개선 전 성공 건수·활성 예약 수·reservedCount 기록
 - [x] 서로 다른 슬롯의 시간 충돌 재현
-- [ ] 해결 방식 비교 및 선택 근거 기록
-- [ ] 해결 적용 및 DB 제약 요구사항 확인
-- [ ] 동일 슬롯 동시 요청에서 성공 1건 검증
-- [ ] 시간이 겹치는 다른 슬롯 동시 요청에서 성공 1건 검증
-- [ ] 실패 요청의 정원 확보 rollback 검증
-- [ ] 취소 후 같은 슬롯에 새 예약 생성 가능 여부 검증
-- [ ] 서로 다른 회원의 정상 예약 회귀 검증
-- [ ] 기존 예약 테스트 결과 기록
-- [ ] 개선 전후 결과 비교 및 최종 한계 정리
+- [x] 해결 방식 비교 및 선택 근거 기록
+- [x] 회원 행 비관적 잠금 적용
+- [x] 활성 예약 DB 유니크 제약 매핑 및 실제 MySQL 검증
+- [x] 동일 슬롯 동시 요청에서 성공 1건 검증 — 최신 XML·로그 확인
+- [x] 동일 슬롯 테스트의 개선 후 성공 수 및 실패 사유를 문서에 보관
+- [x] 시간이 겹치는 다른 슬롯 동시 요청에서 성공 1건 검증 — XML·로그 확인
+- [x] 정원 확보 후 save 호출 실패 주입 시 rollback 검증
+- [x] 같은 회원의 시간 미충돌 동시 예약 성공 검증 — 최신 XML·로그 확인
+- [x] 취소 후 같은 슬롯에 새 예약 생성 가능 여부 검증 — 최신 XML·로그 확인
+- [x] 서로 다른 회원의 정상 예약 회귀 검증 — XML·로그 확인
+- [x] 직접 저장 시 중복 활성 예약 거절 및 반복 취소 이력 허용 검증
+- [x] 동시성·회귀·rollback 6개와 DB 제약 4개 통과 확인
+- [x] 기존 예약 도메인 테스트 결과 기록 — 21개 클래스, 175개 테스트 통과
+- [x] 기존 DB에 적용할 migration SQL 작성
+- [ ] 변경 전 스키마에 migration SQL을 실행해 적용 검증
+- [ ] 실제 적용 대상 DB의 사전 데이터 확인 및 migration 반영
+- [x] 현재 확인한 개선 전후 결과와 검증 한계 기록
 
 ## 7. 증거 보관과 추가 기록 방법
 

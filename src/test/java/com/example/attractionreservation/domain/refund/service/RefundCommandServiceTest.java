@@ -464,6 +464,21 @@ class RefundCommandServiceTest {
     }
 
     @Test
+    @DisplayName("PG 취소 금액이 뺄셈이 넘칠 만큼 작은 음수여도 불일치가 아니라 재시도가 필요한 오류를 던진다.")
+    void syncWithPgCancelledAmount_minLongAmount_ThrowStale() {
+        //given
+        Long completed = saveRefund(RefundStatus.COMPLETED, adult, 1);
+        flushAndClear();
+        String pgId = payment.getPgId();
+
+        //when & then
+        assertThatThrownBy(() -> refundCommandService.syncWithPgCancelledAmount(pgId, Long.MIN_VALUE, now))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE.getMessage());
+        assertThat(find(completed).getStatus()).isEqualTo(RefundStatus.COMPLETED);
+    }
+
+    @Test
     @DisplayName("PG 취소 금액과 같은 환불이 확인 대기(PG_PENDING)면 금액으로 완료하지 않는다(취소 내역 ID로 확정한다).")
     void syncWithPgCancelledAmount_pgPending_NotSynced() {
         //given

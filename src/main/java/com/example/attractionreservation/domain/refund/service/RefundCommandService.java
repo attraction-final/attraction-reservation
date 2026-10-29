@@ -207,13 +207,15 @@ public class RefundCommandService {
 
         long completedAmount = refundRepository.sumRefundAmountByPaymentIdAndStatus(
                 payment.getId(), RefundStatus.COMPLETED);
+        // 트랜잭션 밖에서 조회한 PG 값이 그 사이 완료된 환불보다 오래된 경우다. 다시 조회하면 맞을 수 있으므로 재시도한다.
+        // 뺄셈이 넘치지 않도록 차이를 구하기 전에 비교한다.
+        if (pgCancelledAmount < completedAmount) {
+            throw new BusinessException(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE);
+        }
         long unsyncedAmount = pgCancelledAmount - completedAmount;
 
         if (unsyncedAmount == 0) {
             return PaymentSyncResult.ALREADY_DONE;
-        }
-        if (unsyncedAmount < 0) {
-            throw new BusinessException(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE);
         }
         if (unsyncedAmount > Integer.MAX_VALUE) {
             return PaymentSyncResult.REFUND_MISMATCH;

@@ -206,7 +206,7 @@ public class UserService {
     }
     // 예약에서 사용하는 회원 조회
     public User findByUserId(Long userId) {
-        return userRepository.findById(userId)
+        return userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.USER_NOT_FOUND));
     }

@@ -72,7 +72,7 @@ class TicketExpirationServiceIntegrationTest {
                 TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE
         );
         entityManager.persist(product);
-        Order order = Order.create(user, 50000);
+        Order order = Order.create(user, 50000, TODAY);
         entityManager.persist(order);
         orderItem = OrderItem.create(order, product, 1);
         entityManager.persist(orderItem);

@@ -98,6 +98,7 @@ class ReservationConcurrencyIntegrationTest {
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
     private OverlappingSlot overlappingSlot;
+    private Long nonOverlappingSlotId;
 
     // 테스트용 MySQL
     @TestConfiguration(proxyBeanMethods = false)
@@ -156,6 +157,9 @@ class ReservationConcurrencyIntegrationTest {
             entityManager.createQuery("delete from Reservation r where r.user.id = :userId")
                     .setParameter("userId", fixture.userId()).executeUpdate();
             entityManager.remove(entityManager.find(Ticket.class, fixture.ticketId()));
+            if (nonOverlappingSlotId != null) {
+                entityManager.remove(entityManager.find(AttractionSlot.class, nonOverlappingSlotId));
+            }
             if (overlappingSlot != null) {
                 entityManager.remove(entityManager.find(AttractionSlot.class, overlappingSlot.slotId()));
                 entityManager.remove(entityManager.find(Attraction.class, overlappingSlot.attractionId()));
@@ -279,6 +283,63 @@ class ReservationConcurrencyIntegrationTest {
                     BusinessException.class,
                     exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.RESERVATION_TIME_CONFLICT)
             ));
+        });
+    }
+
+    @Test
+    @DisplayName("같은 회원이 시간이 겹치지 않는 두 슬롯을 동시에 예약하면 모두 성공한다")
+    void createReservation_SameUserAndNonOverlappingSlotsConcurrently_BothSucceed() throws Exception {
+        // given
+        // 기존 슬롯은 16:00~16:30, 추가 슬롯은 17:00~17:30이다.
+        nonOverlappingSlotId = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            Attraction attraction = entityManager.getReference(Attraction.class, fixture.attractionId());
+            AttractionSlot slot = AttractionSlot.create(attraction, NOW.withHour(17), SLOT_CAPACITY);
+            entityManager.persist(slot);
+            entityManager.flush();
+            return slot.getId();
+        }));
+        List<Long> slotIds = List.of(fixture.slotId(), nonOverlappingSlotId);
+        List<CreateReservationRequest> requests = List.of(
+                new CreateReservationRequest(fixture.ticketId(), fixture.slotId()),
+                new CreateReservationRequest(fixture.ticketId(), nonOverlappingSlotId)
+        );
+
+        // when
+        List<RuntimeException> results = reserveConcurrently(requests);
+        long successCount = results.stream().filter(Objects::isNull).count();
+        TimeConflictDatabaseState databaseState = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            long activeCount = entityManager.createQuery("""
+                            select count(r) from Reservation r
+                            where r.user.id = :userId
+                              and r.attractionSlot.id in :slotIds
+                              and r.status = :status
+                            """, Long.class)
+                    .setParameter("userId", fixture.userId())
+                    .setParameter("slotIds", slotIds)
+                    .setParameter("status", ReservationStatus.RESERVED)
+                    .getSingleResult();
+            AttractionSlot first = entityManager.find(AttractionSlot.class, fixture.slotId());
+            AttractionSlot second = entityManager.find(AttractionSlot.class, nonOverlappingSlotId);
+            return new TimeConflictDatabaseState(activeCount, first.getReservedCount(), second.getReservedCount());
+        }));
+
+        // then
+        int totalReservedCount = databaseState.firstReservedCount() + databaseState.secondReservedCount();
+        System.out.printf(
+                "시간 미충돌 동시 예약 결과: 요청=%d, 성공=%d, 활성 예약=%d, 슬롯A=%d, 슬롯B=%d, reservedCount합계=%d, 실패=%s%n",
+                requests.size(), successCount, databaseState.activeCount(), databaseState.firstReservedCount(),
+                databaseState.secondReservedCount(), totalReservedCount,
+                results.stream().filter(Objects::nonNull).toList()
+        );
+
+        assertSoftly(softly -> {
+            softly.assertThat(results).as("두 요청 모두 예외 없이 성공").hasSize(2).containsOnlyNulls();
+            softly.assertThat(successCount).as("시간이 겹치지 않는 두 요청의 성공 수").isEqualTo(2);
+            softly.assertThat(databaseState.activeCount()).as("두 슬롯에 저장된 활성 예약 수").isEqualTo(2);
+            softly.assertThat(databaseState.firstReservedCount()).as("슬롯 A 예약 인원").isEqualTo(1);
+            softly.assertThat(databaseState.secondReservedCount()).as("슬롯 B 예약 인원").isEqualTo(1);
+            softly.assertThat((long) totalReservedCount).as("예약 인원 합계와 실제 활성 예약 수의 일치")
+                    .isEqualTo(databaseState.activeCount());
         });
     }
 

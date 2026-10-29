@@ -94,6 +94,7 @@ public enum ErrorCode {
     TICKET_RESERVATION_DATE_MISMATCH(HttpStatus.BAD_REQUEST, "티켓 방문일과 슬롯 날짜가 일치하지 않습니다."),
     TICKET_RESERVATION_TIME_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "티켓 이용 가능 시간에 포함되지 않는 슬롯입니다."),
     INVALID_TICKET_ENTRY_TIME(HttpStatus.BAD_REQUEST, "입장 처리 시각은 필수입니다."),
+    INVALID_TICKET_EXPIRATION_TIME(HttpStatus.BAD_REQUEST, "티켓 종료 처리 기준 시각은 필수입니다."),
     INVALID_TICKET_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 상태 변경입니다."),
     TICKET_NOT_REFUNDABLE(HttpStatus.CONFLICT, "미사용 티켓만 환불할 수 있습니다."),
 

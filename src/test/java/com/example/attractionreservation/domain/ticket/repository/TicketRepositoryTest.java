@@ -415,6 +415,84 @@ class TicketRepositoryTest {
     }
 
     @Test
+    @DisplayName("종료 대상은 기준 방문일 이하의 UNUSED와 IN_USE만 ID 오름차순으로 조회한다")
+    void findExpirationTargets_DateAndStatus_ReturnsOnlyTargets() {
+        // given
+        LocalDate closedDate = LocalDate.of(2026, 10, 20);
+        Ticket unused = createExpirationTicket(closedDate.minusDays(1), TicketStatus.UNUSED);
+        Ticket inUse = createExpirationTicket(closedDate, TicketStatus.IN_USE);
+        createExpirationTicket(closedDate.plusDays(1), TicketStatus.UNUSED);
+        createExpirationTicket(closedDate.plusDays(1), TicketStatus.IN_USE);
+        createExpirationTicket(closedDate, TicketStatus.USED);
+        createExpirationTicket(closedDate, TicketStatus.EXPIRED);
+        createExpirationTicket(closedDate, TicketStatus.REFUNDED);
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        var result = ticketRepository.findExpirationTargets(closedDate, 100);
+
+        // then
+        assertThat(result).extracting(Ticket::getId).containsExactly(unused.getId(), inUse.getId());
+    }
+
+    @Test
+    @DisplayName("종료 대상이 많아도 요청한 조회 건수까지만 ID 오름차순으로 반환한다")
+    void findExpirationTargets_BatchLimit_ReturnsFirstTargets() {
+        // given
+        LocalDate closedDate = LocalDate.of(2026, 10, 20);
+        Ticket first = createExpirationTicket(closedDate, TicketStatus.UNUSED);
+        Ticket second = createExpirationTicket(closedDate, TicketStatus.IN_USE);
+        createExpirationTicket(closedDate, TicketStatus.UNUSED);
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        var result = ticketRepository.findExpirationTargets(closedDate, 2);
+
+        // then
+        assertThat(result).extracting(Ticket::getId).containsExactly(first.getId(), second.getId());
+    }
+
+    @Test
+    @DisplayName("종료 대상은 소유자와 관계없이 모든 회원의 티켓을 포함한다")
+    void findExpirationTargets_DifferentOwners_IncludesAllOwners() {
+        // given
+        LocalDate closedDate = LocalDate.of(2026, 10, 25);
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        var result = ticketRepository.findExpirationTargets(closedDate, 100);
+
+        // then
+        assertThat(result).extracting(Ticket::getId)
+                .containsExactly(firstTicketId, thirdTicketId, otherUserTicketId);
+    }
+
+    @Test
+    @DisplayName("해당 날짜까지 종료 대상 티켓이 없으면 빈 목록을 반환한다")
+    void findExpirationTargets_NoTargets_ReturnsEmpty() {
+        // given
+        LocalDate closedDate = LocalDate.of(2026, 10, 20);
+        entityManager.flush();
+        entityManager.clear();
+
+        // when
+        var result = ticketRepository.findExpirationTargets(closedDate, 100);
+
+        // then
+        assertThat(result).isEmpty();
+    }
+
+    private Ticket createExpirationTicket(LocalDate validDate, TicketStatus status) {
+        User owner = entityManager.getReference(User.class, userId);
+        Ticket ticket = createTicket(owner, "종료 테스트 입장권", TicketType.ALL_DAY, status);
+        ReflectionTestUtils.setField(ticket, "validDate", validDate);
+        return ticket;
+    }
+    
+    @Test
     @DisplayName("환불용 조회는 요청한 티켓 중 지정한 주문 상품의 티켓만 반환한다")
     void findAllByIdInAndOrderItemIdInForUpdate_OtherOrderTicket_Excluded() {
         // given

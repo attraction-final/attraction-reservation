@@ -128,7 +128,7 @@ public class AttractionSlotService {
     }
 
     private AttractionSlot findSlot(Long slotId) {
-        return attractionSlotRepository.findById(slotId)
+        return attractionSlotRepository.findByIdForUpdate(slotId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
     }
 

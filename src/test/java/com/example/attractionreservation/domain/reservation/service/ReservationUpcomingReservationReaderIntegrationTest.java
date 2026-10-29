@@ -75,7 +75,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
                 "종일 이용권", 50000, "테스트 상품", TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE
         );
         entityManager.persist(product);
-        Order order = Order.create(user, 50000);
+        Order order = Order.create(user, 50000, NOW.toLocalDate());
         entityManager.persist(order);
         OrderItem item = OrderItem.create(order, product, 1);
         entityManager.persist(item);

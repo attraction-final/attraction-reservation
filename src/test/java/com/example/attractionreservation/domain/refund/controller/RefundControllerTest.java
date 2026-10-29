@@ -156,7 +156,7 @@ class RefundControllerTest {
                         .with(authenticatedMember())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "items": [ { "orderItemId": 100, "quantity": 2 } ], "reason": "단순 변심" }
+                                { "ticketIds": [ 1, 2 ], "reason": "단순 변심" }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
@@ -169,14 +169,12 @@ class RefundControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "{ \"reason\": \"단순 변심\" }",
-            "{ \"items\": [], \"reason\": \"단순 변심\" }",
-            "{ \"items\": [ null ], \"reason\": \"단순 변심\" }",
-            "{ \"items\": [ { \"orderItemId\": 100, \"quantity\": 0 } ], \"reason\": \"단순 변심\" }",
-            "{ \"items\": [ { \"orderItemId\": 100 } ], \"reason\": \"단순 변심\" }",
-            "{ \"items\": [ { \"quantity\": 1 } ], \"reason\": \"단순 변심\" }",
-            "{ \"items\": [ { \"orderItemId\": 100, \"quantity\": 1 } ] }"
+            "{ \"ticketIds\": [], \"reason\": \"단순 변심\" }",
+            "{ \"ticketIds\": [ null ], \"reason\": \"단순 변심\" }",
+            "{ \"ticketIds\": [ 1 ] }",
+            "{ \"ticketIds\": [ 1 ], \"reason\": \" \" }"
     })
-    @DisplayName("부분 환불 항목이 없거나, null 항목이 있거나, 수량이 1 미만이거나, 필수값이 빠지면 400을 반환하고 환불하지 않는다.")
+    @DisplayName("환불할 티켓이 없거나, null 티켓 ID가 있거나, 사유가 없으면 400을 반환하고 환불하지 않는다.")
     void createPartialRefund_invalidRequest_BadRequest(String body) throws Exception {
         //when & then
         mockMvc.perform(post(PARTIAL_REFUND_URL, "pg-id")
@@ -189,22 +187,21 @@ class RefundControllerTest {
     }
 
     @Test
-    @DisplayName("같은 주문 상품이 중복되면 400을 반환한다.")
-    void createPartialRefund_duplicateOrderItem_BadRequest() throws Exception {
+    @DisplayName("같은 티켓이 중복되면 400을 반환한다.")
+    void createPartialRefund_duplicateTicket_BadRequest() throws Exception {
         //given
         given(refundFacade.createPartialRefund(eq(USER_ID), eq("pg-id"), any(CreatePartialRefundRequest.class)))
-                .willThrow(new BusinessException(ErrorCode.REFUND_DUPLICATE_ORDER_ITEM));
+                .willThrow(new BusinessException(ErrorCode.REFUND_DUPLICATE_TICKET));
 
         //when & then
         mockMvc.perform(post(PARTIAL_REFUND_URL, "pg-id")
                         .with(authenticatedMember())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "items": [ { "orderItemId": 100, "quantity": 1 }, { "orderItemId": 100, "quantity": 1 } ],
-                                  "reason": "단순 변심" }
+                                { "ticketIds": [ 1, 1 ], "reason": "단순 변심" }
                                 """))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(ErrorCode.REFUND_DUPLICATE_ORDER_ITEM.getMessage()));
+                .andExpect(jsonPath("$.message").value(ErrorCode.REFUND_DUPLICATE_TICKET.getMessage()));
     }
 
     @Test
@@ -214,7 +211,7 @@ class RefundControllerTest {
         mockMvc.perform(post(PARTIAL_REFUND_URL, "pg-id")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "items": [ { "orderItemId": 100, "quantity": 1 } ], "reason": "단순 변심" }
+                                { "ticketIds": [ 1 ], "reason": "단순 변심" }
                                 """))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));

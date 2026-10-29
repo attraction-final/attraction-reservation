@@ -144,13 +144,13 @@ class UserWithdrawalIntegrationTest {
                     );
                     entityManager.persist(product);
 
-                    Order order = Order.create(user, 10000);
-                    order.addOrderItem(product, 1);
-                    entityManager.persist(order);
-
                     LocalDate visitDate = LocalDate.now(
                             ZoneId.of("Asia/Seoul")
                     ).plusDays(1);
+
+                    Order order = Order.create(user, 10000, visitDate);
+                    order.addOrderItem(product, 1);
+                    entityManager.persist(order);
 
                     Ticket ticket = new Ticket(
                             visitDate,
@@ -355,7 +355,7 @@ class UserWithdrawalIntegrationTest {
                     );
                     entityManager.persist(product);
 
-                    Order order = Order.create(user, 10000);
+                    Order order = Order.create(user, 10000, validDate);
                     order.addOrderItem(product, 1);
                     entityManager.persist(order);
 

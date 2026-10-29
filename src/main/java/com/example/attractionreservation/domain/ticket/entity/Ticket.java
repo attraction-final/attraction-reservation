@@ -87,6 +87,23 @@ public class Ticket extends BaseTimeEntity {
         this.enteredAt = now;
     }
 
+    // 티켓 환불 처리. 미사용 티켓만 환불할 수 있다.
+    public void refund() {
+        if (this.status != TicketStatus.UNUSED) {
+            throw new BusinessException(ErrorCode.TICKET_NOT_REFUNDABLE);
+        }
+
+        statusTransition(TicketStatus.REFUNDED);
+    }
+
+    public void statusTransition(TicketStatus newStatus) {
+        if (!this.status.canTransitTo(newStatus)) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_STATUS_TRANSITION);
+        }
+
+        this.status = newStatus;
+    }
+
     // 입장 상태 검증
     private void validateEntryStatus() {
         if (this.status != TicketStatus.UNUSED) {
@@ -109,4 +126,40 @@ public class Ticket extends BaseTimeEntity {
             throw new BusinessException(ErrorCode.TICKET_ENTRY_TIME_NOT_ALLOWED);
         }
     }
+
+    // 티켓 종료 처리
+    public boolean expireIfClosed(Instant now) {
+        if (now == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_EXPIRATION_TIME);
+        }
+
+        // 상태 확인
+        if (this.status == TicketStatus.USED || this.status == TicketStatus.EXPIRED
+                || this.status == TicketStatus.REFUNDED)
+        {
+            return false;
+        }
+
+        // 폐장 시각 계산
+        LocalDateTime closeDateTime = this.validDate.atTime(PARK_CLOSE_TIME);
+        Instant closeTime = closeDateTime.atZone(KstTime.ZONE).toInstant();
+
+        // 현재 시각 비교
+        if (now.isBefore(closeTime)) {
+            return false;
+        }
+
+        // 상태랑 종료시각 기록
+        this.endTime = closeTime;
+
+        if (this.status == TicketStatus.UNUSED) {
+            this.status = TicketStatus.EXPIRED;
+        }
+        if (this.status == TicketStatus.IN_USE) {
+            this.status = TicketStatus.USED;
+        }
+
+        return true;
+    }
+
 }

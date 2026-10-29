@@ -10,6 +10,7 @@ import com.example.attractionreservation.domain.payment.repository.PaymentReposi
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -70,7 +72,7 @@ class PaymentServiceConcurrencyTest {
                     .build();
             entityManager.persist(user);
 
-            Order order = Order.create(user, 10000);
+            Order order = Order.create(user, 10000, LocalDate.now(KstTime.ZONE).plusDays(1));
             entityManager.persist(order);
 
             Payment payment = Payment.create(order);

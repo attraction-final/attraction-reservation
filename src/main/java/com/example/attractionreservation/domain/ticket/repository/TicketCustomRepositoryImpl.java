@@ -15,6 +15,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -28,6 +29,7 @@ public class TicketCustomRepositoryImpl implements TicketCustomRepository{
 
     private final JPAQueryFactory queryFactory;
 
+    // 내 티켓 목록 조회
     @Override
     public Page<Ticket> findAllByUserIdWithCondition(
             Long userId,
@@ -83,6 +85,25 @@ public class TicketCustomRepositoryImpl implements TicketCustomRepository{
                 )
                 .fetchOne();
         return Optional.ofNullable(result);
+    }
+
+    // 티켓 사용 완료 처리
+    @Override
+    public List<Ticket> findExpirationTargets(LocalDate closedDate, int batchSize) {
+        // 방문일 <= closedDate AND 상태 Unused OR in_use
+        return queryFactory
+                .selectFrom(ticket)
+                .where(
+                        closeDateLoe(closedDate),
+                        ticket.status.in(TicketStatus.IN_USE, TicketStatus.UNUSED)
+                )
+                .orderBy(ticket.id.asc())
+                .limit(batchSize)
+                .fetch();
+    }
+
+    private BooleanExpression closeDateLoe(LocalDate closedDate) {
+        return ticket.validDate.loe(closedDate);
     }
 
     private BooleanExpression ticketIdEq(Long ticketId) {

@@ -8,6 +8,7 @@ import com.example.attractionreservation.domain.payment.entity.PaymentCompensati
 import com.example.attractionreservation.domain.payment.entity.enums.CompensationStatus;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentCompensationRepository;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
@@ -17,6 +18,7 @@ import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +34,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, TicketProductService.class, QuerydslConfig.class})
+@Import({JpaConfig.class, PaymentCommandService.class, PaymentCompensationService.class, TicketProductService.class, TicketService.class, QuerydslConfig.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PaymentCompensationOutboxTest {
 
@@ -80,7 +86,7 @@ class PaymentCompensationOutboxTest {
             entityManager.persist(ticketProduct);
             productId = ticketProduct.getId();
 
-            Order order = Order.create(user, 10000);
+            Order order = Order.create(user, 10000, LocalDate.now(KstTime.ZONE).plusDays(1));
             order.addOrderItem(ticketProduct, 2);
             entityManager.persist(order);
 
@@ -95,6 +101,7 @@ class PaymentCompensationOutboxTest {
     @AfterEach
     void tearDown() {
         transactionTemplate.executeWithoutResult(status -> {
+            entityManager.createQuery("delete from Ticket").executeUpdate();
             entityManager.createQuery("delete from PaymentCompensation").executeUpdate();
             entityManager.createQuery("delete from Payment").executeUpdate();
             entityManager.createQuery("delete from OrderItem").executeUpdate();
@@ -222,6 +229,40 @@ class PaymentCompensationOutboxTest {
 
         //then
         assertThat(findStock()).isEqualTo(8);
+    }
+
+    @Test
+    @DisplayName("결제 대기 결제를 승인하면 주문 항목별 수량만큼 방문일 기준 티켓을 함께 커밋한다.")
+    void approvePayment_pending_IssueTicketsPerOrderItem() {
+        //given: 기존 항목(수량 2)에 수량이 다른 항목(수량 3)을 추가한다.
+        transactionTemplate.executeWithoutResult(status -> {
+            TicketProduct afternoonProduct = new TicketProduct(
+                    "오후이용권", 3000, "오후에 이용 가능한 입장권", TicketType.AFTERNOON, 10, TicketProductStatus.ON_SALE);
+            entityManager.persist(afternoonProduct);
+            entityManager.find(Order.class, orderId).addOrderItem(afternoonProduct, 3);
+        });
+
+        //when
+        paymentCommandService.approvePayment(pgId, Instant.now(), 10000L);
+
+        //then
+        Map<Long, Long> ticketCounts = transactionTemplate.execute(status -> entityManager
+                .createQuery("select t.orderItem.id, count(t) from Ticket t group by t.orderItem.id", Object[].class)
+                .getResultList().stream()
+                .collect(Collectors.toMap(row -> (Long) row[0], row -> (Long) row[1])));
+        Map<Long, Long> orderItemQuantities = transactionTemplate.execute(status -> entityManager
+                .createQuery("select oi.id, oi.quantity from OrderItem oi where oi.order.id = :orderId", Object[].class)
+                .setParameter("orderId", orderId)
+                .getResultList().stream()
+                .collect(Collectors.toMap(row -> (Long) row[0], row -> ((Integer) row[1]).longValue())));
+        assertThat(orderItemQuantities).hasSize(2).containsValues(2L, 3L);
+        assertThat(ticketCounts).isEqualTo(orderItemQuantities);
+
+        LocalDate visitDate = transactionTemplate.execute(status -> entityManager.find(Order.class, orderId).getVisitDate());
+        List<LocalDate> validDates = transactionTemplate.execute(status -> entityManager
+                .createQuery("select t.validDate from Ticket t", LocalDate.class)
+                .getResultList());
+        assertThat(validDates).hasSize(5).containsOnly(visitDate);
     }
 
     private int findStock() {

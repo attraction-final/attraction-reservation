@@ -27,7 +27,7 @@ public class RefundFacade {
 
     public RefundResponse createPartialRefund(Long userId, String pgId, CreatePartialRefundRequest request) {
         Long refundId = refundService.createRefund(
-                userId, pgId, request.toRefundQuantities(), request.reason(), Instant.now());
+                userId, pgId, request.ticketIds(), request.reason(), Instant.now());
         return processAndFind(refundId);
     }
 

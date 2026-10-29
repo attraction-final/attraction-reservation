@@ -9,6 +9,7 @@ import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
+import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
@@ -37,6 +38,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,10 +56,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockStatic;
 
 // 개선 전에는 실패할 수 있는 회귀 테스트다. 중복 조회와 정원 UPDATE는 실제 MySQL에서 실행한다.
@@ -82,6 +88,10 @@ class ReservationConcurrencyIntegrationTest {
 
     @Autowired
     private ReservationService reservationService;
+
+    // 기본 동작은 실제 Repository를 사용하고, rollback 테스트의 save 호출만 예외로 대체한다.
+    @MockitoSpyBean
+    private ReservationRepository reservationRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -477,6 +487,59 @@ class ReservationConcurrencyIntegrationTest {
                 softly.assertThat(slot.getReservedCount()).as("최종 슬롯 예약 인원").isEqualTo(2);
                 softly.assertThat(slot.getReservedCount()).as("예약 인원과 실제 활성 예약 수의 일치")
                         .isEqualTo(reservedUserIds.size());
+            });
+        });
+    }
+
+    @Test
+    @DisplayName("정원 확보 후 예약 저장에서 예외가 발생하면 예약 인원 증가도 함께 롤백된다")
+    void createReservation_SaveFailsAfterCapacityAcquired_RollsBackCapacity() {
+        // given
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        IllegalStateException saveFailure = new IllegalStateException("예약 저장 실패 재현");
+        AtomicInteger countBeforeFailure = new AtomicInteger(-1);
+        doAnswer(invocation -> {
+            // 같은 transaction에서 실제 DB의 정원 증가를 확인한 다음 실패를 주입한다.
+            Integer reservedCount = entityManager.createQuery("""
+                            select s.reservedCount from AttractionSlot s where s.id = :slotId
+                            """, Integer.class)
+                    .setParameter("slotId", fixture.slotId())
+                    .getSingleResult();
+            countBeforeFailure.set(reservedCount);
+            throw saveFailure;
+        }).when(reservationRepository).save(any(Reservation.class));
+
+        // when & then
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+            assertThatThrownBy(() -> reservationService.createReservation(fixture.userId(), request))
+                    .isSameAs(saveFailure);
+        }
+
+        // then
+        // Service transaction이 rollback된 후, 새 transaction으로 DB에 남은 값을 확인한다.
+        transactionTemplate.executeWithoutResult(status -> {
+            AttractionSlot slot = entityManager.find(AttractionSlot.class, fixture.slotId());
+            long reservationCount = entityManager.createQuery("""
+                            select count(r) from Reservation r
+                            where r.user.id = :userId and r.attractionSlot.id = :slotId
+                            """, Long.class)
+                    .setParameter("userId", fixture.userId())
+                    .setParameter("slotId", fixture.slotId())
+                    .getSingleResult();
+
+            System.out.printf(
+                    "예약 저장 실패 롤백 결과: 실패직전인원=%d, 롤백후인원=%d, 남은예약=%d%n",
+                    countBeforeFailure.get(), slot.getReservedCount(), reservationCount
+            );
+
+            assertSoftly(softly -> {
+                softly.assertThat(countBeforeFailure.get()).as("예외 직전에 실제 DB에서 정원 확보 완료")
+                        .isEqualTo(1);
+                softly.assertThat(slot.getReservedCount()).as("실패 후 예약 인원 증가가 rollback됨").isZero();
+                softly.assertThat(slot.getRemainingCount()).as("실패 후 잔여 정원이 원래대로 유지됨")
+                        .isEqualTo(SLOT_CAPACITY);
+                softly.assertThat(reservationCount).as("실패한 요청의 예약이 남지 않음").isZero();
             });
         });
     }

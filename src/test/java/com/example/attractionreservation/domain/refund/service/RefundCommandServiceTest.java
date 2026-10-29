@@ -454,9 +454,10 @@ class RefundCommandServiceTest {
         //given
         Long completed = saveRefund(RefundStatus.COMPLETED, adult, 1);
         flushAndClear();
+        String pgId = payment.getPgId();
 
         //when & then
-        assertThatThrownBy(() -> refundCommandService.syncWithPgCancelledAmount(payment.getPgId(), 0L, now))
+        assertThatThrownBy(() -> refundCommandService.syncWithPgCancelledAmount(pgId, 0L, now))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE.getMessage());
         assertThat(find(completed).getStatus()).isEqualTo(RefundStatus.COMPLETED);

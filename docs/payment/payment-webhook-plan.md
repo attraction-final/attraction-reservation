@@ -162,7 +162,7 @@ global/config/SchedulingConfig          @EnableScheduling
     - 원장 `CANCELLED` + PG Paid는 여기에 해당하지 않는다. `COMPENSATED`로 보상 요청을 저장한다(payment-approval.md 4.3).
 - **Processor의 예외 처리**
   - 결과 기록 중 `PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION`: 멈춘 행을 다시 점유한 사이 다른 처리가 먼저 기록한 경우다. 실패로 기록하지 않고 건너뛴다.
-  - 그 밖의 예외는 `recordFailure`로 재시도를 예약한다. 최대 시도 횟수를 넘겨 `DEAD`가 되면 수동 확인 대상이므로 `error` 로그를 남긴다(그 전에는 `warn`).
+  - 그 밖의 예외는 `recordFailure`로 재시도를 예약한다. 최대 시도 횟수(5회)째 실패로 `DEAD`가 되면 수동 확인 대상이므로 `error` 로그를 남긴다(그 전에는 `warn`).
   - `processPending`은 웹훅마다 예외를 격리해, 한 웹훅의 예외가 같은 배치의 나머지 처리를 막지 않는다.
 
 ### 스케줄러 설정

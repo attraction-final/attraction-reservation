@@ -1,7 +1,11 @@
 package com.example.attractionreservation.domain.attraction.repository;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 
@@ -18,4 +22,9 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long>, A
 
     // 수정 시 이름 중복 확인 (자기 자신은 제외)
     boolean existsByNameAndIdNotAndDeletedAtIsNull(String name, Long id);
+
+    // ★ 추가: 슬롯 등록·시간 수정 시 같은 어트랙션의 겹침 검사를 한 명씩 하도록 어트랙션 행을 잠근다
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId AND a.deletedAt IS NULL")
+    Optional<Attraction> findActiveByIdForUpdate(@Param("attractionId") Long attractionId);
 }

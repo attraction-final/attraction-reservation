@@ -100,6 +100,7 @@ class ReservationConcurrencyIntegrationTest {
     private Fixture fixture;
     private OverlappingSlot overlappingSlot;
     private Long nonOverlappingSlotId;
+    private OtherMember otherMember;
 
     // 테스트용 MySQL
     @TestConfiguration(proxyBeanMethods = false)
@@ -157,6 +158,14 @@ class ReservationConcurrencyIntegrationTest {
         transactionTemplate.executeWithoutResult(status -> {
             entityManager.createQuery("delete from Reservation r where r.user.id = :userId")
                     .setParameter("userId", fixture.userId()).executeUpdate();
+            if (otherMember != null) {
+                entityManager.createQuery("delete from Reservation r where r.user.id = :userId")
+                        .setParameter("userId", otherMember.userId()).executeUpdate();
+                entityManager.remove(entityManager.find(Ticket.class, otherMember.ticketId()));
+                entityManager.remove(entityManager.find(OrderItem.class, otherMember.orderItemId()));
+                entityManager.remove(entityManager.find(Order.class, otherMember.orderId()));
+                entityManager.remove(entityManager.find(User.class, otherMember.userId()));
+            }
             entityManager.remove(entityManager.find(Ticket.class, fixture.ticketId()));
             if (nonOverlappingSlotId != null) {
                 entityManager.remove(entityManager.find(AttractionSlot.class, nonOverlappingSlotId));
@@ -405,18 +414,91 @@ class ReservationConcurrencyIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("서로 다른 회원이 정원이 충분한 같은 슬롯에 동시에 예약하면 모두 성공한다")
+    void createReservation_DifferentUsersAndSameSlotConcurrently_BothSucceed() throws Exception {
+        // given
+        otherMember = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            User user = User.builder()
+                    .email("other-reservation-concurrency@test.com")
+                    .password("test-password")
+                    .nickname("다른예약회원")
+                    .build();
+            entityManager.persist(user);
+            TicketProduct product = entityManager.getReference(TicketProduct.class, fixture.productId());
+            Order order = Order.create(user, 50000, NOW.toLocalDate());
+            entityManager.persist(order);
+            OrderItem item = OrderItem.create(order, product, 1);
+            entityManager.persist(item);
+            Ticket ticket = new Ticket(NOW.toLocalDate(), item);
+            ticket.entryTicket(NOW.withHour(10).atZone(KstTime.ZONE).toInstant());
+            entityManager.persist(ticket);
+            entityManager.flush();
+            return new OtherMember(user.getId(), order.getId(), item.getId(), ticket.getId());
+        }));
+        List<Long> userIds = List.of(fixture.userId(), otherMember.userId());
+        List<ReservationAttempt> attempts = List.of(
+                new ReservationAttempt(fixture.userId(),
+                        new CreateReservationRequest(fixture.ticketId(), fixture.slotId())),
+                new ReservationAttempt(otherMember.userId(),
+                        new CreateReservationRequest(otherMember.ticketId(), fixture.slotId()))
+        );
+
+        // when
+        List<RuntimeException> results = reserveAttemptsConcurrently(attempts);
+        long successCount = results.stream().filter(Objects::isNull).count();
+
+        // then
+        transactionTemplate.executeWithoutResult(status -> {
+            List<Long> reservedUserIds = entityManager.createQuery("""
+                            select r.user.id from Reservation r
+                            where r.user.id in :userIds
+                              and r.attractionSlot.id = :slotId
+                              and r.status = :status
+                            """, Long.class)
+                    .setParameter("userIds", userIds)
+                    .setParameter("slotId", fixture.slotId())
+                    .setParameter("status", ReservationStatus.RESERVED)
+                    .getResultList();
+            AttractionSlot slot = entityManager.find(AttractionSlot.class, fixture.slotId());
+
+            System.out.printf(
+                    "다른 회원 동시 예약 결과: 요청=%d, 성공=%d, 활성 예약=%d, 예약회원=%s, reservedCount=%d, 실패=%s%n",
+                    attempts.size(), successCount, reservedUserIds.size(), reservedUserIds,
+                    slot.getReservedCount(), results.stream().filter(Objects::nonNull).toList()
+            );
+
+            assertSoftly(softly -> {
+                softly.assertThat(results).as("각자 본인 티켓으로 두 요청 모두 성공")
+                        .hasSize(2).containsOnlyNulls();
+                softly.assertThat(successCount).as("서로 다른 회원의 성공 요청 수").isEqualTo(2);
+                softly.assertThat(reservedUserIds).as("두 회원의 활성 예약이 각각 한 건씩 저장됨")
+                        .containsExactlyInAnyOrder(fixture.userId(), otherMember.userId());
+                softly.assertThat(slot.getReservedCount()).as("최종 슬롯 예약 인원").isEqualTo(2);
+                softly.assertThat(slot.getReservedCount()).as("예약 인원과 실제 활성 예약 수의 일치")
+                        .isEqualTo(reservedUserIds.size());
+            });
+        });
+    }
+
     // 테스트 동시 실행 담당
     private List<RuntimeException> reserveConcurrently(CreateReservationRequest request) throws Exception {
         return reserveConcurrently(Collections.nCopies(REQUEST_COUNT, request));
     }
 
     private List<RuntimeException> reserveConcurrently(List<CreateReservationRequest> requests) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(requests.size());  // 요청 수만큼 작업 스레드 준비
-        CountDownLatch ready = new CountDownLatch(requests.size());
+        List<ReservationAttempt> attempts = requests.stream()
+                .map(request -> new ReservationAttempt(fixture.userId(), request)).toList();
+        return reserveAttemptsConcurrently(attempts);
+    }
+
+    private List<RuntimeException> reserveAttemptsConcurrently(List<ReservationAttempt> attempts) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(attempts.size());  // 요청 수만큼 작업 스레드 준비
+        CountDownLatch ready = new CountDownLatch(attempts.size());
         CountDownLatch start = new CountDownLatch(1);
         List<Future<RuntimeException>> futures = new ArrayList<>();
         try {
-            for (CreateReservationRequest request : requests) {
+            for (ReservationAttempt attempt : attempts) {
                 futures.add(executor.submit(() -> {
                     // static mock은 스레드별로 적용되므로 각 작업에서 같은 기준 시각을 설정한다.
                     try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
@@ -427,7 +509,7 @@ class ReservationConcurrencyIntegrationTest {
                         }
                         try {
                             // 테스트 transaction을 공유하지 않고 Service의 transaction을 각각 시작한다.
-                            reservationService.createReservation(fixture.userId(), request);
+                            reservationService.createReservation(attempt.userId(), attempt.request());
                             return null;
                         } catch (RuntimeException exception) {
                             return exception;
@@ -462,5 +544,11 @@ class ReservationConcurrencyIntegrationTest {
     }
 
     private record TimeConflictDatabaseState(long activeCount, int firstReservedCount, int secondReservedCount) {
+    }
+
+    private record OtherMember(Long userId, Long orderId, Long orderItemId, Long ticketId) {
+    }
+
+    private record ReservationAttempt(Long userId, CreateReservationRequest request) {
     }
 }

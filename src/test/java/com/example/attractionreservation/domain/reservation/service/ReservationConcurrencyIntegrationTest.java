@@ -7,6 +7,7 @@ import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepo
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
+import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
@@ -341,6 +342,67 @@ class ReservationConcurrencyIntegrationTest {
             softly.assertThat((long) totalReservedCount).as("예약 인원 합계와 실제 활성 예약 수의 일치")
                     .isEqualTo(databaseState.activeCount());
         });
+    }
+
+    @Test
+    @DisplayName("예약을 취소한 후 같은 슬롯에 새로 예약하면 취소 이력을 유지하고 한 자리만 사용한다")
+    void createReservation_AfterCancellationSameSlot_CreatesNewReservation() {
+        // given
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+            var original = reservationService.createReservation(fixture.userId(), request);
+
+            // when
+            // 각 Service 호출은 별도 transaction으로 commit된다. 동시 취소·생성 테스트는 아니다.
+            reservationService.cancelReservation(fixture.userId(), original.reservationId());
+            int countAfterCancellation = Objects.requireNonNull(transactionTemplate.execute(status ->
+                    entityManager.find(AttractionSlot.class, fixture.slotId()).getReservedCount()
+            ));
+            var recreated = reservationService.createReservation(fixture.userId(), request);
+
+            // then
+            assertThat(recreated.reservationId()).as("취소한 예약을 복구하지 않고 새 예약 생성")
+                    .isNotEqualTo(original.reservationId());
+            assertThat(recreated.reservationNumber()).as("새 예약의 고유 예약 번호")
+                    .isNotEqualTo(original.reservationNumber());
+            assertThat(countAfterCancellation).as("취소 직후 슬롯 예약 인원 복구").isZero();
+
+            transactionTemplate.executeWithoutResult(status -> {
+                Reservation cancelled = entityManager.find(Reservation.class, original.reservationId());
+                Reservation active = entityManager.find(Reservation.class, recreated.reservationId());
+                List<Reservation> reservations = entityManager.createQuery("""
+                                select r from Reservation r
+                                where r.user.id = :userId
+                                  and r.attractionSlot.id = :slotId
+                                """, Reservation.class)
+                        .setParameter("userId", fixture.userId())
+                        .setParameter("slotId", fixture.slotId())
+                        .getResultList();
+                AttractionSlot slot = entityManager.find(AttractionSlot.class, fixture.slotId());
+                long activeCount = reservations.stream()
+                        .filter(reservation -> reservation.getStatus() == ReservationStatus.RESERVED).count();
+
+                System.out.printf(
+                        "취소 후 재예약 결과: 기존예약=%d(%s), 새예약=%d(%s), 전체이력=%d, 활성예약=%d, 취소직후인원=%d, 최종인원=%d%n",
+                        cancelled.getId(), cancelled.getStatus(), active.getId(), active.getStatus(),
+                        reservations.size(), activeCount, countAfterCancellation, slot.getReservedCount()
+                );
+
+                assertSoftly(softly -> {
+                    softly.assertThat(cancelled.getStatus()).as("기존 예약의 취소 상태 유지")
+                            .isEqualTo(ReservationStatus.CANCELLED);
+                    softly.assertThat(cancelled.getCancelledAt()).as("기존 예약의 취소 시각 유지")
+                            .isEqualTo(NOW.atZone(KstTime.ZONE).toInstant());
+                    softly.assertThat(active.getStatus()).as("새 예약의 활성 상태")
+                            .isEqualTo(ReservationStatus.RESERVED);
+                    softly.assertThat(active.getCancelledAt()).as("새 예약은 취소되지 않음").isNull();
+                    softly.assertThat(reservations).as("취소 이력과 새 예약이 각각 저장됨").hasSize(2);
+                    softly.assertThat(activeCount).as("동일 회원·슬롯의 활성 예약 수").isEqualTo(1);
+                    softly.assertThat(slot.getReservedCount()).as("최종 슬롯 예약 인원").isEqualTo(1);
+                });
+            });
+        }
     }
 
     // 테스트 동시 실행 담당

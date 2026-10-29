@@ -45,6 +45,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
@@ -59,7 +60,7 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 
 // 개선 전에는 실패할 수 있는 회귀 테스트다. 중복 조회와 정원 UPDATE는 실제 MySQL에서 실행한다.
-@DataJpaTest(properties = "spring.datasource.hikari.maximum-pool-size=20")
+@DataJpaTest(properties = "spring.datasource.hikari.maximum-pool-size=20") // DB 연결 최대 20개까지 확보
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -74,9 +75,9 @@ import static org.mockito.Mockito.mockStatic;
 })
 class ReservationConcurrencyIntegrationTest {
 
-    private static final int REQUEST_COUNT = 10;
-    private static final int SLOT_CAPACITY = 20;
-    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 29, 14, 0);
+    private static final int REQUEST_COUNT = 10;  // 동시에 보낼 예약 요청 수 : 10건
+    private static final int SLOT_CAPACITY = 20;  // 슬롯 전체 정원 : 20명
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 29, 14, 0); // 테스트용 현재 시각
 
     @Autowired
     private ReservationService reservationService;
@@ -96,7 +97,9 @@ class ReservationConcurrencyIntegrationTest {
 
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
+    private OverlappingSlot overlappingSlot;
 
+    // 테스트용 MySQL
     @TestConfiguration(proxyBeanMethods = false)
     static class MySqlConfig {
         @Bean
@@ -142,6 +145,7 @@ class ReservationConcurrencyIntegrationTest {
         }));
     }
 
+    // 트랜잭션이 실제 커밋되므로 테스트 종료시 직접 데이터 삭제
     @AfterEach
     void tearDown() {
         if (fixture == null) {
@@ -152,6 +156,10 @@ class ReservationConcurrencyIntegrationTest {
             entityManager.createQuery("delete from Reservation r where r.user.id = :userId")
                     .setParameter("userId", fixture.userId()).executeUpdate();
             entityManager.remove(entityManager.find(Ticket.class, fixture.ticketId()));
+            if (overlappingSlot != null) {
+                entityManager.remove(entityManager.find(AttractionSlot.class, overlappingSlot.slotId()));
+                entityManager.remove(entityManager.find(Attraction.class, overlappingSlot.attractionId()));
+            }
             entityManager.remove(entityManager.find(AttractionSlot.class, fixture.slotId()));
             entityManager.remove(entityManager.find(Attraction.class, fixture.attractionId()));
             entityManager.remove(entityManager.find(OrderItem.class, fixture.orderItemId()));
@@ -169,7 +177,7 @@ class ReservationConcurrencyIntegrationTest {
 
         // when
         List<RuntimeException> results = reserveConcurrently(request);
-        long successCount = results.stream().filter(Objects::isNull).count();
+        long successCount = results.stream().filter(Objects::isNull).count(); // null 개수 세기, null이 예약 성공
         DatabaseState databaseState = Objects.requireNonNull(transactionTemplate.execute(status -> {
             long activeCount = entityManager.createQuery("""
                             select count(r) from Reservation r
@@ -190,6 +198,7 @@ class ReservationConcurrencyIntegrationTest {
                 REQUEST_COUNT, successCount, databaseState.activeCount(), databaseState.reservedCount(),
                 results.stream().filter(Objects::nonNull).toList());
 
+        // 검증을 모아서 확인
         assertSoftly(softly -> {
             softly.assertThat(successCount).as("성공한 요청 수").isEqualTo(1);
             softly.assertThat(databaseState.activeCount()).as("DB에 저장된 활성 예약 수").isEqualTo(1);
@@ -208,13 +217,83 @@ class ReservationConcurrencyIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("같은 회원이 시간이 겹치는 다른 슬롯을 동시에 예약하면 한 건만 성공한다")
+    void createReservation_SameUserAndOverlappingSlotsConcurrently_OnlyOneSucceeds() throws Exception {
+        // given
+        // 기존 슬롯은 16:00~16:30, 추가 슬롯은 다른 어트랙션의 16:10~16:40이다.
+        overlappingSlot = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            Attraction attraction = Attraction.create("시간 충돌 테스트 어트랙션", "테스트 설명", "B구역", 30, 5);
+            entityManager.persist(attraction);
+            AttractionSlot slot = AttractionSlot.create(
+                    attraction, NOW.withHour(16).withMinute(10), SLOT_CAPACITY
+            );
+            entityManager.persist(slot);
+            entityManager.flush();
+            return new OverlappingSlot(attraction.getId(), slot.getId());
+        }));
+        List<Long> slotIds = List.of(fixture.slotId(), overlappingSlot.slotId());
+        List<CreateReservationRequest> requests = List.of(
+                new CreateReservationRequest(fixture.ticketId(), fixture.slotId()),
+                new CreateReservationRequest(fixture.ticketId(), overlappingSlot.slotId())
+        );
+
+        // when
+        List<RuntimeException> results = reserveConcurrently(requests);
+        long successCount = results.stream().filter(Objects::isNull).count();
+        TimeConflictDatabaseState databaseState = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            long activeCount = entityManager.createQuery("""
+                            select count(r) from Reservation r
+                            where r.user.id = :userId
+                              and r.attractionSlot.id in :slotIds
+                              and r.status = :status
+                            """, Long.class)
+                    .setParameter("userId", fixture.userId())
+                    .setParameter("slotIds", slotIds)
+                    .setParameter("status", ReservationStatus.RESERVED)
+                    .getSingleResult();
+            AttractionSlot first = entityManager.find(AttractionSlot.class, fixture.slotId());
+            AttractionSlot second = entityManager.find(AttractionSlot.class, overlappingSlot.slotId());
+            return new TimeConflictDatabaseState(activeCount, first.getReservedCount(), second.getReservedCount());
+        }));
+
+        // then
+        int totalReservedCount = databaseState.firstReservedCount() + databaseState.secondReservedCount();
+        List<RuntimeException> failures = results.stream().filter(Objects::nonNull).toList();
+        System.out.printf(
+                "시간 충돌 동시 예약 결과: 요청=%d, 성공=%d, 활성 예약=%d, 슬롯A=%d, 슬롯B=%d, reservedCount합계=%d, 실패=%s%n",
+                requests.size(), successCount, databaseState.activeCount(), databaseState.firstReservedCount(),
+                databaseState.secondReservedCount(), totalReservedCount, failures
+        );
+
+        assertSoftly(softly -> {
+            softly.assertThat(successCount).as("시간이 겹치는 두 요청 중 성공한 요청 수").isEqualTo(1);
+            softly.assertThat(databaseState.activeCount()).as("두 슬롯에 저장된 활성 예약 수").isEqualTo(1);
+            softly.assertThat(totalReservedCount).as("두 슬롯의 예약 인원 합계").isEqualTo(1);
+            softly.assertThat(databaseState.firstReservedCount()).as("슬롯 A 예약 인원").isIn(0, 1);
+            softly.assertThat(databaseState.secondReservedCount()).as("슬롯 B 예약 인원").isIn(0, 1);
+            softly.assertThat((long) totalReservedCount).as("예약 인원 합계와 실제 활성 예약 수의 일치")
+                    .isEqualTo(databaseState.activeCount());
+            softly.assertThat(failures).as("시간 충돌로 거절된 요청 수").hasSize(1);
+            softly.assertThat(failures).allSatisfy(failure -> assertThat(failure).isInstanceOfSatisfying(
+                    BusinessException.class,
+                    exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.RESERVATION_TIME_CONFLICT)
+            ));
+        });
+    }
+
+    // 테스트 동시 실행 담당
     private List<RuntimeException> reserveConcurrently(CreateReservationRequest request) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(REQUEST_COUNT);
-        CountDownLatch ready = new CountDownLatch(REQUEST_COUNT);
+        return reserveConcurrently(Collections.nCopies(REQUEST_COUNT, request));
+    }
+
+    private List<RuntimeException> reserveConcurrently(List<CreateReservationRequest> requests) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(requests.size());  // 요청 수만큼 작업 스레드 준비
+        CountDownLatch ready = new CountDownLatch(requests.size());
         CountDownLatch start = new CountDownLatch(1);
         List<Future<RuntimeException>> futures = new ArrayList<>();
         try {
-            for (int index = 0; index < REQUEST_COUNT; index++) {
+            for (CreateReservationRequest request : requests) {
                 futures.add(executor.submit(() -> {
                     // static mock은 스레드별로 적용되므로 각 작업에서 같은 기준 시각을 설정한다.
                     try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
@@ -254,5 +333,11 @@ class ReservationConcurrencyIntegrationTest {
     }
 
     private record DatabaseState(long activeCount, int reservedCount) {
+    }
+
+    private record OverlappingSlot(Long attractionId, Long slotId) {
+    }
+
+    private record TimeConflictDatabaseState(long activeCount, int firstReservedCount, int secondReservedCount) {
     }
 }

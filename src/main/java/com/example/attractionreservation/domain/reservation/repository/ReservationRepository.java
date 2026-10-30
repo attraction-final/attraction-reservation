@@ -50,4 +50,10 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long>,
             @Param("reservationId") Long reservationId,
             @Param("userId") Long userId
     );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM Reservation r WHERE r.id = :reservationId")
+    Optional<Reservation> findByIdWithLock(
+            @Param("reservationId") Long reservationId
+    );
 }

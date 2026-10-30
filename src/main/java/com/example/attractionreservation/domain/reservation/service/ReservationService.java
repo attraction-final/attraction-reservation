@@ -220,7 +220,8 @@ public class ReservationService {
     public UpdateAdminReservationCancelResponse adminReservationCancel(Long reservationId, UpdateAdminReservationCancelRequest request) {
 
         // 예약 존재 여부 및 RESERVED 상태 검증
-        Reservation reservation = getReservationById(reservationId);
+        Reservation reservation = reservationRepository.findByIdWithLock(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         if (reservation.getStatus() != ReservationStatus.RESERVED) {
             throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);

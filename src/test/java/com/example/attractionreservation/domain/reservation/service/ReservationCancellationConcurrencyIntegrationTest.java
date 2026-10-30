@@ -7,8 +7,11 @@ import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepo
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
+import com.example.attractionreservation.domain.reservation.dto.UpdateAdminReservationCancelRequest;
+import com.example.attractionreservation.domain.reservation.dto.UpdateAdminReservationCancelResponse;
 import com.example.attractionreservation.domain.reservation.dto.UpdateReservationCancelResponse;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
+import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
@@ -47,8 +50,10 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -208,6 +213,87 @@ class ReservationCancellationConcurrencyIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("같은 예약에 사용자 취소와 관리자 강제 취소가 동시에 들어와도 한 번만 성공하고 정원을 한 번만 복구한다")
+    void cancelReservation_UserAndAdminConcurrently_OnlyOneReleaseSucceeds() throws Exception {
+        // given
+        DatabaseState initialState = readDatabaseState();
+        assertThat(initialState.reservationAStatus()).isEqualTo(ReservationStatus.RESERVED);
+        assertThat(initialState.reservationBStatus()).isEqualTo(ReservationStatus.RESERVED);
+        assertThat(initialState.activeCount()).isEqualTo(2);
+        assertThat(initialState.reservedCount()).isEqualTo(2);
+        ReservationCancelReason adminReason = ReservationCancelReason.OPERATIONAL_ISSUE;
+        UpdateAdminReservationCancelRequest adminRequest = new UpdateAdminReservationCancelRequest(adminReason);
+
+        Callable<MixedCancelResult> userTask = () -> {
+            try {
+                return new MixedCancelResult("USER", reservationService.cancelReservation(
+                        fixture.first().userId(), fixture.reservationAId()), null, null);
+            } catch (RuntimeException exception) {
+                return new MixedCancelResult("USER", null, null, exception);
+            }
+        };
+        Callable<MixedCancelResult> adminTask = () -> {
+            try {
+                return new MixedCancelResult("ADMIN", null, reservationService.adminReservationCancel(
+                        fixture.reservationAId(), adminRequest), null);
+            } catch (RuntimeException exception) {
+                return new MixedCancelResult("ADMIN", null, null, exception);
+            }
+        };
+
+        // when
+        List<MixedCancelResult> results = runConcurrently(List.of(userTask, adminTask));
+        List<MixedCancelResult> successes = results.stream().filter(result -> result.failure() == null).toList();
+        List<RuntimeException> failures = results.stream().map(MixedCancelResult::failure)
+                .filter(Objects::nonNull).toList();
+        DatabaseState actual = readDatabaseState();
+
+        // then
+        System.out.printf(
+                "사용자·관리자 동시 취소 결과: 요청=%d, 성공=%d, 실패=%d, 예약A=%s, 예약B=%s, 활성예약=%d, reservedCount=%d, 취소사유=%s, 요청별결과=%s%n",
+                results.size(), successes.size(), failures.size(), actual.reservationAStatus(),
+                actual.reservationBStatus(), actual.activeCount(), actual.reservedCount(),
+                actual.reservationACancelReason(), results
+        );
+
+        assertSoftly(softly -> {
+            softly.assertThat(successes).as("사용자·관리자 중 취소 성공은 1건만 반환").hasSize(1);
+            softly.assertThat(failures).as("나머지 취소 요청 1건은 거절").hasSize(1);
+            softly.assertThat(actual.reservationAStatus()).as("취소 대상 A의 상태")
+                    .isEqualTo(ReservationStatus.CANCELLED);
+            softly.assertThat(actual.reservationBStatus()).as("다른 회원의 예약 B는 유지")
+                    .isEqualTo(ReservationStatus.RESERVED);
+            softly.assertThat(actual.activeCount()).as("남은 활성 예약은 B 한 건").isEqualTo(1);
+            softly.assertThat(actual.reservedCount()).as("정원 복구는 한 번만 수행").isEqualTo(1);
+            softly.assertThat((long) actual.reservedCount()).as("예약 인원과 실제 활성 예약 수 일치")
+                    .isEqualTo(actual.activeCount());
+            softly.assertThat(failures).allSatisfy(failure -> assertThat(failure).isInstanceOfSatisfying(
+                    BusinessException.class,
+                    exception -> assertThat(exception.getErrorCode())
+                            .isEqualTo(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS)
+            ));
+            softly.assertThat(successes).allSatisfy(result -> {
+                if (result.userResponse() != null) {
+                    assertThat(result.userResponse().reservationId()).isEqualTo(fixture.reservationAId());
+                    assertThat(result.userResponse().status()).isEqualTo(ReservationStatus.CANCELLED);
+                    assertThat(result.userResponse().cancelledAt()).isEqualTo(NOW.atZone(KstTime.ZONE).toInstant());
+                } else {
+                    assertThat(result.adminResponse()).isNotNull();
+                    assertThat(result.adminResponse().reservationId()).isEqualTo(fixture.reservationAId());
+                    assertThat(result.adminResponse().status()).isEqualTo(ReservationStatus.CANCELLED);
+                    assertThat(result.adminResponse().cancelledAt()).isNotNull();
+                    assertThat(result.adminResponse().cancelReason()).isEqualTo(adminReason);
+                }
+            });
+            if (successes.size() == 1) {
+                ReservationCancelReason expectedReason = successes.get(0).adminResponse() != null ? adminReason : null;
+                softly.assertThat(actual.reservationACancelReason()).as("최종 취소 사유는 성공한 요청의 결과와 일치")
+                        .isEqualTo(expectedReason);
+            }
+        });
+    }
+
     private Member createMember(String email, TicketProduct product) {
         User user = User.builder().email(email).password("test-password").nickname("취소예약회원").build();
         entityManager.persist(user);
@@ -233,17 +319,30 @@ class ReservationCancellationConcurrencyIntegrationTest {
                     .setParameter("slotId", fixture.slotId())
                     .setParameter("status", ReservationStatus.RESERVED)
                     .getSingleResult();
-            return new DatabaseState(first.getStatus(), second.getStatus(), activeCount, slot.getReservedCount());
+            return new DatabaseState(first.getStatus(), second.getStatus(), activeCount, slot.getReservedCount(),
+                    first.getCancelReason());
         }));
     }
 
     private List<CancelResult> cancelConcurrently() throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(REQUEST_COUNT);
-        CountDownLatch ready = new CountDownLatch(REQUEST_COUNT);
+        Callable<CancelResult> task = () -> {
+            try {
+                return new CancelResult(reservationService.cancelReservation(
+                        fixture.first().userId(), fixture.reservationAId()), null);
+            } catch (RuntimeException exception) {
+                return new CancelResult(null, exception);
+            }
+        };
+        return runConcurrently(Collections.nCopies(REQUEST_COUNT, task));
+    }
+
+    private <T> List<T> runConcurrently(List<Callable<T>> tasks) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(tasks.size());
+        CountDownLatch ready = new CountDownLatch(tasks.size());
         CountDownLatch start = new CountDownLatch(1);
-        List<Future<CancelResult>> futures = new ArrayList<>();
+        List<Future<T>> futures = new ArrayList<>();
         try {
-            for (int index = 0; index < REQUEST_COUNT; index++) {
+            for (Callable<T> task : tasks) {
                 futures.add(executor.submit(() -> {
                     try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
                         time.when(KstTime::now).thenReturn(NOW);
@@ -251,20 +350,15 @@ class ReservationCancellationConcurrencyIntegrationTest {
                         if (!start.await(10, TimeUnit.SECONDS)) {
                             throw new IllegalStateException("취소 동시 요청 시작 대기 시간 초과");
                         }
-                        try {
-                            // 각 작업에서 별도의 Service transaction을 시작한다.
-                            return new CancelResult(reservationService.cancelReservation(
-                                    fixture.first().userId(), fixture.reservationAId()), null);
-                        } catch (RuntimeException exception) {
-                            return new CancelResult(null, exception);
-                        }
+                        // 각 작업에서 별도의 Service transaction을 시작한다.
+                        return task.call();
                     }
                 }));
             }
             assertThat(ready.await(20, TimeUnit.SECONDS)).as("모든 취소 요청의 시작 준비").isTrue();
             start.countDown();
-            List<CancelResult> results = new ArrayList<>();
-            for (Future<CancelResult> future : futures) {
+            List<T> results = new ArrayList<>();
+            for (Future<T> future : futures) {
                 results.add(future.get(30, TimeUnit.SECONDS));
             }
             return results;
@@ -284,9 +378,13 @@ class ReservationCancellationConcurrencyIntegrationTest {
     }
 
     private record DatabaseState(ReservationStatus reservationAStatus, ReservationStatus reservationBStatus,
-                                 long activeCount, int reservedCount) {
+                                 long activeCount, int reservedCount, ReservationCancelReason reservationACancelReason) {
     }
 
     private record CancelResult(UpdateReservationCancelResponse response, RuntimeException failure) {
+    }
+
+    private record MixedCancelResult(String actor, UpdateReservationCancelResponse userResponse,
+                                     UpdateAdminReservationCancelResponse adminResponse, RuntimeException failure) {
     }
 }

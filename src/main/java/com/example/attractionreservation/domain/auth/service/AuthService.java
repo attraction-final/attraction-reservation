@@ -21,7 +21,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -35,7 +37,7 @@ public class AuthService {
     @Transactional(readOnly = true)
     public CreateAuthLoginServiceResponse login(CreateAuthLoginRequest request) {
         User user = authenticateUser(request);
-        return issueTokens(user.getId());
+        return issueTokens(user.getId(), "PASSWORD");
     }
 
     @Transactional(readOnly = true)
@@ -56,10 +58,13 @@ public class AuthService {
             throw new BusinessException(ErrorCode.USER_NOT_ACTIVE);
         }
 
-        return issueTokens(user.getId());
+        return issueTokens(user.getId(), "SOCIAL_CODE");
     }
 
-    private CreateAuthLoginServiceResponse issueTokens(Long userId) {
+    private CreateAuthLoginServiceResponse issueTokens(
+            Long userId,
+            String authMethod
+    ) {
         // 일반 로그인과 소셜 코드 교환에 동일한 토큰 발급 정책을 적용한다.
         String accessToken = jwtProvider.createAccessToken(userId);
         String refreshToken = jwtProvider.createRefreshToken(userId);
@@ -70,6 +75,13 @@ public class AuthService {
         CreateAuthLoginResponse response = CreateAuthLoginResponse.of(
                 accessToken,
                 jwtProvider.getAccessTokenExpirationSeconds()
+        );
+
+        log.info(
+                "event=AUTH_TOKENS_ISSUED result=SUCCESS "
+                        + "userId={} authMethod={}",
+                userId,
+                authMethod
         );
 
         return CreateAuthLoginServiceResponse.of(response, refreshToken);
@@ -93,10 +105,17 @@ public class AuthService {
         }
 
         // Refresh Token을 변경하지 않고 Access Token만 발급한다.
-        return CreateAuthRefreshResponse.of(
+        CreateAuthRefreshResponse response = CreateAuthRefreshResponse.of(
                 jwtProvider.createAccessToken(userId),
                 jwtProvider.getAccessTokenExpirationSeconds()
         );
+
+        log.info(
+                "event=AUTH_ACCESS_TOKEN_REISSUED result=SUCCESS userId={}",
+                userId
+        );
+
+        return response;
     }
 
     private Long validateRefreshToken(String refreshToken) {
@@ -129,6 +148,12 @@ public class AuthService {
                 || !refreshTokenRepository.deleteIfMatches(userId, refreshToken)) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
+
+        log.info(
+                "event=AUTH_LOGOUT_COMPLETED result=SUCCESS "
+                        + "userId={} refreshTokenRevoked=true",
+                userId
+        );
     }
 
 

@@ -222,13 +222,22 @@ public class OrderService {
                         now
                 )) {
                     cancelledCount++;
+
+                    log.info(
+                            "event=ORDER_CANCELLED result=SUCCESS "
+                                    + "userId={} orderId={} cancelType=AUTO status=CANCELLED",
+                            userId,
+                            orderId
+                    );
                 }
             } catch (BusinessException exception) {
                 // 실패한 주문은 해당 트랜잭션에서 롤백하고 다음 주문을 처리한다.
                 log.warn(
-                        "만료 주문 자동 취소 실패: orderId={}, errorCode={}",
+                        "event=ORDER_AUTO_CANCEL_FAILED result=FAILURE "
+                                + "userId={} orderId={} errorCode={}",
+                        userId,
                         orderId,
-                        exception.getErrorCode()
+                        exception.getErrorCode().name()
                 );
             }
         }

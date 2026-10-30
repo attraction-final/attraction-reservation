@@ -25,8 +25,9 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.DeleteMapping;
 
 import java.time.Duration;
+import lombok.extern.slf4j.Slf4j;
 
-
+@Slf4j
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/users")
@@ -40,6 +41,11 @@ public class UserController {
             @Valid @RequestBody CreateUserRequest request
     ) {
         CreateUserResponse response = userService.signup(request);
+
+        log.info(
+                "event=USER_SIGNUP_COMPLETED result=SUCCESS userId={}",
+                response.id()
+        );
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
@@ -76,6 +82,11 @@ public class UserController {
         // 요청값으로 회원 ID를 받지 않고 인증된 본인만 탈퇴 처리한다.
         userWithdrawalFacade.withdraw(userId);
 
+        log.info(
+                "event=USER_WITHDRAWAL_COMPLETED result=SUCCESS userId={}",
+                userId
+        );
+
         // 서버에서 토큰을 폐기한 뒤 브라우저의 Refresh Token 쿠키도 삭제한다.
         ResponseCookie expiredCookie = ResponseCookie
                 .from("refreshToken", "")
@@ -103,6 +114,11 @@ public class UserController {
             @Valid @RequestBody UpdatePasswordRequest request
     ) {
         userService.updatePassword(userId, request);
+
+        log.info(
+                "event=USER_PASSWORD_CHANGED result=SUCCESS userId={}",
+                userId
+        );
 
         return ResponseEntity.ok(
                 ApiResponse.ok("비밀번호 변경에 성공했습니다.", null)

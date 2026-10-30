@@ -18,6 +18,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.event.Level;
+import org.springframework.web.servlet.HandlerMapping;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,14 +30,60 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     // 서비스 또는 엔티티의 비즈니스 규칙을 위반한 경우
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
+    public ResponseEntity<ApiResponse<Void>> handleBusinessException(
+            BusinessException exception,
+            HttpServletRequest request
+    ) {
         ErrorCode errorCode = exception.getErrorCode();
-        // 서비스에서 직접 만든 메시지가 있으면 그 메시지를, 없으면 ErrorCode 기본 메시지를 내보낸다.
+
+        // 실제 요청값 대신 Spring이 매칭한 경로 형식을 기록한다.
+        Object matchedPattern = request.getAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE
+        );
+        String route = matchedPattern == null
+                ? "UNKNOWN"
+                : matchedPattern.toString();
+
+        boolean authenticationFailure = switch (errorCode) {
+            case INVALID_LOGIN_CREDENTIALS,
+                 INVALID_ACCESS_TOKEN,
+                 INVALID_REFRESH_TOKEN,
+                 SOCIAL_LOGIN_CODE_INVALID,
+                 UNAUTHORIZED,
+                 ACCESS_DENIED,
+                 USER_NOT_ACTIVE -> true;
+            default -> false;
+        };
+
+        Level level = Level.INFO;
+        String result = "REJECTED";
+
+        if (errorCode.getStatus().is5xxServerError()) {
+            level = Level.ERROR;
+            result = "FAILURE";
+        } else if (authenticationFailure) {
+            level = Level.WARN;
+        }
+
+        log.atLevel(level).log(
+                "event=BUSINESS_EXCEPTION result={} "
+                        + "method={} route={} errorCode={} httpStatus={}",
+                result,
+                request.getMethod(),
+                route,
+                errorCode.name(),
+                errorCode.getStatus().value()
+        );
+
+        // 서비스에서 직접 만든 메시지가 있으면 그 메시지를,
+        // 없으면 ErrorCode 기본 메시지를 내보낸다.
         String message = exception.getMessage();
+
         return ResponseEntity.status(errorCode.getStatus())
                 .body(ApiResponse.error(
-                     errorCode,
-                     message != null ? message : errorCode.getMessage()));
+                        errorCode,
+                        message != null ? message : errorCode.getMessage()
+                ));
     }
 
     // @Valid가 적용된 요청 본문의 필드 검증에 실패한 경우
@@ -100,14 +150,27 @@ public class GlobalExceptionHandler {
 
     // 예상하지 못한 DB 제약 조건 위반이 발생한 경우
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation() {
-        return ResponseEntity.internalServerError().body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR));
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception
+    ) {
+        log.error(
+                "event=DATABASE_CONSTRAINT_ERROR result=FAILURE exceptionType={}",
+                exception.getClass().getSimpleName(),
+                exception
+        );
+
+        return ResponseEntity.internalServerError()
+                .body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR));
     }
 
     // 위에서 처리하지 못한 예외가 발생한 경우
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception exception) {
-        exception.printStackTrace();
+        log.error(
+                "event=UNEXPECTED_SERVER_ERROR result=FAILURE exceptionType={}",
+                exception.getClass().getSimpleName(),
+                exception
+        );
 
         return ResponseEntity.internalServerError()
                 .body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR));

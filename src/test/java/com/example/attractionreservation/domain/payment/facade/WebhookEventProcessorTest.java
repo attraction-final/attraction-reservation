@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -143,6 +144,22 @@ class WebhookEventProcessorTest {
         //then
         assertThat(output).contains("최대 시도 초과, 수동 확인 필요").doesNotContain("재시도 예정");
         assertThat(output.getAll().lines().filter(line -> line.contains("최대 시도 초과, 수동 확인 필요")))
+                .singleElement().asString().contains("ERROR");
+    }
+
+    @Test
+    @DisplayName("처리 실패를 기록하지 못하면 원래 실패 원인을 error 로그로 남기고 기록 실패 예외를 전파한다.")
+    void process_recordFailureFailed_LogOriginalCauseAndRethrow(CapturedOutput output) {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willThrow(new IllegalStateException("원래 처리 실패"));
+        CannotAcquireLockException recordError = new CannotAcquireLockException("실패 기록 락 충돌");
+        given(webhookEventCommandService.recordFailure(eq(EVENT_ID), any(), any())).willThrow(recordError);
+
+        //when & then
+        assertThatThrownBy(() -> webhookEventProcessor.process(EVENT_ID)).isSameAs(recordError);
+        assertThat(output).contains("처리 실패를 기록하지 못함").contains("원래 처리 실패");
+        assertThat(output.getAll().lines().filter(line -> line.contains("처리 실패를 기록하지 못함")))
                 .singleElement().asString().contains("ERROR");
     }
 

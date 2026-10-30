@@ -14,7 +14,14 @@ import java.time.LocalTime;
 
 @Getter
 @Entity
-@Table(name = "attraction_slots")
+@Table(
+        name = "attraction_slots",
+        // ★ 추가: "어느 어트랙션의 언제 시작하는 슬롯"을 찾는 조회 3개가 모두 사용
+        indexes = @Index(
+                name = "idx_attraction_slots_attraction_starts",
+                columnList = "attraction_id, starts_at"
+        )
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AttractionSlot extends BaseTimeEntity {
 

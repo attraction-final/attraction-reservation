@@ -25,7 +25,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
             String providerUserId
     );
 
-    // 같은 회원의 탈퇴 요청을 순서대로 처리하도록 회원 행을 잠근다.
+    // 같은 회원의 탈퇴 요청 및 같은 회원의 예약을 순서대로 처리하도록 회원 행을 잠근다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.id = :userId")
     Optional<User> findByIdForUpdate(@Param("userId") Long userId);

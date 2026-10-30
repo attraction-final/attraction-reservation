@@ -155,7 +155,7 @@ PG_PENDING ──→ DONE        (조회: 취소 완료)
 - `PortOneClient.cancelPayment`의 멱등 키(`Idempotency-Key`)는 **호출마다 새로 만들고, 한 호출 안의 재시도(통신 실패, 앞선 요청 처리 중)에서만 같은 키**를 쓴다.
   - PortOne은 같은 키의 응답(실패 포함)을 **3시간 동안 저장**해 돌려준다. 호출 간에 키를 고정하면 한 번 실패한 취소를 다시 시도해도 저장된 실패 응답만 받는다.
   - 통신 실패 뒤 같은 키로 재시도했는데 앞선 요청이 처리 중이면 PortOne은 409 `IDEMPOTENCY_OUTSTANDING_REQUEST`로 응답한다. 1초(`portone.cancel-outstanding-retry-delay`)를 기다려 같은 키로 재시도하며(처리 중 응답이 연속되면 2초), 횟수는 통신 재시도와 함께 최대 3회로 센다(KAN-90). 처리 중 응답은 통신 실패 뒤에만 오므로 실제로는 `타임아웃 → 처리 중 → 1초 대기 → 마지막 시도`로 재시도가 1번이다.
-  - 마지막 시도까지 처리 중이면 실패로 알리지 않고 `UNKNOWN`을 반환해 `PG_PENDING`으로 조회로만 확정한다. 실패(`FAILED`)로 기록하면 다음 재시도가 새 키로 취소를 보내, 앞선 요청이 아직 PG 취소 내역에 나타나기 전이면 다시 취소될 수 있기 때문이다.
+  - 한 번이라도 처리 중 응답을 받았는데 결과를 확인하지 못하고 재시도를 다 쓰면(마지막이 처리 중이든 통신 실패든) 실패로 알리지 않고 `UNKNOWN`을 반환해 `PG_PENDING`으로 조회로만 확정한다. 실패(`FAILED`)로 기록하면 다음 재시도가 새 키로 취소를 보내, 앞선 요청이 아직 PG 취소 내역에 나타나기 전이면 다시 취소될 수 있기 때문이다.
 - 중복 환불 방지: 즉시 시도·스케줄러·멈춘 행 재점유가 겹쳐 같은 결제를 두 번 전체 취소해도, 두 번째는 `PAYMENT_ALREADY_CANCELLED`로 응답되고 성공(DONE)으로 처리된다.
 
 ### PG 취소 결과 확인 (`PG_PENDING`)
@@ -208,7 +208,7 @@ payment:
 | `failPaymentWithCompensation` 트랜잭션 실패 | 결제 실패·보상 요청 모두 롤백. 다음 요청에서 다시 판단 |
 | 커밋 직후 즉시 시도 전 서버 종료 | 보상 요청이 `REQUESTED`로 남아 스케줄러가 처리 |
 | 즉시 PG 취소 실패 | `FAILED` + 백오프, 스케줄러 재시도 (새 멱등 키) |
-| 즉시 PG 취소가 끝까지 "앞선 요청 처리 중"(409 `IDEMPOTENCY_OUTSTANDING_REQUEST`) | `UNKNOWN` → `PG_PENDING`. 새 키로 다시 취소하지 않고 조회로 확정 |
+| 즉시 PG 취소 중 "앞선 요청 처리 중"(409 `IDEMPOTENCY_OUTSTANDING_REQUEST`) 응답 뒤 결과 미확인 | `UNKNOWN` → `PG_PENDING`. 새 키로 다시 취소하지 않고 조회로 확정 |
 | PG 취소 성공 후 `DONE` 기록 전 종료 | 5분 뒤 재점유 → 재시도 전 조회에서 PG `CANCELLED` 확인 → 취소를 다시 보내지 않고 `DONE` |
 | `REQUESTED` 응답 후 `PG_PENDING` 기록 전 종료·기록 실패 | 재점유 또는 `FAILED` 재시도 → 재시도 전 조회에서 `REQUESTED` 내역 확인 → 취소를 다시 보내지 않고 `PG_PENDING` |
 | 재시도 전 PG 조회 실패 | 취소를 보내지 않고 `FAILED` + 백오프 |

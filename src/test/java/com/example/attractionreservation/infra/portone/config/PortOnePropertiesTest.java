@@ -61,6 +61,36 @@ class PortOnePropertiesTest {
     }
 
     @Test
+    @DisplayName("처리 중 응답 재시도 대기 시간이 10초를 넘으면 멈춘 행 재점유 기준을 넘을 수 있으므로 설정 검증에 실패한다.")
+    void cancelOutstandingRetryDelay_overMax_ValidationFails() {
+        //given
+        PortOneProperties properties = new PortOneProperties();
+        properties.setCancelOutstandingRetryDelay(Duration.ofSeconds(10).plusMillis(1));
+
+        //when
+        Set<ConstraintViolation<PortOneProperties>> violations =
+                validator.validateProperty(properties, "cancelOutstandingRetryDelay");
+
+        //then
+        assertThat(violations).isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("처리 중 응답 재시도 대기 시간이 상한인 10초면 허용한다.")
+    void cancelOutstandingRetryDelay_max_ValidationPasses() {
+        //given
+        PortOneProperties properties = new PortOneProperties();
+        properties.setCancelOutstandingRetryDelay(Duration.ofSeconds(10));
+
+        //when
+        Set<ConstraintViolation<PortOneProperties>> violations =
+                validator.validateProperty(properties, "cancelOutstandingRetryDelay");
+
+        //then
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
     @DisplayName("처리 중 응답 재시도 대기 시간을 설정하지 않으면 기본값 1초를 쓴다.")
     void cancelOutstandingRetryDelay_notSet_DefaultOneSecond() {
         //given & when

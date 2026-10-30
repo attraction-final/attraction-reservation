@@ -87,8 +87,9 @@ public class WebhookEventProcessor {
         try {
             status = webhookEventCommandService.recordFailure(eventId, e.getMessage(), Instant.now());
         } catch (RuntimeException recordError) {
-            // 기록 실패 예외만 위로 전파되므로 원래 처리 실패 원인을 여기서 남긴다. 웹훅은 처리 중으로 남아 재점유로 재시도된다.
-            log.error("[Webhook] 처리 실패를 기록하지 못함, 재점유로 재시도 예정: eventId={}, pgId={}", eventId, pgId, e);
+            // 기록 실패 예외만 위로 전파되므로 원래 처리 실패 원인을 여기서 남긴다.
+            // 대부분 롤백돼 처리 중으로 남고 재점유로 재시도되지만, 다른 처리가 먼저 상태를 바꿨거나 커밋 결과가 불확실할 수 있어 단정하지 않는다.
+            log.error("[Webhook] 처리 실패를 기록하지 못함, 웹훅 상태 확인 필요: eventId={}, pgId={}", eventId, pgId, e);
             throw recordError;
         }
 

@@ -468,19 +468,22 @@ class PortOneClientTest {
     }
 
     @Test
-    @DisplayName("앞선 요청 처리 중 응답 뒤 마지막 시도가 통신 실패로 끝나면 결제 취소 실패로 처리한다.")
-    void cancelPayment_outstandingThenTimeoutLast_Fail() {
+    @DisplayName("앞선 요청 처리 중 응답을 받은 뒤 마지막 시도가 통신 실패로 끝나도 앞선 요청이 PG에 도달했으므로 실패로 보지 않고 UNKNOWN을 반환한다.")
+    void cancelPayment_outstandingThenTimeoutLast_Unknown() {
         //given
-        server.expect(ExpectedCount.times(2), requestTo(CANCEL_URL))
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+        server.expect(requestTo(CANCEL_URL))
                 .andRespond(outstandingRequest());
         server.expect(requestTo(CANCEL_URL))
                 .andRespond(withException(new SocketTimeoutException("read timed out")));
 
-        //when & then
-        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage(ErrorCode.PAYMENT_CANCELLATION_FAILED.getMessage());
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L, 10000L);
+
+        //then
         server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
     }
 
     @Test

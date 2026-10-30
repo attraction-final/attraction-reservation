@@ -192,9 +192,13 @@ public class RefundCommandService {
      * (PROCESSING·FAILED·DEAD)이 정확히 1건이면 PG에 반영된 것으로 보고 완료 처리한다.
      * REQUESTED는 아직 PG에 보낸 적이 없으므로 후보가 아니다. 그 밖의 경우는 자동으로 맞추지 않는다.
      *
+     * <p>PG 취소 금액이 완료 환불 합계보다 작으면, 트랜잭션 밖에서 조회한 PG 값이 그 사이 완료된 환불보다 오래된 것이다.
+     * 다시 조회하면 맞을 수 있으므로 불일치로 보지 않고 재시도가 필요한 오류를 던진다.
+     *
      * <p>결과 기록과 같이 결제를 먼저 잠그므로, 같은 환불의 완료 기록과 겹치면 한쪽만 완료한다.
      *
      * @return ALREADY_DONE(이미 맞음), REFUND_SYNCED(1건 완료), REFUND_MISMATCH(수동 확인 필요)
+     * @throws BusinessException PG 취소 금액이 완료 환불 합계보다 작으면 {@code REFUND_PG_CANCELLED_AMOUNT_STALE}
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSyncResult syncWithPgCancelledAmount(String pgId, long pgCancelledAmount, Instant now) {
@@ -203,12 +207,17 @@ public class RefundCommandService {
 
         long completedAmount = refundRepository.sumRefundAmountByPaymentIdAndStatus(
                 payment.getId(), RefundStatus.COMPLETED);
+        // 트랜잭션 밖에서 조회한 PG 값이 그 사이 완료된 환불보다 오래된 경우다. 다시 조회하면 맞을 수 있으므로 재시도한다.
+        // 뺄셈이 넘치지 않도록 차이를 구하기 전에 비교한다.
+        if (pgCancelledAmount < completedAmount) {
+            throw new BusinessException(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE);
+        }
         long unsyncedAmount = pgCancelledAmount - completedAmount;
 
         if (unsyncedAmount == 0) {
             return PaymentSyncResult.ALREADY_DONE;
         }
-        if (unsyncedAmount < 0 || unsyncedAmount > Integer.MAX_VALUE) {
+        if (unsyncedAmount > Integer.MAX_VALUE) {
             return PaymentSyncResult.REFUND_MISMATCH;
         }
 

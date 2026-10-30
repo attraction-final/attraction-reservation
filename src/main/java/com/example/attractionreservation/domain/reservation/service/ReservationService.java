@@ -159,7 +159,8 @@ public class ReservationService {
     @Transactional
     public UpdateReservationCancelResponse cancelReservation(Long userId, Long reservationId) {
 
-        Reservation reservation = getReservationByIdAndUserId(reservationId, userId);
+        Reservation reservation = reservationRepository.findByIdAndUserIdWithLock(reservationId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         // 예약 상태가 RESERVED인지 확인
         if (reservation.getStatus() != ReservationStatus.RESERVED) {

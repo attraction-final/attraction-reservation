@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.payment.facade;
 
 import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.entity.enums.WebhookStatus;
 import com.example.attractionreservation.domain.payment.service.WebhookEventCommandService;
 import com.example.attractionreservation.domain.refund.facade.RefundProcessor;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -82,7 +83,11 @@ public class WebhookEventProcessor {
 
     // 일시적 오류(PG 조회 실패, 락 충돌, DB 오류 등)는 실패로 기록하고 백오프 후 재시도한다.
     private void recordFailure(Long eventId, String pgId, RuntimeException e) {
+        WebhookStatus status = webhookEventCommandService.recordFailure(eventId, e.getMessage(), Instant.now());
+        if (status == WebhookStatus.DEAD) {
+            log.error("[Webhook] 최대 시도 초과, 수동 확인 필요: eventId={}, pgId={}", eventId, pgId, e);
+            return;
+        }
         log.warn("[Webhook] 처리 실패, 재시도 예정: eventId={}, pgId={}", eventId, pgId, e);
-        webhookEventCommandService.recordFailure(eventId, e.getMessage(), Instant.now());
     }
 }

@@ -18,7 +18,20 @@ import java.util.UUID;
 
 @Getter
 @Entity
-@Table(name = "reservations")
+// 같은 회원·슬롯의 RESERVED 예약은 1건만 허용한다.
+// 비활성 예약의 active_reservation은 NULL이므로 과거 이력은 여러 건 보존할 수 있다.
+@Table(name = "reservations",
+        uniqueConstraints = {
+            @UniqueConstraint(
+                name = "uk_reservations_user_slot_active",
+                columnNames = {
+                        "user_id",
+                        "attraction_slot_id",
+                        "active_reservation"
+                }
+            )
+        }
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Reservation extends BaseTimeEntity {
 
@@ -29,6 +42,19 @@ public class Reservation extends BaseTimeEntity {
     @Column(name = "reservation_status", nullable = false)
     @Enumerated(EnumType.STRING)
     private ReservationStatus status;
+
+    // 활성 예약 중복 방지용 보조 컬럼: DB에서 RESERVED는 1, 나머지 상태는 NULL로 계산
+    @Column(
+            name = "active_reservation",
+            insertable = false,
+            updatable = false,
+            columnDefinition = """
+                    INT GENERATED ALWAYS AS (
+                        CASE WHEN reservation_status = 'RESERVED' THEN 1 ELSE NULL END 
+                    )
+                    """
+    )
+    private Integer activeReservation;
 
     @Column(name = "cancel_reason", length = 255)
     @Enumerated(EnumType.STRING)

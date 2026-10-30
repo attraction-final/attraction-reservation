@@ -60,6 +60,9 @@ class RefundServiceTest {
     private static final String PG_ID = "pg-id";
     private static final Instant NOW = Instant.parse("2026-10-22T01:00:00Z");
     private static final LocalDate VISIT_DATE = LocalDate.of(2026, 10, 25);
+    // 입장일 전날 23:59:59 KST / 입장일 00:00 KST
+    private static final Instant DAY_BEFORE_VISIT_LAST_MOMENT = Instant.parse("2026-10-24T14:59:59Z");
+    private static final Instant VISIT_DAY_START = Instant.parse("2026-10-24T15:00:00Z");
 
     @Mock
     private RefundRepository refundRepository;
@@ -314,6 +317,38 @@ class RefundServiceTest {
     }
 
     @Test
+    @DisplayName("부분 환불: 입장일 전날 마지막 시각에는 환불할 수 있다.")
+    void createRefund_dayBeforeVisit_Saved() {
+        //given
+        givenPayment(payment);
+        List<Ticket> tickets = tickets(adultItem(payment), 1L, 1, TicketStatus.UNUSED);
+        givenRefundTickets(tickets);
+        givenRefundedQuantities(List.of());
+        givenSaveReturnsWithId();
+
+        //when
+        Long refundId = refundService.createRefund(
+                USER_ID, PG_ID, ticketIds(tickets), "단순 변심", DAY_BEFORE_VISIT_LAST_MOMENT);
+
+        //then
+        assertThat(refundId).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("부분 환불: 입장일 당일부터는 환불할 수 없다.")
+    void createRefund_onVisitDay_Fail() {
+        //given
+        givenPayment(payment);
+        List<Long> ticketIds = List.of(1L);
+
+        //when & then
+        assertThatThrownBy(() -> refundService.createRefund(USER_ID, PG_ID, ticketIds, "단순 변심", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_DEADLINE_PASSED.getMessage());
+        verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
+    }
+
+    @Test
     @DisplayName("전체 환불: 환불 이력이 없으면 모든 미사용 티켓을 환불하고 티켓을 환불 상태로 바꾼다.")
     void createFullRefund_noPreviousRefund_RefundAll() {
         //given
@@ -395,6 +430,36 @@ class RefundServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_INVALID_QUANTITY.getMessage());
         verify(refundRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("전체 환불: 입장일 전날 마지막 시각에는 환불할 수 있다.")
+    void createFullRefund_dayBeforeVisit_Saved() {
+        //given
+        givenPayment(payment);
+        List<Ticket> tickets = tickets(adultItem(payment), 1L, 3, TicketStatus.UNUSED);
+        given(ticketService.findUnusedTicketsForUpdate(anySet())).willReturn(tickets);
+        givenRefundedQuantities(List.of());
+        givenSaveReturnsWithId();
+
+        //when
+        Long refundId = refundService.createFullRefund(USER_ID, PG_ID, "단순 변심", DAY_BEFORE_VISIT_LAST_MOMENT);
+
+        //then
+        assertThat(refundId).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("전체 환불: 입장일 당일부터는 환불할 수 없다.")
+    void createFullRefund_onVisitDay_Fail() {
+        //given
+        givenPayment(payment);
+
+        //when & then
+        assertThatThrownBy(() -> refundService.createFullRefund(USER_ID, PG_ID, "단순 변심", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.REFUND_DEADLINE_PASSED.getMessage());
+        verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.payment.facade;
 
 import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.entity.enums.WebhookStatus;
 import com.example.attractionreservation.domain.payment.service.WebhookEventCommandService;
 import com.example.attractionreservation.domain.refund.facade.RefundProcessor;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -11,11 +12,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.CannotAcquireLockException;
 
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -26,7 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class WebhookEventProcessorTest {
 
     private static final Long EVENT_ID = 1L;
@@ -105,6 +109,41 @@ class WebhookEventProcessorTest {
         verify(webhookEventCommandService).recordFailure(
                 eq(EVENT_ID), eq(ErrorCode.PAYMENT_GATEWAY_ERROR.getMessage()), any());
         verify(webhookEventCommandService, never()).recordResult(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("PG 취소 금액이 완료 환불보다 작으면 수동 확인(DEAD)으로 넘기지 않고 실패로 기록해 다시 조회한다.")
+    void process_refundSyncStale_RecordFailure() {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willReturn(PaymentSyncResult.REFUND_SYNC_REQUIRED);
+        given(refundProcessor.syncWithPg(PG_ID))
+                .willThrow(new BusinessException(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE));
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        verify(webhookEventCommandService).recordFailure(
+                eq(EVENT_ID), eq(ErrorCode.REFUND_PG_CANCELLED_AMOUNT_STALE.getMessage()), any());
+        verify(webhookEventCommandService, never()).recordResult(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("실패 기록 결과가 DEAD면 수동 확인이 필요하다는 error 로그를 남긴다.")
+    void process_failureBecomesDead_LogError(CapturedOutput output) {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+        given(webhookEventCommandService.recordFailure(eq(EVENT_ID), any(), any())).willReturn(WebhookStatus.DEAD);
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        assertThat(output).contains("최대 시도 초과, 수동 확인 필요").doesNotContain("재시도 예정");
+        assertThat(output.getAll().lines().filter(line -> line.contains("최대 시도 초과, 수동 확인 필요")))
+                .singleElement().asString().contains("ERROR");
     }
 
     @Test

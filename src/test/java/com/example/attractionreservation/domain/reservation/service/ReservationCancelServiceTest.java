@@ -64,7 +64,7 @@ class ReservationCancelServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.of(reservation));
@@ -104,7 +104,7 @@ class ReservationCancelServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.of(reservation));
@@ -133,7 +133,7 @@ class ReservationCancelServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.of(reservation));
@@ -157,7 +157,7 @@ class ReservationCancelServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.of(reservation));
@@ -193,7 +193,7 @@ class ReservationCancelServiceTest {
 
         ReflectionTestUtils.setField(reservation, "status", status);
 
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.of(reservation));
@@ -221,7 +221,7 @@ class ReservationCancelServiceTest {
     @DisplayName("본인 예약 조회 결과가 없으면 취소하지 않는다")
     void cancelReservation_notFound() {
         // given
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.empty());
@@ -251,7 +251,7 @@ class ReservationCancelServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findReservationByIdAndUser_Id(
+        when(reservationRepository.findByIdAndUserIdWithLock(
                 RESERVATION_ID,
                 USER_ID
         )).thenReturn(Optional.of(reservation));

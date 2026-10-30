@@ -19,6 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -62,20 +65,44 @@ public class UserWithdrawalService {
             );
         }
 
-        var reservations = reservationRepository.findUpcomingForUpdate(
+        // 이용 예정 예약의 후보 ID를 예약 ID 오름차순으로 조회한다.
+        List<Long> reservationIds = reservationRepository.findUpcomingReservationIdsByUserId(
                 userId,
                 ReservationStatus.RESERVED,
                 nowInSeoul
         );
 
-        for (Reservation reservation : reservations) {
+        // 모든 대상 예약의 잠금을 먼저 확보한 뒤 슬롯을 처리한다.
+        List<Reservation> reservationsToCancel = new ArrayList<>();
+
+        for (Long reservationId : reservationIds) {
+            Reservation reservation = reservationRepository.findByIdWithLock(reservationId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
+
+            // 잠금을 기다리는 동안 다른 요청이 처리한 예약은 건너뛴다.
+            if (reservation.getStatus() != ReservationStatus.RESERVED) {
+                continue;
+            }
+
+            // 후보 조회와 동일하게 시작 시각이 기준 시각보다 이후인 예약만 처리한다.
+            if (!reservation.getAttractionSlot().getStartsAt().isAfter(nowInSeoul)) {
+                continue;
+            }
+
+            reservationsToCancel.add(reservation);
+        }
+
+        // 예약 잠금 확보 후, 슬롯 접근 순서도 일정하게 유지한다.
+        reservationsToCancel.sort(
+                Comparator.comparing((Reservation reservation) -> reservation.getAttractionSlot().getId())
+                        .thenComparing(Reservation::getId)
+        );
+
+        for (Reservation reservation : reservationsToCancel) {
             Long slotId = reservation.getAttractionSlot().getId();
 
-            AttractionSlot slot =
-                    attractionSlotRepository.findByIdForUpdate(slotId)
-                            .orElseThrow(() -> new IllegalStateException(
-                                    "예약에 연결된 슬롯을 찾을 수 없습니다."
-                            ));
+            AttractionSlot slot = attractionSlotRepository.findByIdForUpdate(slotId)
+                    .orElseThrow(() -> new IllegalStateException("예약에 연결된 슬롯을 찾을 수 없습니다."));
 
             reservation.cancelForWithdrawal(now);
             slot.releaseReservation();

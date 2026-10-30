@@ -68,7 +68,7 @@ class AdminReservationStatusServiceTest {
                 previousUpdatedAt
         );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         doAnswer(invocation -> {
@@ -110,7 +110,7 @@ class AdminReservationStatusServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when
@@ -134,7 +134,7 @@ class AdminReservationStatusServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -175,7 +175,7 @@ class AdminReservationStatusServiceTest {
                 currentStatus
         );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -212,7 +212,7 @@ class AdminReservationStatusServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -240,7 +240,7 @@ class AdminReservationStatusServiceTest {
                         ReservationStatus.COMPLETED
                 );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -278,10 +278,11 @@ class AdminReservationStatusServiceTest {
             LocalDateTime now,
             ReservationStatus targetStatus
     ) {
-        try (MockedStatic<KstTime> mocked = mockStatic(KstTime.class)) {
-            mocked.when(() ->
-                    KstTime.toLocalDateTime(any(Instant.class))
-            ).thenReturn(now);
+        Instant fixedNow = now.atZone(KstTime.ZONE).toInstant();
+
+        try (MockedStatic<Instant> mocked =
+                     mockStatic(Instant.class, CALLS_REAL_METHODS)) {
+            mocked.when(Instant::now).thenReturn(fixedNow);
 
             return reservationService.updateReservationStatus(
                     RESERVATION_ID,

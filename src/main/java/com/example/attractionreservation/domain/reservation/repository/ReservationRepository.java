@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long>, ReservationCustomRepository {
 
@@ -36,5 +37,17 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long>,
             @Param("userId") Long userId,
             @Param("status") ReservationStatus status,
             @Param("now") LocalDateTime now
+    );
+
+    // 예약 취소 시 중복 취소 방지를 위한 락
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT r FROM Reservation r
+        WHERE r.id = :reservationId
+        AND r.user.id = :userId
+        """)
+    Optional<Reservation> findByIdAndUserIdWithLock(
+            @Param("reservationId") Long reservationId,
+            @Param("userId") Long userId
     );
 }

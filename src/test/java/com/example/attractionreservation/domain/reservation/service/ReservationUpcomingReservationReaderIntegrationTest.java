@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -57,6 +59,10 @@ class ReservationUpcomingReservationReaderIntegrationTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    // 추가: @DataJpaTest 에는 Redis 빈이 없으므로, 캐시 삭제 도우미는 가짜로 넣어 준다
+    @MockitoBean
+    private AttractionDetailCacheEvictor attractionDetailCacheEvictor;
 
     private User user;
     private Ticket ticket;

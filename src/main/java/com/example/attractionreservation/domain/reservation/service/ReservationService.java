@@ -41,7 +41,6 @@ public class ReservationService {
     private final AttractionSlotService attractionSlotService;
 
     // 예약 생성
-    // 동시성 해결 필요
     @Transactional
     public CreateReservationResponse createReservation(Long userId, CreateReservationRequest request) {
 

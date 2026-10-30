@@ -58,7 +58,7 @@ class AdminReservationCancelServiceTest {
         UpdateAdminReservationCancelRequest request =
                 new UpdateAdminReservationCancelRequest(reason);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         Instant before = Instant.now();
@@ -100,7 +100,7 @@ class AdminReservationCancelServiceTest {
                         ReservationCancelReason.WEATHER_CONDITION
                 );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -137,7 +137,7 @@ class AdminReservationCancelServiceTest {
                         ReservationCancelReason.WEATHER_CONDITION
                 );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -169,7 +169,7 @@ class AdminReservationCancelServiceTest {
         UpdateAdminReservationCancelRequest request =
                 new UpdateAdminReservationCancelRequest(null);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -206,7 +206,7 @@ class AdminReservationCancelServiceTest {
                         ReservationCancelReason.WEATHER_CONDITION
                 );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         doThrow(new BusinessException(

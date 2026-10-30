@@ -68,7 +68,7 @@ class AdminReservationStatusServiceTest {
                 previousUpdatedAt
         );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         doAnswer(invocation -> {
@@ -110,7 +110,7 @@ class AdminReservationStatusServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when
@@ -134,7 +134,7 @@ class AdminReservationStatusServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -175,7 +175,7 @@ class AdminReservationStatusServiceTest {
                 currentStatus
         );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -212,7 +212,7 @@ class AdminReservationStatusServiceTest {
 
         Reservation reservation = createReservation(slot);
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.of(reservation));
 
         // when & then
@@ -240,7 +240,7 @@ class AdminReservationStatusServiceTest {
                         ReservationStatus.COMPLETED
                 );
 
-        when(reservationRepository.findById(RESERVATION_ID))
+        when(reservationRepository.findByIdWithLock(RESERVATION_ID))
                 .thenReturn(Optional.empty());
 
         // when & then

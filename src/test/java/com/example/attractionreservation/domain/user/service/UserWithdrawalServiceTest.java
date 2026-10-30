@@ -113,9 +113,9 @@ class UserWithdrawalServiceTest {
                         any(LocalDate.class)
                 )).thenReturn(false);
 
-        when(reservationRepository.findUpcomingForUpdate(
-                eq(1L), any(), any()
-        )).thenReturn(java.util.List.of());
+        when(reservationRepository.findUpcomingReservationIdsByUserId(
+                eq(1L), eq(ReservationStatus.RESERVED), any(LocalDateTime.class)
+        )).thenReturn(List.of());
 
         service.withdraw(1L);
 
@@ -161,11 +161,13 @@ class UserWithdrawalServiceTest {
         List<Reservation> reservations = new java.util.ArrayList<>();
 
         for (int i = 0; i < reservationCount; i++) {
-            reservations.add(new Reservation(
+            Reservation reservation = new Reservation(
                     user,
                     mock(Ticket.class),
                     slot
-            ));
+            );
+            ReflectionTestUtils.setField(reservation, "id", 100L + i);
+            reservations.add(reservation);
         }
 
         when(userRepository.findByIdForUpdate(1L))
@@ -178,9 +180,14 @@ class UserWithdrawalServiceTest {
                         any(LocalDate.class)
                 )).thenReturn(false);
 
-        when(reservationRepository.findUpcomingForUpdate(
-                eq(1L), eq(ReservationStatus.RESERVED), any()
-        )).thenReturn(reservations);
+        when(reservationRepository.findUpcomingReservationIdsByUserId(
+                eq(1L), eq(ReservationStatus.RESERVED), any(LocalDateTime.class)
+        )).thenReturn(reservations.stream().map(Reservation::getId).toList());
+
+        for (Reservation reservation : reservations) {
+            when(reservationRepository.findByIdWithLock(reservation.getId()))
+                    .thenReturn(Optional.of(reservation));
+        }
 
         when(attractionSlotRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(slot));
@@ -209,8 +216,15 @@ class UserWithdrawalServiceTest {
         assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
         assertThat(slot.isAutoClosed()).isFalse();
 
-        verify(attractionSlotRepository, times(reservationCount))
-                .findByIdForUpdate(10L);
+        // 후보 조회 후 모든 예약 잠금을 확보하고 나서 슬롯을 처리하는 순서를 검증한다.
+        var order = inOrder(reservationRepository, attractionSlotRepository);
+        order.verify(reservationRepository).findUpcomingReservationIdsByUserId(
+                eq(1L), eq(ReservationStatus.RESERVED), any(LocalDateTime.class)
+        );
+        for (Reservation reservation : reservations) {
+            order.verify(reservationRepository).findByIdWithLock(reservation.getId());
+        }
+        order.verify(attractionSlotRepository, times(reservationCount)).findByIdForUpdate(10L);
         verify(userRepository).flush();
     }
 
@@ -296,13 +310,16 @@ class UserWithdrawalServiceTest {
                 mock(Ticket.class),
                 slot
         );
+        ReflectionTestUtils.setField(reservation, "id", 100L);
 
         when(userRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(user));
 
-        when(reservationRepository.findUpcomingForUpdate(
-                eq(1L), eq(ReservationStatus.RESERVED), any()
-        )).thenReturn(List.of(reservation));
+        when(reservationRepository.findUpcomingReservationIdsByUserId(
+                eq(1L), eq(ReservationStatus.RESERVED), any(LocalDateTime.class)
+        )).thenReturn(List.of(100L));
+        when(reservationRepository.findByIdWithLock(100L))
+                .thenReturn(Optional.of(reservation));
 
         when(attractionSlotRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(slot));

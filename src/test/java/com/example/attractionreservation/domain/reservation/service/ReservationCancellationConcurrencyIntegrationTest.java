@@ -21,7 +21,9 @@ import com.example.attractionreservation.domain.ticketProduct.entity.TicketProdu
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.domain.user.service.UserService;
+import com.example.attractionreservation.domain.user.service.UserWithdrawalService;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -80,6 +83,7 @@ import static org.mockito.Mockito.mockStatic;
         QuerydslConfig.class,
         ReservationService.class,
         UserService.class,
+        UserWithdrawalService.class,
         TicketService.class,
         AttractionSlotService.class,
         ReservationCancellationConcurrencyIntegrationTest.MySqlConfig.class
@@ -93,10 +97,16 @@ class ReservationCancellationConcurrencyIntegrationTest {
     private ReservationService reservationService;
 
     @Autowired
+    private UserWithdrawalService userWithdrawalService;
+
+    @Autowired
     private EntityManager entityManager;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private MySQLContainer mysqlContainer;
 
     // UserService의 생성에 필요하지만 이 테스트의 예약·취소 경로에서는 사용하지 않는다.
     @MockitoBean
@@ -107,13 +117,16 @@ class ReservationCancellationConcurrencyIntegrationTest {
 
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
+    private int mysqlLogOffset;
 
     @TestConfiguration(proxyBeanMethods = false)
     static class MySqlConfig {
         @Bean
         @ServiceConnection
         MySQLContainer mysqlContainer() {
-            return new MySQLContainer(DockerImageName.parse("mysql:9.6"));
+            // 이 테스트 전용 MySQL에 deadlock 진단을 기록한다. 잠금·상태 변경 로직은 그대로 둔다.
+            return new MySQLContainer(DockerImageName.parse("mysql:9.6"))
+                    .withCommand("--innodb-print-all-deadlocks=ON", "--log-error-verbosity=3");
         }
     }
 
@@ -145,6 +158,7 @@ class ReservationCancellationConcurrencyIntegrationTest {
                         reservationA.reservationId(), reservationB.reservationId());
             }));
         }
+        mysqlLogOffset = mysqlContainer.getLogs().length();
     }
 
     @AfterEach
@@ -400,6 +414,138 @@ class ReservationCancellationConcurrencyIntegrationTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"USER", "ADMIN"})
+    @DisplayName("탈퇴 취소와 사용자 또는 관리자 취소가 경합해도 탈퇴를 완료하고 예약 인원을 한 번만 복구한다")
+    void withdraw_UserOrAdminCancelConcurrently_ReleasesCapacityOnce(String cancellationActor) throws Exception {
+        // given
+        DatabaseState initialState = readDatabaseState();
+        assertThat(initialState.reservationAStatus()).isEqualTo(ReservationStatus.RESERVED);
+        assertThat(initialState.reservationBStatus()).isEqualTo(ReservationStatus.RESERVED);
+        assertThat(initialState.activeCount()).isEqualTo(2);
+        assertThat(initialState.reservedCount()).isEqualTo(2);
+        // A 회원의 티켓은 IN_USE이므로 미사용 티켓에 의한 탈퇴 차단은 발생하지 않는다.
+        // 14시는 사용자 취소 마감 전이며 A 예약이 탈퇴 시 이용 예정 예약에 포함되는 시각이다.
+        Instant executionTime = NOW.atZone(KstTime.ZONE).toInstant();
+        ReservationCancelReason adminReason = ReservationCancelReason.OPERATIONAL_ISSUE;
+        UpdateAdminReservationCancelRequest adminRequest = new UpdateAdminReservationCancelRequest(adminReason);
+
+        Callable<WithdrawalRaceResult> withdrawalTask = () -> {
+            try (MockedStatic<Instant> clock = mockStatic(Instant.class, CALLS_REAL_METHODS)) {
+                clock.when(Instant::now).thenReturn(executionTime);
+                try {
+                    userWithdrawalService.withdraw(fixture.first().userId());
+                    return new WithdrawalRaceResult("WITHDRAWAL", null, null, null);
+                } catch (RuntimeException exception) {
+                    return new WithdrawalRaceResult("WITHDRAWAL", exception, null, null);
+                }
+            }
+        };
+        Callable<WithdrawalRaceResult> cancellationTask = () -> {
+            try (MockedStatic<Instant> clock = mockStatic(Instant.class, CALLS_REAL_METHODS)) {
+                clock.when(Instant::now).thenReturn(executionTime);
+                try {
+                    if ("USER".equals(cancellationActor)) {
+                        return new WithdrawalRaceResult("USER", null, reservationService.cancelReservation(
+                                fixture.first().userId(), fixture.reservationAId()), null);
+                    }
+                    return new WithdrawalRaceResult("ADMIN", null, null,
+                            reservationService.adminReservationCancel(fixture.reservationAId(), adminRequest));
+                } catch (RuntimeException exception) {
+                    return new WithdrawalRaceResult(cancellationActor, exception, null, null);
+                }
+            }
+        };
+
+        // when
+        List<WithdrawalRaceResult> results = runConcurrently(List.of(withdrawalTask, cancellationTask));
+        if (results.stream().anyMatch(result -> result.failure() != null
+                && !(result.failure() instanceof BusinessException))) {
+            printMySqlDiagnostics(cancellationActor);
+        }
+        WithdrawalRaceResult withdrawalResult = results.get(0);
+        WithdrawalRaceResult cancellationResult = results.get(1);
+        DatabaseState actual = readDatabaseState();
+        WithdrawalDatabaseState withdrawalState = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            User user = entityManager.find(User.class, fixture.first().userId());
+            Reservation reservation = entityManager.find(Reservation.class, fixture.reservationAId());
+            return new WithdrawalDatabaseState(user.getStatus(), user.getWithdrawnAt(), reservation.getCancelledAt());
+        }));
+
+        // then
+        long successCount = results.stream().filter(result -> result.failure() == null).count();
+        System.out.printf(
+                "탈퇴·취소 경합 결과: 취소주체=%s, 성공=%d, 회원상태=%s, 예약A=%s, 예약B=%s, 활성예약=%d, reservedCount=%d, 취소사유=%s, 요청별결과=%s%n",
+                cancellationActor, successCount, withdrawalState.userStatus(), actual.reservationAStatus(),
+                actual.reservationBStatus(), actual.activeCount(), actual.reservedCount(),
+                actual.reservationACancelReason(), results
+        );
+
+        assertSoftly(softly -> {
+            softly.assertThat(withdrawalResult.failure()).as("취소가 먼저 완료되어도 회원 탈퇴는 정상 완료").isNull();
+            softly.assertThat(withdrawalState.userStatus()).as("탈퇴 회원 상태")
+                    .isEqualTo(UserStatus.WITHDRAWN);
+            softly.assertThat(withdrawalState.withdrawnAt()).as("탈퇴 시각 기록").isEqualTo(executionTime);
+            softly.assertThat(actual.reservationAStatus()).as("탈퇴 회원의 예약 A는 취소됨")
+                    .isEqualTo(ReservationStatus.CANCELLED);
+            softly.assertThat(withdrawalState.cancelledAt()).as("예약 A의 취소 시각 기록").isEqualTo(executionTime);
+            softly.assertThat(actual.reservationBStatus()).as("다른 회원의 예약 B는 유지")
+                    .isEqualTo(ReservationStatus.RESERVED);
+            softly.assertThat(actual.activeCount()).as("남은 활성 예약은 B 한 건").isEqualTo(1);
+            softly.assertThat(actual.reservedCount()).as("예약 A 때문에 인원은 한 번만 감소").isEqualTo(1);
+            softly.assertThat((long) actual.reservedCount()).as("예약 인원과 활성 예약 수 일치")
+                    .isEqualTo(actual.activeCount());
+
+            // 취소가 먼저 성공하면 탈퇴도 성공할 수 있다. 두 성공을 중복 정원 복구로 판단하지 않는다.
+            if (cancellationResult.failure() == null) {
+                if ("USER".equals(cancellationActor)) {
+                    softly.assertThat(cancellationResult.userResponse()).isNotNull();
+                    if (cancellationResult.userResponse() != null) {
+                        softly.assertThat(cancellationResult.userResponse().reservationId())
+                                .isEqualTo(fixture.reservationAId());
+                        softly.assertThat(cancellationResult.userResponse().status()).isEqualTo(ReservationStatus.CANCELLED);
+                    }
+                    softly.assertThat(actual.reservationACancelReason()).as("일반 취소 사유를 탈퇴가 덮어쓰지 않음")
+                            .isNull();
+                } else {
+                    softly.assertThat(cancellationResult.adminResponse()).isNotNull();
+                    if (cancellationResult.adminResponse() != null) {
+                        softly.assertThat(cancellationResult.adminResponse().reservationId())
+                                .isEqualTo(fixture.reservationAId());
+                        softly.assertThat(cancellationResult.adminResponse().status()).isEqualTo(ReservationStatus.CANCELLED);
+                        softly.assertThat(cancellationResult.adminResponse().cancelReason()).isEqualTo(adminReason);
+                    }
+                    softly.assertThat(actual.reservationACancelReason()).as("관리자 취소 사유를 탈퇴가 덮어쓰지 않음")
+                            .isEqualTo(adminReason);
+                }
+            } else {
+                softly.assertThat(cancellationResult.failure()).isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS));
+                softly.assertThat(actual.reservationACancelReason()).as("탈퇴가 먼저 예약을 취소한 경우 사유 유지")
+                        .isEqualTo(ReservationCancelReason.USER_WITHDRAWAL);
+            }
+        });
+    }
+
+    private void printMySqlDiagnostics(String cancellationActor) {
+        System.out.printf("=== KAN-91 MySQL deadlock 진단 시작: WITHDRAWAL / %s ===%n", cancellationActor);
+        try {
+            String logs = mysqlContainer.getLogs();
+            // 현재 테스트 시작 이후의 로그만 출력해 이전 시나리오 기록과 혼동하지 않도록 한다.
+            String currentTestLogs = logs.substring(Math.min(mysqlLogOffset, logs.length()));
+            if (currentTestLogs.isBlank()) {
+                System.out.println("새 MySQL 서버 로그가 없습니다. deadlock 상세 기록 확보 여부를 확인해야 합니다.");
+            } else {
+                System.out.println(currentTestLogs);
+            }
+        } catch (RuntimeException exception) {
+            // 진단 수집 오류가 원래 테스트 실패 원인을 가리지 않도록 한다.
+            System.out.printf("MySQL 진단 로그 수집 실패: %s%n", exception.getMessage());
+        }
+        System.out.println("=== KAN-91 MySQL deadlock 진단 끝 ===");
+    }
+
     private Member createMember(String email, TicketProduct product) {
         User user = User.builder().email(email).password("test-password").nickname("취소예약회원").build();
         entityManager.persist(user);
@@ -496,5 +642,13 @@ class ReservationCancellationConcurrencyIntegrationTest {
 
     private record AdminTransitionResult(String actor, UpdateAdminReservationCancelResponse cancelResponse,
                                          UpdateAdminReservationStatusResponse statusResponse, RuntimeException failure) {
+    }
+
+    private record WithdrawalRaceResult(String actor, RuntimeException failure,
+                                        UpdateReservationCancelResponse userResponse,
+                                        UpdateAdminReservationCancelResponse adminResponse) {
+    }
+
+    private record WithdrawalDatabaseState(UserStatus userStatus, Instant withdrawnAt, Instant cancelledAt) {
     }
 }

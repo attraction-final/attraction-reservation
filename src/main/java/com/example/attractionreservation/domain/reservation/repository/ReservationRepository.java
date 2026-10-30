@@ -56,4 +56,17 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long>,
     Optional<Reservation> findByIdWithLock(
             @Param("reservationId") Long reservationId
     );
+
+    @Query("""
+        SELECT r.id FROM Reservation r
+        WHERE r.user.id = :userId
+        AND r.status = :status
+        AND r.attractionSlot.startsAt > :now
+        ORDER BY r.id ASC
+    """)
+    List<Long> findUpcomingReservationIdsByUserId(
+            @Param("userId") Long userId,
+            @Param("status") ReservationStatus status,
+            @Param("now") LocalDateTime now
+    );
 }

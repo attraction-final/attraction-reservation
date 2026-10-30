@@ -278,10 +278,11 @@ class AdminReservationStatusServiceTest {
             LocalDateTime now,
             ReservationStatus targetStatus
     ) {
-        try (MockedStatic<KstTime> mocked = mockStatic(KstTime.class)) {
-            mocked.when(() ->
-                    KstTime.toLocalDateTime(any(Instant.class))
-            ).thenReturn(now);
+        Instant fixedNow = now.atZone(KstTime.ZONE).toInstant();
+
+        try (MockedStatic<Instant> mocked =
+                     mockStatic(Instant.class, CALLS_REAL_METHODS)) {
+            mocked.when(Instant::now).thenReturn(fixedNow);
 
             return reservationService.updateReservationStatus(
                     RESERVATION_ID,

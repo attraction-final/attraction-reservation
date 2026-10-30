@@ -245,7 +245,7 @@ public class ReservationService {
 
         // KST 기준 슬롯 종료 이후인지 검증
         Instant now = Instant.now();
-        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime currentTime = LocalDateTime.ofInstant(now, KstTime.ZONE);
         LocalDateTime endTime = reservation.getAttractionSlot().getEndsAt();
         if (currentTime.isBefore(endTime)) {
             throw new BusinessException(ErrorCode.RESERVATION_SLOT_NOT_ENDED);

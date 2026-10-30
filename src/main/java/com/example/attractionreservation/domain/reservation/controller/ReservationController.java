@@ -6,6 +6,7 @@ import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/reservations")
+@Slf4j
 public class ReservationController {
 
     private final ReservationService reservationService;
@@ -30,6 +32,12 @@ public class ReservationController {
             @Valid @RequestBody CreateReservationRequest request
     ) {
         CreateReservationResponse response = reservationService.createReservation(userId, request);
+        log.info("event=RESERVATION_CREATED reservationId={} userId={} ticketId={} slotId={}",
+                response.reservationId(),
+                userId,
+                response.ticketId(),
+                response.slotId()
+        );
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("어트랙션 예약에 성공했습니다.", response));
     }
 
@@ -71,6 +79,10 @@ public class ReservationController {
             @Min(1) @PathVariable Long reservationId
     ) {
         UpdateReservationCancelResponse response = reservationService.cancelReservation(userId, reservationId);
+        log.info("event=RESERVATION_CANCELLED reservationId={} userId={}",
+                response.reservationId(),
+                userId
+        );
         return ResponseEntity.ok(ApiResponse.ok("예약 취소에 성공했습니다.", response));
     }
 }

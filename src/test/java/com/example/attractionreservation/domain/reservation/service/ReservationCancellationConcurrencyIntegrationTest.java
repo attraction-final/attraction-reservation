@@ -9,6 +9,8 @@ import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
 import com.example.attractionreservation.domain.reservation.dto.UpdateAdminReservationCancelRequest;
 import com.example.attractionreservation.domain.reservation.dto.UpdateAdminReservationCancelResponse;
+import com.example.attractionreservation.domain.reservation.dto.UpdateAdminReservationStatusRequest;
+import com.example.attractionreservation.domain.reservation.dto.UpdateAdminReservationStatusResponse;
 import com.example.attractionreservation.domain.reservation.dto.UpdateReservationCancelResponse;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
@@ -30,6 +32,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -48,6 +52,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -294,6 +299,107 @@ class ReservationCancellationConcurrencyIntegrationTest {
         });
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ReservationStatus.class, names = {"COMPLETED", "NO_SHOW"})
+    @DisplayName("슬롯 종료 후 관리자 강제 취소와 완료 또는 노쇼가 경합하면 하나만 성공하고 상태와 인원이 일치한다")
+    void updateReservationStatus_AdminCancelAndTerminalStatusConcurrently_OnlyOneTransitionSucceeds(
+            ReservationStatus targetStatus
+    ) throws Exception {
+        // given
+        DatabaseState initialState = readDatabaseState();
+        assertThat(initialState.reservationAStatus()).isEqualTo(ReservationStatus.RESERVED);
+        assertThat(initialState.reservationBStatus()).isEqualTo(ReservationStatus.RESERVED);
+        assertThat(initialState.activeCount()).isEqualTo(2);
+        assertThat(initialState.reservedCount()).isEqualTo(2);
+        // 슬롯은 16:30 종료다. 두 관리자 요청 모두 동일한 종료 이후 시각을 사용한다.
+        Instant afterSlotEnd = NOW.withHour(17).atZone(KstTime.ZONE).toInstant();
+        ReservationCancelReason adminReason = ReservationCancelReason.OPERATIONAL_ISSUE;
+        UpdateAdminReservationCancelRequest cancelRequest = new UpdateAdminReservationCancelRequest(adminReason);
+        UpdateAdminReservationStatusRequest statusRequest = new UpdateAdminReservationStatusRequest(targetStatus);
+
+        Callable<AdminTransitionResult> cancelTask = () -> {
+            try (MockedStatic<Instant> clock = mockStatic(Instant.class, CALLS_REAL_METHODS)) {
+                clock.when(Instant::now).thenReturn(afterSlotEnd);
+                try {
+                    return new AdminTransitionResult("CANCEL", reservationService.adminReservationCancel(
+                            fixture.reservationAId(), cancelRequest), null, null);
+                } catch (RuntimeException exception) {
+                    return new AdminTransitionResult("CANCEL", null, null, exception);
+                }
+            }
+        };
+        Callable<AdminTransitionResult> statusTask = () -> {
+            try (MockedStatic<Instant> clock = mockStatic(Instant.class, CALLS_REAL_METHODS)) {
+                clock.when(Instant::now).thenReturn(afterSlotEnd);
+                try {
+                    return new AdminTransitionResult("STATUS", null, reservationService.updateReservationStatus(
+                            fixture.reservationAId(), statusRequest), null);
+                } catch (RuntimeException exception) {
+                    return new AdminTransitionResult("STATUS", null, null, exception);
+                }
+            }
+        };
+
+        // when
+        List<AdminTransitionResult> results = runConcurrently(List.of(cancelTask, statusTask));
+        List<AdminTransitionResult> successes = results.stream().filter(result -> result.failure() == null).toList();
+        List<AdminTransitionResult> failures = results.stream().filter(result -> result.failure() != null).toList();
+        DatabaseState actual = readDatabaseState();
+
+        // then
+        System.out.printf(
+                "관리자 취소·상태 변경 경합 결과: 대상상태=%s, 성공=%d, 실패=%d, 예약A=%s, 예약B=%s, 활성예약=%d, reservedCount=%d, 취소사유=%s, 요청별결과=%s%n",
+                targetStatus, successes.size(), failures.size(), actual.reservationAStatus(),
+                actual.reservationBStatus(), actual.activeCount(), actual.reservedCount(),
+                actual.reservationACancelReason(), results
+        );
+
+        assertSoftly(softly -> {
+            softly.assertThat(successes).as("동일 예약의 상태 전이는 한 번만 성공").hasSize(1);
+            softly.assertThat(failures).as("나머지 상태 변경 요청은 거절").hasSize(1);
+            softly.assertThat(actual.reservationAStatus()).as("예약 A는 취소 또는 요청한 종료 상태")
+                    .isIn(ReservationStatus.CANCELLED, targetStatus);
+            softly.assertThat(actual.reservationBStatus()).as("다른 예약 B는 변경하지 않음")
+                    .isEqualTo(ReservationStatus.RESERVED);
+            softly.assertThat(actual.activeCount()).as("RESERVED로 남는 예약은 B 한 건").isEqualTo(1);
+
+            // 기존 구현 기준: 취소만 정원을 복구하고 완료·노쇼는 예약 인원을 유지한다.
+            int expectedCount = actual.reservationAStatus() == ReservationStatus.CANCELLED ? 1 : 2;
+            softly.assertThat(actual.reservedCount()).as("최종 상태에 맞는 슬롯 예약 인원")
+                    .isEqualTo(expectedCount);
+
+            softly.assertThat(failures).allSatisfy(result -> {
+                ErrorCode expectedCode = "CANCEL".equals(result.actor())
+                        ? ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS
+                        : ErrorCode.RESERVATION_STATUS_CHANGE_NOT_ALLOWED;
+                assertThat(result.failure()).isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(expectedCode));
+            });
+
+            softly.assertThat(successes).allSatisfy(result -> {
+                if (result.cancelResponse() != null) {
+                    assertThat(result.cancelResponse().reservationId()).isEqualTo(fixture.reservationAId());
+                    assertThat(result.cancelResponse().status()).isEqualTo(ReservationStatus.CANCELLED);
+                    assertThat(result.cancelResponse().cancelledAt()).isEqualTo(afterSlotEnd);
+                    assertThat(result.cancelResponse().cancelReason()).isEqualTo(adminReason);
+                } else {
+                    assertThat(result.statusResponse()).isNotNull();
+                    assertThat(result.statusResponse().reservationId()).isEqualTo(fixture.reservationAId());
+                    assertThat(result.statusResponse().status()).isEqualTo(targetStatus);
+                }
+            });
+            if (successes.size() == 1) {
+                boolean cancelled = successes.get(0).cancelResponse() != null;
+                softly.assertThat(actual.reservationAStatus()).as("DB 최종 상태와 성공 응답 일치")
+                        .isEqualTo(cancelled ? ReservationStatus.CANCELLED : targetStatus);
+                softly.assertThat(actual.reservationACancelReason()).as("취소가 성공한 경우에만 취소 사유 기록")
+                        .isEqualTo(cancelled ? adminReason : null);
+                softly.assertThat(actual.reservedCount()).as("취소가 성공한 경우에만 한 자리 복구")
+                        .isEqualTo(cancelled ? 1 : 2);
+            }
+        });
+    }
+
     private Member createMember(String email, TicketProduct product) {
         User user = User.builder().email(email).password("test-password").nickname("취소예약회원").build();
         entityManager.persist(user);
@@ -386,5 +492,9 @@ class ReservationCancellationConcurrencyIntegrationTest {
 
     private record MixedCancelResult(String actor, UpdateReservationCancelResponse userResponse,
                                      UpdateAdminReservationCancelResponse adminResponse, RuntimeException failure) {
+    }
+
+    private record AdminTransitionResult(String actor, UpdateAdminReservationCancelResponse cancelResponse,
+                                         UpdateAdminReservationStatusResponse statusResponse, RuntimeException failure) {
     }
 }

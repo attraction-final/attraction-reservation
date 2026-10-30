@@ -240,7 +240,8 @@ public class ReservationService {
     // 관리자 예약 상태 변경
     @Transactional
     public UpdateAdminReservationStatusResponse updateReservationStatus(Long reservationId, UpdateAdminReservationStatusRequest request) {
-        Reservation reservation = getReservationById(reservationId);
+        Reservation reservation = reservationRepository.findByIdWithLock(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         // KST 기준 슬롯 종료 이후인지 검증
         Instant now = Instant.now();

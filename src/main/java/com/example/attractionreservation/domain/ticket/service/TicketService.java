@@ -5,10 +5,12 @@ import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.ticket.dto.*;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
+import com.example.attractionreservation.domain.ticket.event.TicketIssuedEvent;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,8 @@ import java.util.List;
 public class TicketService {
 
     private final TicketRepository ticketRepository;
+    // 티켓 발급 정보를 Listener에 전달하는 Spring event 발행자
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     // 내 티켓 목록 조회
     public Page<SearchTicketResponse> findTicketAll(Long userId, SearchTicketCondition condition, Pageable stablePageable) {
@@ -48,7 +52,6 @@ public class TicketService {
     }
 
     // 티켓 입장 처리
-    // TODO: 동시성 처리 필요
     @Transactional
     public CreateTicketEntryResponse createTicketEntry(CreateTicketEntryRequest request) {
 
@@ -83,6 +86,10 @@ public class TicketService {
         }
 
         ticketRepository.saveAll(tickets);
+        // 발급 로그에 필요한 값만 담아 엔티티를 Listener에 직접 전달하지 않는다.
+        TicketIssuedEvent ticketIssuedEvent = new TicketIssuedEvent(order.getId(), order.getUser().getId(), tickets.size());
+        // 현재 transaction 안에서 발행하며, commit 이후 실행 여부는 Listener에서 설정한다.
+        applicationEventPublisher.publishEvent(ticketIssuedEvent);
     }
 
     // 환불 - 요청한 티켓을 잠가서 조회한다. 없거나 해당 주문 상품의 티켓이 아니면 예외가 발생한다.

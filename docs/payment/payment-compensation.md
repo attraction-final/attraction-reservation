@@ -152,8 +152,10 @@ PG_PENDING ──→ DONE        (조회: 취소 완료)
 ### PG 취소와 멱등성
 
 - 보상은 **전체 취소**(`amount = null`)로 보낸다. PG에서 결제된 금액을 모두 돌려주는 것이 보상의 의미이고, 중복 호출 시 두 번째가 확실히 "이미 취소됨"으로 응답되기 때문이다.
-- `PortOneClient.cancelPayment`의 멱등 키(`Idempotency-Key`)는 **호출마다 새로 만들고, 한 호출 안의 통신 재시도에서만 같은 키**를 쓴다.
+- `PortOneClient.cancelPayment`의 멱등 키(`Idempotency-Key`)는 **호출마다 새로 만들고, 한 호출 안의 재시도(통신 실패, 앞선 요청 처리 중)에서만 같은 키**를 쓴다.
   - PortOne은 같은 키의 응답(실패 포함)을 **3시간 동안 저장**해 돌려준다. 호출 간에 키를 고정하면 한 번 실패한 취소를 다시 시도해도 저장된 실패 응답만 받는다.
+  - 통신 실패 뒤 같은 키로 재시도했는데 앞선 요청이 처리 중이면 PortOne은 409 `IDEMPOTENCY_OUTSTANDING_REQUEST`로 응답한다. 1초(`portone.cancel-outstanding-retry-delay`)를 기다려 같은 키로 재시도하며(처리 중 응답이 연속되면 2초), 횟수는 통신 재시도와 함께 최대 3회로 센다(KAN-90). 처리 중 응답은 통신 실패 뒤에만 오므로 실제로는 `타임아웃 → 처리 중 → 1초 대기 → 마지막 시도`로 재시도가 1번이다.
+  - 마지막 시도까지 처리 중이면 실패로 알리지 않고 `UNKNOWN`을 반환해 `PG_PENDING`으로 조회로만 확정한다. 실패(`FAILED`)로 기록하면 다음 재시도가 새 키로 취소를 보내, 앞선 요청이 아직 PG 취소 내역에 나타나기 전이면 다시 취소될 수 있기 때문이다.
 - 중복 환불 방지: 즉시 시도·스케줄러·멈춘 행 재점유가 겹쳐 같은 결제를 두 번 전체 취소해도, 두 번째는 `PAYMENT_ALREADY_CANCELLED`로 응답되고 성공(DONE)으로 처리된다.
 
 ### PG 취소 결과 확인 (`PG_PENDING`)
@@ -197,7 +199,7 @@ payment:
 
 - `processPending`은 취소 대상을 `batch-size`, PG 확인 대상을 `pg-check-batch-size`로 각각 조회하므로, 한 번 실행에 PG 호출은 최대 `batch-size` + `pg-check-batch-size`(기본 25회)다. 재시도는 취소 전 조회가 더해져 요청 하나가 PG 호출 2회일 수 있다.
 - 확인 건수를 따로 작게 두는 이유: PG 장애가 복구될 때까지 `PG_PENDING`이 한꺼번에 쌓일 수 있는데, 확인마다 PG를 조회하므로(최대 약 15초) 같은 스레드의 취소 처리가 밀린다. 기본값 5건이면 한 주기의 확인 지연은 최대 약 75초이고, 복구 후에는 30초마다 5건(시간당 약 600건)씩 확정한다. 확인 기한(24시간) 안에 약 1만 4천 건까지 확정할 수 있다.
-- 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) = 45초)보다 길어야 한다.
+- 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) + 처리 중 응답 대기 1초·2초 = 48초)보다 길어야 한다.
 
 ## 6. 장애 시나리오
 
@@ -206,6 +208,7 @@ payment:
 | `failPaymentWithCompensation` 트랜잭션 실패 | 결제 실패·보상 요청 모두 롤백. 다음 요청에서 다시 판단 |
 | 커밋 직후 즉시 시도 전 서버 종료 | 보상 요청이 `REQUESTED`로 남아 스케줄러가 처리 |
 | 즉시 PG 취소 실패 | `FAILED` + 백오프, 스케줄러 재시도 (새 멱등 키) |
+| 즉시 PG 취소가 끝까지 "앞선 요청 처리 중"(409 `IDEMPOTENCY_OUTSTANDING_REQUEST`) | `UNKNOWN` → `PG_PENDING`. 새 키로 다시 취소하지 않고 조회로 확정 |
 | PG 취소 성공 후 `DONE` 기록 전 종료 | 5분 뒤 재점유 → 재시도 전 조회에서 PG `CANCELLED` 확인 → 취소를 다시 보내지 않고 `DONE` |
 | `REQUESTED` 응답 후 `PG_PENDING` 기록 전 종료·기록 실패 | 재점유 또는 `FAILED` 재시도 → 재시도 전 조회에서 `REQUESTED` 내역 확인 → 취소를 다시 보내지 않고 `PG_PENDING` |
 | 재시도 전 PG 조회 실패 | 취소를 보내지 않고 `FAILED` + 백오프 |
@@ -233,7 +236,7 @@ payment:
 | `PaymentCompensationSchedulerTest` | 단위 + `ApplicationContextRunner` | 배치 크기 전달, 예외 삼킴, 설정에 따른 빈 등록 |
 | `PaymentFacadeTest` | Mockito | 금액 불일치 시 보상 요청 후 `processByPgId` 즉시 시도·이미 처리됐으면 생략, 취소된 결제의 PG 결제 완료 시 `approvePayment`의 CANCELLED 응답으로 즉시 시도 후 `PAYMENT_ALREADY_CANCELLED`(중복은 Processor가 건너뜀)·PG 금액을 보상 금액으로 전달, 웹훅 `COMPENSATED` |
 | `PaymentCommandServiceTest` | Mockito | 금액 불일치 시 보상 저장(원장 CANCELLED면 실패 처리 없이 저장), 이미 처리된 결제면 저장 안 함, PG 실패는 보상 없음, `approvePayment`의 취소된 결제 보상 저장·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파 |
-| `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 전체 취소의 이미 취소됨 성공 처리 (부분 취소의 이미 취소됨은 예외, KAN-51), 취소 응답 상태별 반환(SUCCEEDED·REQUESTED·FAILED 예외·UNKNOWN·내역 없음·해석 불가·처리할 수 없는 content-type), 결제 조회의 취소 내역 매핑 |
+| `PortOneClientTest` | `MockRestServiceServer` | 전체·부분 취소 모두 호출마다 다른 멱등 키, 한 호출 안의 재시도는 같은 키, 앞선 요청 처리 중 응답은 같은 키로 대기 후 재시도·끝까지 처리 중이면 UNKNOWN, 전체 취소의 이미 취소됨 성공 처리 (부분 취소의 이미 취소됨은 예외, KAN-51), 취소 응답 상태별 반환(SUCCEEDED·REQUESTED·FAILED 예외·UNKNOWN·내역 없음·해석 불가·처리할 수 없는 content-type), 결제 조회의 취소 내역 매핑 |
 
 - `PaymentCompensationOutboxTest`는 테스트 메서드 트랜잭션에 묶이지 않도록 `NOT_SUPPORTED`로 실행하고 데이터를 직접 정리한다.
 
@@ -268,5 +271,5 @@ payment:
 - [ ] 결제 수단 확정 후 PortOne 테스트 채널에서 실제 취소로 확인: 취소 응답 상태, `REQUESTED`일 때 결제 조회의 `cancellations`·`amount.cancelled`, 웹훅 수신 없이 스케줄러만으로 확정
 - [ ] PortOne 호출 제한을 확인하고, 필요하면 PG 확인 대상의 배치 크기를 취소 대상과 분리한다
 - [ ] (선택) 취소 웹훅 수신 시 해당 pgId의 `PG_PENDING` 요청 `next_retry_at`을 즉시로 당겨 확정 앞당기기
-- [ ] 즉시 시도가 요청 스레드에서 PG 취소를 기다린다(최악 약 45초). 필요하면 커밋 후 `@Async`로 전환한다. 보상 요청이 이미 저장돼 있어 안전성은 같다.
+- [ ] 즉시 시도가 요청 스레드에서 PG 취소를 기다린다(최악 약 48초). 필요하면 커밋 후 `@Async`로 전환한다. 보상 요청이 이미 저장돼 있어 안전성은 같다.
 - [ ] 금액 불일치 응답 메시지에 "환불은 자동으로 진행됩니다" 포함 검토

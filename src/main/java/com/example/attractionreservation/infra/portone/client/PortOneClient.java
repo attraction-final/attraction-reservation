@@ -34,6 +34,8 @@ public class PortOneClient implements PaymentGateway {
     // PortOne CancellableAmountConsistencyBrokenError의 type 값 (server-sdk 직렬화 이름 기준)
     private static final String CANCELLABLE_AMOUNT_MISMATCH = "CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN";
     private static final String PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND";
+    // 같은 멱등 키의 앞선 요청이 처리 중일 때의 409 오류 type 값 (PortOne REST API V2 문서 멱등성 항목 기준)
+    private static final String IDEMPOTENCY_OUTSTANDING_REQUEST = "IDEMPOTENCY_OUTSTANDING_REQUEST";
 
     private final RestClient portOneRestClient;
     private final PortOneProperties portOneProperties;
@@ -67,10 +69,14 @@ public class PortOneClient implements PaymentGateway {
     }
 
     /**
-     * 멱등 키는 호출마다 새로 만들고, 한 호출 안의 통신 재시도에서만 같은 키를 쓴다.
+     * 멱등 키는 호출마다 새로 만들고, 한 호출 안의 재시도(통신 실패, 앞선 요청 처리 중)에서만 같은 키를 쓴다.
      * PortOne은 같은 키의 응답(실패 포함)을 3시간 동안 저장해 돌려주므로, 호출 간에 키를 고정하면
      * 한 번 실패한 취소를 다시 시도해도 저장된 실패 응답만 받게 된다.
      * 호출이 겹쳐 같은 결제를 두 번 전체 취소해도 두 번째는 PAYMENT_ALREADY_CANCELLED로 성공 처리된다.
+     *
+     * <p>통신 실패 뒤 같은 키로 재시도했는데 앞선 요청이 아직 처리 중이면 PortOne은 409 IDEMPOTENCY_OUTSTANDING_REQUEST로 응답한다.
+     * 이때는 잠시 기다려 같은 키로 다시 보낸다. 마지막 시도까지 처리 중이면 취소가 반영될 수 있으므로 실패로 알리지 않고
+     * UNKNOWN을 반환한다. 실패로 알리면 다음 재시도가 새 키로 취소를 다시 보내게 된다.
      */
     @Override
     public PaymentCancellationResponse cancelPayment(
@@ -79,6 +85,11 @@ public class PortOneClient implements PaymentGateway {
         log.info("PortOne 결제 취소 요청: pgId={}, reason={}, amount={}, currentCancellableAmount={}, idempotencyKey={}",
                 pgId, reason, amount, currentCancellableAmount, idempotencyKey);
 
+        // 마지막 시도의 응답이 "앞선 요청 처리 중"이었는지. 재시도를 다 쓴 뒤 실패와 UNKNOWN을 가른다.
+        boolean lastAttemptOutstanding = false;
+        // 처리 중 응답을 받은 횟수. 대기 시간을 정한다. 처리 중 응답은 통신 실패 뒤 재시도에서만 오므로
+        // 시도 번호로 정하면 첫 대기가 1배가 아닌 2배가 된다.
+        int outstandingCount = 0;
         for (int attempt = 1; attempt <= MAX_CANCEL_ATTEMPTS; attempt++) {
             try {
                 PortOneCancelResponse response = portOneRestClient.post()
@@ -91,6 +102,20 @@ public class PortOneClient implements PaymentGateway {
                         .body(PortOneCancelResponse.class);
                 return toCancellationResult(pgId, response);
             } catch (RestClientResponseException e) {
+                // 같은 키의 앞선 요청이 PortOne에서 처리 중이다. 새 키로 보내면 중복 취소될 수 있으므로 같은 키로 기다려 재시도한다.
+                if (isIdempotencyOutstanding(e)) {
+                    lastAttemptOutstanding = true;
+                    outstandingCount++;
+                    log.info("PortOne 결제 취소 앞선 요청 처리 중 (시도 {}/{}): pgId={}",
+                            attempt, MAX_CANCEL_ATTEMPTS, pgId);
+
+                    if (attempt < MAX_CANCEL_ATTEMPTS && !waitForOutstandingRequest(outstandingCount)) {
+                        log.warn("PortOne 결제 취소 재시도 대기 중 인터럽트됨, 조회로 확인 필요: pgId={}", pgId);
+                        return new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN);
+                    }
+                    continue;
+                }
+
                 if (isAlreadyCancelled(e)) {
                     // 부분 취소에서 받으면 다른 경로로 전체 취소된 것이므로 이번 부분 취소가 반영됐다고 볼 수 없다.
                     if (amount != null) {
@@ -115,6 +140,7 @@ public class PortOneClient implements PaymentGateway {
                 throw new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED);
             } catch (ResourceAccessException e) {
                 // 같은 멱등 키로 재시도하므로 이전 요청이 PortOne에서 처리됐어도 중복 취소되지 않는다.
+                lastAttemptOutstanding = false;
                 log.warn("PortOne 결제 취소 통신 실패 (시도 {}/{}): pgId={}",
                         attempt, MAX_CANCEL_ATTEMPTS, pgId);
             } catch (RestClientException e) {
@@ -132,8 +158,28 @@ public class PortOneClient implements PaymentGateway {
             }
         }
 
-        // 재시도를 모두 실패하면 취소가 됐는지 알 수 없으므로 반드시 실패로 알린다.
+        // 끝까지 앞선 요청이 처리 중이면 취소가 반영될 수 있으므로 다시 보내지 않고 조회로 확정하게 한다.
+        if (lastAttemptOutstanding) {
+            log.warn("PortOne 결제 취소 앞선 요청이 끝까지 처리 중, 조회로 확인 필요: pgId={}", pgId);
+            return new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN);
+        }
+
+        // 통신 재시도를 모두 실패하면 취소가 됐는지 알 수 없으므로 반드시 실패로 알린다.
         throw new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED);
+    }
+
+    // 앞선 요청 처리 중 응답 뒤 재시도 전 대기. 처리 중 응답 횟수에 따라 설정값의 1배, 2배로 늘린다. 인터럽트되면 false
+    private boolean waitForOutstandingRequest(int outstandingCount) {
+        long delayMillis = portOneProperties.getCancelOutstandingRetryDelay()
+                .multipliedBy(1L << (outstandingCount - 1))
+                .toMillis();
+        try {
+            Thread.sleep(delayMillis);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     // 취소 응답의 상태로 결과를 정한다. FAILED는 PG가 취소를 거절한 것이므로 예외로 알린다.
@@ -186,6 +232,10 @@ public class PortOneClient implements PaymentGateway {
     private boolean isPaymentNotFound(RestClientResponseException exception) {
         return exception.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND)
                 && PAYMENT_NOT_FOUND.equals(extractErrorType(exception));
+    }
+
+    private boolean isIdempotencyOutstanding(RestClientResponseException exception) {
+        return IDEMPOTENCY_OUTSTANDING_REQUEST.equals(extractErrorType(exception));
     }
 
     private boolean isAlreadyCancelled(RestClientResponseException exception) {

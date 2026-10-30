@@ -83,7 +83,15 @@ public class WebhookEventProcessor {
 
     // 일시적 오류(PG 조회 실패, 락 충돌, DB 오류 등)는 실패로 기록하고 백오프 후 재시도한다.
     private void recordFailure(Long eventId, String pgId, RuntimeException e) {
-        WebhookStatus status = webhookEventCommandService.recordFailure(eventId, e.getMessage(), Instant.now());
+        WebhookStatus status;
+        try {
+            status = webhookEventCommandService.recordFailure(eventId, e.getMessage(), Instant.now());
+        } catch (RuntimeException recordError) {
+            // 기록 실패 예외만 위로 전파되므로 원래 처리 실패 원인을 여기서 남긴다. 웹훅은 처리 중으로 남아 재점유로 재시도된다.
+            log.error("[Webhook] 처리 실패를 기록하지 못함, 재점유로 재시도 예정: eventId={}, pgId={}", eventId, pgId, e);
+            throw recordError;
+        }
+
         if (status == WebhookStatus.DEAD) {
             log.error("[Webhook] 최대 시도 초과, 수동 확인 필요: eventId={}, pgId={}", eventId, pgId, e);
             return;

@@ -15,9 +15,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
 import java.net.SocketTimeoutException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,9 +50,23 @@ class PortOneClientTest {
         RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         server = MockRestServiceServer.bindTo(builder).build();
 
+        portOneClient = new PortOneClient(builder.build(), properties(Duration.ZERO));
+    }
+
+    private static PortOneProperties properties(Duration cancelOutstandingRetryDelay) {
         PortOneProperties properties = new PortOneProperties();
         properties.setStoreId(STORE_ID);
-        portOneClient = new PortOneClient(builder.build(), properties);
+        properties.setCancelOutstandingRetryDelay(cancelOutstandingRetryDelay);
+        return properties;
+    }
+
+    // 같은 멱등 키의 앞선 요청이 처리 중일 때의 PortOne 응답
+    private static ResponseCreator outstandingRequest() {
+        return withStatus(HttpStatus.CONFLICT)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""
+                        {"type":"IDEMPOTENCY_OUTSTANDING_REQUEST","message":"처리 중인 요청입니다."}
+                        """);
     }
 
     @Test
@@ -388,6 +404,203 @@ class PortOneClientTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_CANCELLATION_FAILED.getMessage());
         server.verify();
+    }
+
+    @Test
+    @DisplayName("통신 실패 뒤 앞선 요청 처리 중 응답을 받고 재시도에 성공하면 모든 요청을 같은 멱등 키로 보내고 성공으로 처리한다.")
+    void cancelPayment_outstandingThenSuccess_RetryWithSameKey() {
+        //given
+        List<String> idempotencyKeys = new ArrayList<>();
+        server.expect(requestTo(CANCEL_URL))
+                .andExpect(request -> idempotencyKeys.add(request.getHeaders().getFirst("Idempotency-Key")))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+        server.expect(requestTo(CANCEL_URL))
+                .andExpect(request -> idempotencyKeys.add(request.getHeaders().getFirst("Idempotency-Key")))
+                .andRespond(outstandingRequest());
+        server.expect(requestTo(CANCEL_URL))
+                .andExpect(request -> idempotencyKeys.add(request.getHeaders().getFirst("Idempotency-Key")))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.SUCCEEDED));
+        assertThat(idempotencyKeys).hasSize(3).doesNotContainNull().containsOnly(idempotencyKeys.get(0));
+    }
+
+    @Test
+    @DisplayName("모든 시도가 앞선 요청 처리 중 응답이면 취소가 반영될 수 있으므로 실패로 보지 않고 UNKNOWN을 반환한다.")
+    void cancelPayment_outstandingAllAttempts_Unknown() {
+        //given
+        List<String> idempotencyKeys = new ArrayList<>();
+        server.expect(ExpectedCount.times(3), requestTo(CANCEL_URL))
+                .andExpect(request -> idempotencyKeys.add(request.getHeaders().getFirst("Idempotency-Key")))
+                .andRespond(outstandingRequest());
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L, 10000L);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
+        assertThat(idempotencyKeys).hasSize(3).containsOnly(idempotencyKeys.get(0));
+    }
+
+    @Test
+    @DisplayName("통신 실패 뒤 마지막 시도가 앞선 요청 처리 중 응답이면 UNKNOWN을 반환한다.")
+    void cancelPayment_timeoutThenOutstandingLast_Unknown() {
+        //given
+        server.expect(ExpectedCount.times(2), requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
+    }
+
+    @Test
+    @DisplayName("앞선 요청 처리 중 응답 뒤 마지막 시도가 통신 실패로 끝나면 결제 취소 실패로 처리한다.")
+    void cancelPayment_outstandingThenTimeoutLast_Fail() {
+        //given
+        server.expect(ExpectedCount.times(2), requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_CANCELLATION_FAILED.getMessage());
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("앞선 요청 처리 중 응답 뒤 다른 취소 오류 응답을 받으면 더 재시도하지 않고 결제 취소 실패로 처리한다.")
+    void cancelPayment_outstandingThenErrorResponse_FailWithoutRetry() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PG_PROVIDER","message":"PG사 오류"}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage(ErrorCode.PAYMENT_CANCELLATION_FAILED.getMessage());
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("앞선 요청 처리 중 응답 뒤 전체 취소가 이미 취소됨으로 응답하면 성공으로 처리한다.")
+    void cancelPayment_outstandingThenAlreadyCancelled_Success() {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.CONFLICT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PAYMENT_ALREADY_CANCELLED","message":"이미 취소된 결제입니다."}
+                                """));
+
+        //when
+        PaymentCancellationResponse response = portOneClient.cancelPayment(PG_ID, "금액 불일치", null);
+
+        //then
+        server.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED));
+    }
+
+    @Test
+    @DisplayName("앞선 요청 처리 중 응답을 받으면 설정한 대기 시간의 1배, 2배를 기다린 뒤 재시도한다.")
+    void cancelPayment_outstanding_WaitBeforeRetry() {
+        //given
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer delayedServer = MockRestServiceServer.bindTo(builder).build();
+        PortOneClient delayedClient = new PortOneClient(builder.build(), properties(Duration.ofMillis(50)));
+        delayedServer.expect(ExpectedCount.times(2), requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+        delayedServer.expect(requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        long startedAt = System.nanoTime();
+        PaymentCancellationResponse response = delayedClient.cancelPayment(PG_ID, "금액 불일치", null);
+        Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+        //then
+        delayedServer.verify();
+        assertThat(response.status()).isEqualTo(GatewayCancellationStatus.SUCCEEDED);
+        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(150));
+    }
+
+    @Test
+    @DisplayName("통신 실패 뒤 처음 받은 처리 중 응답은 시도 번호와 무관하게 설정한 대기 시간의 1배만 기다린다.")
+    void cancelPayment_timeoutThenOutstanding_WaitBaseDelay() {
+        //given
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer delayedServer = MockRestServiceServer.bindTo(builder).build();
+        PortOneClient delayedClient = new PortOneClient(builder.build(), properties(Duration.ofSeconds(1)));
+        delayedServer.expect(requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+        delayedServer.expect(requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+        delayedServer.expect(requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        long startedAt = System.nanoTime();
+        PaymentCancellationResponse response = delayedClient.cancelPayment(PG_ID, "금액 불일치", null);
+        Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+        //then
+        delayedServer.verify();
+        assertThat(response.status()).isEqualTo(GatewayCancellationStatus.SUCCEEDED);
+        // 시도 번호(2회차)로 정하면 2배인 2초를 기다린다. 상한에 1초 여유를 둬 느린 환경에서도 구분한다.
+        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofSeconds(1)).isLessThan(Duration.ofSeconds(2));
+    }
+
+    @Test
+    @DisplayName("재시도 대기 중 인터럽트되면 더 재시도하지 않고 인터럽트 상태를 유지한 채 UNKNOWN을 반환한다.")
+    void cancelPayment_interruptedWhileWaiting_Unknown() {
+        //given
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer delayedServer = MockRestServiceServer.bindTo(builder).build();
+        PortOneClient delayedClient = new PortOneClient(builder.build(), properties(Duration.ofSeconds(10)));
+        delayedServer.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+
+        //when
+        Thread.currentThread().interrupt();
+        PaymentCancellationResponse response;
+        boolean interrupted;
+        try {
+            response = delayedClient.cancelPayment(PG_ID, "금액 불일치", null);
+        } finally {
+            interrupted = Thread.interrupted();
+        }
+
+        //then
+        delayedServer.verify();
+        assertThat(response).isEqualTo(new PaymentCancellationResponse(null, GatewayCancellationStatus.UNKNOWN));
+        assertThat(interrupted).isTrue();
     }
 
     @Test

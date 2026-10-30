@@ -1,0 +1,49 @@
+# 테스트 전용 신규 DB. 실제 비밀값과 공용 DB를 사용하지 않는다.
+server:
+  address: 127.0.0.1
+  port: 18086
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:13316/attraction_perf
+    username: perf
+    password: perf-local-only
+    hikari:
+      maximum-pool-size: 10
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 16396
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+jwt:
+  secret: cGVyZi1sb2NhbC1vbmx5LWtleS1kb250LXVzZS1pbi1wcm9kdWN0aW9uLTEyMzQ1Ng==
+portone:
+  base-url: http://127.0.0.1:9
+  api-secret: local-test-only
+  store-id: local-test-only
+  channel-key: local-test-only
+  webhook-secret: bG9jYWwtdGVzdC1vbmx5
+app:
+  oauth2:
+    success-redirect-uri: http://localhost:18086/unused
+    failure-redirect-uri: http://localhost:18086/unused
+order:
+  cancel:
+    scheduler:
+      enabled: false
+payment:
+  webhook:
+    scheduler:
+      enabled: false
+  compensation:
+    scheduler:
+      enabled: false
+  refund:
+    scheduler:
+      enabled: false
+ticket:
+  expiration:
+    scheduler:
+      fixed-delay: 24h

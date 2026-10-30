@@ -1,0 +1,24 @@
+name: attraction-order-perf
+services:
+  mysql:
+    image: mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    environment:
+      MYSQL_ROOT_PASSWORD: perf-local-only
+      MYSQL_DATABASE: attraction_perf
+      MYSQL_USER: perf
+      MYSQL_PASSWORD: perf-local-only
+    ports:
+      - "127.0.0.1:13316:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pperf-local-only"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis@sha256:298e5b3bc566bade82f46ad5511777a4a07a294097ce16ada2f6a42be5239df5
+    ports:
+      - "127.0.0.1:16396:6379"
+volumes:
+  mysql-data:

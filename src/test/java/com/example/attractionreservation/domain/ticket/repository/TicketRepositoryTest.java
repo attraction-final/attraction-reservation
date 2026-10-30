@@ -24,6 +24,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -38,6 +39,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 @DataJpaTest
 @ActiveProfiles("test")
@@ -282,7 +284,8 @@ class TicketRepositoryTest {
     @DisplayName("실제 Repository로 내 티켓을 조회하고 응답 DTO로 변환한다")
     void findTicketAll_RealRepository_ReturnsResponseDtos() {
         // given
-        TicketService ticketService = new TicketService(ticketRepository);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        TicketService ticketService = new TicketService(ticketRepository, eventPublisher);
         SearchTicketCondition condition =
                 new SearchTicketCondition(null, null, null);
         Pageable pageable = PageRequest.of(

@@ -37,6 +37,7 @@ def csrf():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', action='store_true')
+    parser.add_argument('--extend', action='store_true')
     parser.add_argument('--users', type=int, default=20)
     parser.add_argument('--orders-per-user', type=int, default=1000)
     args = parser.parse_args()
@@ -44,29 +45,96 @@ def main():
         raise ValueError('회원 2~2000명, 회원별 주문 10~100000건 범위')
     if sql('SELECT DATABASE();') != 'attraction_perf':
         raise RuntimeError('개인 테스트 DB가 아닙니다.')
+    if args.seed and args.extend:
+        raise ValueError('--seed와 --extend는 함께 사용할 수 없습니다.')
+
     ids = []
-    if args.seed:
-        if int(sql('SELECT COUNT(*) FROM orders;')):
-            raise RuntimeError('기존 주문이 있는 DB에는 seed를 반복 적용하지 않습니다. 토큰 재발급은 --seed 없이 실행하세요.')
+    if args.seed or args.extend:
+        if args.seed and int(sql('SELECT COUNT(*) FROM orders;')):
+            raise RuntimeError(
+                '기존 주문이 있는 DB입니다. 데이터 추가는 --extend를 사용하세요.'
+            )
+
+        # 기존 회원의 주문 수가 다르면 임의로 덮어쓰거나 추가하지 않는다.
         for i in range(args.users):
             email = f'perf{i:04d}@example.test'
             uid = sql(f"SELECT id FROM users WHERE email='{email}';")
-            if not uid:
-                request('POST', '/api/users/signup', {'email': email, 'password': PASSWORD,
-                    'nickname': f'성능테스트{i:04d}'}, csrf())
-                uid = sql(f"SELECT id FROM users WHERE email='{email}';")
-            ids.append((int(uid), email))
+            if uid:
+                total = int(sql(
+                    f'SELECT COUNT(*) FROM orders WHERE user_id={int(uid)};'
+                ))
+                if total not in (0, args.orders_per_user):
+                    raise RuntimeError(
+                        f'회원 {uid}의 주문 수가 {total}건입니다. '
+                        f'예상한 {args.orders_per_user}건과 달라 중단합니다.'
+                    )
+
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        for uid, _ in ids:
+
+        for i in range(args.users):
+            email = f'perf{i:04d}@example.test'
+            uid = sql(f"SELECT id FROM users WHERE email='{email}';")
+
+            if not uid:
+                request(
+                    'POST',
+                    '/api/users/signup',
+                    {
+                        'email': email,
+                        'password': PASSWORD,
+                        'nickname': f'성능테스트{i:04d}',
+                    },
+                    csrf(),
+                )
+                uid = sql(f"SELECT id FROM users WHERE email='{email}';")
+
+            uid = int(uid)
+            ids.append((uid, email))
+            total = int(sql(
+                f'SELECT COUNT(*) FROM orders WHERE user_id={uid};'
+            ))
+
+            # 이미 준비된 회원의 주문은 그대로 유지한다.
+            if total == args.orders_per_user:
+                continue
+
+            if total != 0:
+                raise RuntimeError(
+                    f'회원 {uid}의 주문 수가 변경되어 중단합니다.'
+                )
+
             for batch in range(0, args.orders_per_user, 500):
                 values = []
-                for j in range(batch, min(batch + 500, args.orders_per_user)):
-                    stamp = (start + timedelta(seconds=j // 2)).strftime('%Y-%m-%d %H:%M:%S')
-                    values.append(f"({uid},10000,'COMPLETED','2025-01-01','{stamp}','{stamp}')")
-                sql('INSERT INTO orders(user_id,total_amount,status,visit_date,created_at,updated_at) VALUES ' + ','.join(values) + ';')
+                for j in range(
+                    batch,
+                    min(batch + 500, args.orders_per_user),
+                ):
+                    stamp = (
+                        start + timedelta(seconds=j // 2)
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+
+                    values.append(
+                        f"({uid},10000,'COMPLETED','2025-01-01',"
+                        f"'{stamp}','{stamp}')"
+                    )
+
+                sql(
+                    'INSERT INTO orders'
+                    '(user_id,total_amount,status,visit_date,'
+                    'created_at,updated_at) VALUES '
+                    + ','.join(values)
+                    + ';'
+                )
     else:
-        rows = sql("SELECT id,email FROM users WHERE email REGEXP '^perf[0-9]{4}@example[.]test$' ORDER BY email;")
-        ids = [(int(row.split('\t')[0]), row.split('\t')[1]) for row in rows.splitlines()]
+        rows = sql(
+            "SELECT id,email FROM users "
+            "WHERE email REGEXP '^perf[0-9]{4}@example[.]test$' "
+            "ORDER BY email;"
+        )
+        ids = [
+            (int(row.split('\t')[0]), row.split('\t')[1])
+            for row in rows.splitlines()
+        ]
     accounts, public = [], []
     for uid, email in ids:
         body, _ = request('POST', '/api/auth/login', {'email': email, 'password': PASSWORD}, csrf())

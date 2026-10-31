@@ -29,7 +29,7 @@ def main():
     if not re.fullmatch(r'[a-zA-Z0-9_-]+', args.run_id):
         raise ValueError('실행 ID는 영문·숫자·밑줄·하이픈만 사용')
     folder = ROOT / 'results' / args.run_id
-    folder.mkdir(exist_ok=False)
+    folder.mkdir(parents=True, exist_ok=False)
     subprocess.run([sys.executable, str(ROOT / 'prepare.py')], check=True)
     metadata = {'runId': args.run_id, 'startedAt': datetime.now(timezone.utc).isoformat(),
         'commit': output(['git','rev-parse','HEAD']),

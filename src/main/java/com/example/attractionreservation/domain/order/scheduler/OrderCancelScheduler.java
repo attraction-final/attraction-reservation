@@ -28,7 +28,10 @@ public class OrderCancelScheduler {
         int cancelledCount = orderService.updateExpiredOrdersByCancel();
 
         if (cancelledCount > 0) {
-            log.info("결제 대기 주문 자동 취소 완료: {}건", cancelledCount);
+            log.info(
+                    "event=ORDER_AUTO_CANCEL_SUMMARY cancelledCount={}",
+                    cancelledCount
+            );
         }
     }
 }

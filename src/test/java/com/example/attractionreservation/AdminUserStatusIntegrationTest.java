@@ -17,6 +17,11 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.UUID;
 
@@ -29,6 +34,8 @@ import static org.mockito.Mockito.doThrow;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "admin-user-status-test=true"
 })
+
+@ExtendWith(OutputCaptureExtension.class)
 @ActiveProfiles("test")
 class AdminUserStatusIntegrationTest {
 
@@ -44,12 +51,17 @@ class AdminUserStatusIntegrationTest {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @MockitoSpyBean
     private RefreshTokenRepository refreshTokenRepository;
 
     @Test
     @DisplayName("회원 정지를 DB에 저장하고 실제 Redis의 Refresh Token을 폐기한다")
-    void updateUserStatus_suspendMember_persistsStatusAndDeletesToken() {
+    void updateUserStatus_suspendMember_persistsStatusAndDeletesToken(
+            CapturedOutput output
+    ) {
         // given
         User user = userRepository.saveAndFlush(
                 User.builder()
@@ -69,6 +81,7 @@ class AdminUserStatusIntegrationTest {
 
             // when
             UpdateUserStatusResponse response = userService.updateUserStatus(
+                    1L,
                     userId,
                     new UpdateUserStatusRequest(UserStatus.SUSPENDED)
             );
@@ -84,6 +97,11 @@ class AdminUserStatusIntegrationTest {
                     .isFalse();
             assertThat(redisTemplate.hasKey("auth:refresh:" + userId))
                     .isFalse();
+            assertThat(output.getAll()).contains(
+                    "event=USER_STATUS_CHANGED result=SUCCESS "
+                            + "adminId=1 userId=" + userId
+                            + " previousStatus=ACTIVE currentStatus=SUSPENDED"
+            );
         } finally {
             // 테스트에 별도 트랜잭션이 없고 Redis도 자동 롤백되지 않아 직접 정리한다.
             redisTemplate.delete("auth:refresh:" + userId);
@@ -93,7 +111,9 @@ class AdminUserStatusIntegrationTest {
 
     @Test
     @DisplayName("Redis 토큰 삭제가 실패하면 DB의 회원 상태 변경을 롤백한다")
-    void updateUserStatus_redisFailure_rollsBackDatabaseStatus() {
+    void updateUserStatus_redisFailure_rollsBackDatabaseStatus(
+            CapturedOutput output
+    ) {
         // given
         User user = userRepository.saveAndFlush(
                 User.builder()
@@ -123,6 +143,7 @@ class AdminUserStatusIntegrationTest {
 
             // when & then
             assertThatThrownBy(() -> userService.updateUserStatus(
+                    1L,
                     userId,
                     new UpdateUserStatusRequest(UserStatus.SUSPENDED)
             )).isSameAs(failure);
@@ -135,9 +156,59 @@ class AdminUserStatusIntegrationTest {
             // 이번 테스트는 삭제 실행 전에 실패하도록 구성했으므로 토큰이 남아 있다.
             assertThat(refreshTokenRepository.matches(userId, refreshToken))
                     .isTrue();
+            assertThat(output.getAll())
+                    .doesNotContain("event=USER_STATUS_CHANGED");
         } finally {
             // 오류를 설정한 저장소 메서드 대신 Redis에 직접 접근하여 정리한다.
             redisTemplate.delete("auth:refresh:" + userId);
+            userRepository.deleteById(userId);
+        }
+    }
+
+    @Test
+    @DisplayName("이벤트 전달 후 외부 트랜잭션이 롤백되면 완료 로그를 남기지 않는다")
+    void updateUserStatus_outerRollback_doesNotLogSuccess(
+            CapturedOutput output
+    ) {
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("로그롤백테스트")
+                        .build()
+        );
+
+        Long userId = user.getId();
+
+        try {
+            TransactionTemplate transaction =
+                    new TransactionTemplate(transactionManager);
+
+            transaction.executeWithoutResult(status -> {
+                userService.updateUserStatus(
+                        1L,
+                        userId,
+                        new UpdateUserStatusRequest(UserStatus.INACTIVE)
+                );
+
+                // 서비스가 반환돼도 외부 트랜잭션이 커밋되기 전에는
+                // 완료 로그가 출력되면 안 된다.
+                assertThat(output.getAll())
+                        .doesNotContain("event=USER_STATUS_CHANGED");
+
+                // 이벤트 전달 이후의 롤백을 의도적으로 발생시킨다.
+                status.setRollbackOnly();
+            });
+
+            User savedUser = userRepository.findById(userId)
+                    .orElseThrow();
+
+            assertThat(savedUser.getStatus())
+                    .isEqualTo(UserStatus.ACTIVE);
+
+            assertThat(output.getAll())
+                    .doesNotContain("event=USER_STATUS_CHANGED");
+        } finally {
             userRepository.deleteById(userId);
         }
     }

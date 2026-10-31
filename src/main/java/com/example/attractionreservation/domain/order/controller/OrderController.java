@@ -15,6 +15,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/orders")
@@ -30,6 +33,22 @@ public class OrderController {
         // 주문자는 요청값이 아닌 인증된 회원 ID로 식별한다.
         CreateOrderResponse response =
                 orderService.createOrder(userId, request);
+
+        long totalQuantity = response.items().stream()
+                .mapToLong(CreateOrderResponse.Item::quantity)
+                .sum();
+
+        log.info(
+                "event=ORDER_CREATED result=SUCCESS "
+                        + "userId={} orderId={} totalAmount={} totalQuantity={} "
+                        + "visitDate={} status={}",
+                userId,
+                response.orderId(),
+                response.totalAmount(),
+                totalQuantity,
+                request.visitDate(),
+                response.status()
+        );
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok("주문 생성에 성공했습니다.", response));
@@ -68,6 +87,14 @@ public class OrderController {
     ) {
         UpdateOrderResponse response =
                 orderService.updateOrderByCancel(userId, orderId);
+
+        log.info(
+                "event=ORDER_CANCELLED result=SUCCESS "
+                        + "userId={} orderId={} cancelType=USER status={}",
+                userId,
+                response.orderId(),
+                response.status()
+        );
 
         return ResponseEntity.ok(
                 ApiResponse.ok("주문 취소에 성공했습니다.", response)

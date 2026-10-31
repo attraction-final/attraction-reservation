@@ -291,7 +291,7 @@ class AdminUserControllerTest {
         UpdateUserStatusRequest request =
                 new UpdateUserStatusRequest(UserStatus.SUSPENDED);
 
-        when(userService.updateUserStatus(10L, request))
+        when(userService.updateUserStatus(1L, 10L, request))
                 .thenReturn(new UpdateUserStatusResponse(
                         10L,
                         "user@example.com",
@@ -316,7 +316,7 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.data.status").value("SUSPENDED"))
                 .andExpect(jsonPath("$.data.password").doesNotExist());
 
-        verify(userService).updateUserStatus(10L, request);
+        verify(userService).updateUserStatus(1L, 10L, request);
     }
 
     @Test
@@ -394,7 +394,7 @@ class AdminUserControllerTest {
         UpdateUserStatusRequest request =
                 new UpdateUserStatusRequest(UserStatus.SUSPENDED);
 
-        when(userService.updateUserStatus(10L, request))
+        when(userService.updateUserStatus(1L, 10L, request))
                 .thenThrow(new BusinessException(errorCode));
 
         // when & then
@@ -408,7 +408,7 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value(errorCode.getMessage()));
 
-        verify(userService).updateUserStatus(10L, request);
+        verify(userService).updateUserStatus(1L, 10L, request);
     }
 
     private RequestPostProcessor authenticatedAs(String role) {

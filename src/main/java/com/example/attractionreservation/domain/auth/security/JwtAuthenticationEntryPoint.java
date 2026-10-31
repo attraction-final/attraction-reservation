@@ -13,7 +13,9 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
@@ -29,6 +31,14 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
         // 인증 정보가 없는 요청은 401 Unauthorized로 처리한다.
         ErrorCode errorCode = ErrorCode.UNAUTHORIZED;
+
+        log.warn(
+                "event=AUTHENTICATION_REJECTED result=REJECTED "
+                        + "method={} errorCode={} httpStatus={}",
+                request.getMethod(),
+                errorCode.name(),
+                errorCode.getStatus().value()
+        );
 
         // 팀 공통 API 응답 형식에 맞춰 HTTP 상태와 JSON 응답을 설정한다.
         response.setStatus(errorCode.getStatus().value());

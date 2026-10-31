@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.event.UserStatusChangedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepository;
 import com.example.attractionreservation.domain.user.dto.UpdateUserStatusRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserStatusResponse;
@@ -35,6 +37,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public CreateUserResponse signup(CreateUserRequest request) {
@@ -106,12 +109,16 @@ public class UserService {
 
     @Transactional
     public UpdateUserStatusResponse updateUserStatus(
+            Long adminId,
             Long userId,
             UpdateUserStatusRequest request
     ) {
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        // 변경 전에 값을 보관해야 실제 이전 상태를 기록할 수 있다.
+        UserStatus previousStatus = user.getStatus();
 
         user.updateStatus(request.status());
 
@@ -124,6 +131,16 @@ public class UserService {
             // Redis 오류를 그대로 전달하여 DB 상태 변경은 롤백되도록 한다.
             refreshTokenRepository.delete(userId);
         }
+
+        // 완료 로그 출력은 리스너가 DB 커밋 이후에 수행한다.
+        eventPublisher.publishEvent(
+                new UserStatusChangedEvent(
+                        adminId,
+                        userId,
+                        previousStatus,
+                        user.getStatus()
+                )
+        );
 
         return UpdateUserStatusResponse.from(user);
     }

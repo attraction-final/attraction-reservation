@@ -23,6 +23,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
@@ -30,6 +32,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,7 +43,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PaymentFacadeTest {
 
     private static final Long USER_ID = 1L;
@@ -223,6 +226,21 @@ class PaymentFacadeTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_INCORRECT_AMOUNT.getMessage());
         verifyNoInteractions(paymentCompensationProcessor);
+    }
+
+    @Test
+    @DisplayName("PG 결제 금액이 원장과 다르면 원장 금액과 PG 금액을 WARN 로그로 남긴다.")
+    void confirmPayment_amountMismatch_LogWarn(CapturedOutput output) {
+        //given
+        given(paymentService.getOwnedPayment(USER_ID, pgId)).willReturn(payment);
+        given(paymentGateway.getPayment(pgId)).willReturn(Optional.of(pgResponse(GatewayPaymentStatus.PAID, 9999L)));
+        given(paymentCommandService.failPaymentWithCompensation(pgId, 9999L, "결제 금액 불일치")).willReturn(true);
+
+        //when & then
+        assertThatThrownBy(() -> paymentFacade.confirmPayment(USER_ID, pgId, request))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_AMOUNT_MISMATCHED")))
+                .singleElement().asString().contains("WARN").contains("amount=10000 pgAmount=9999");
     }
 
     @Test

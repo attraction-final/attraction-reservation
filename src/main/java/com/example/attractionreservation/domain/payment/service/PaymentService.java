@@ -10,13 +10,16 @@ import com.example.attractionreservation.domain.payment.repository.PaymentReposi
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.response.PageableDto;
+import com.example.attractionreservation.global.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
@@ -65,6 +68,9 @@ public class PaymentService {
         // 결제만 취소한다. 주문 취소와 재고 복구는 호출한 주문 취소 흐름에서 처리한다.
         found.markAsCancelled();
         paymentRepository.save(found);
+
+        String pgId = found.getPgId();
+        AfterCommit.run(() -> log.info("event=PAYMENT_CANCELLED pgId={} orderId={} userId={}", pgId, orderId, userId));
     }
 
     @Transactional

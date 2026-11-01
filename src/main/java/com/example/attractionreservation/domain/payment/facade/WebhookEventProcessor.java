@@ -12,6 +12,7 @@ import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -27,14 +28,19 @@ public class WebhookEventProcessor {
     private final PaymentFacade paymentFacade;
     private final RefundProcessor refundProcessor;
 
-    public void processPending(int limit) {
-        for (Long eventId: webhookEventCommandService.findProcessableIds(Instant.now(), limit)) {
+    /**
+     * @return 이번 주기에 처리를 시도한 웹훅 수
+     */
+    public int processPending(int limit) {
+        List<Long> eventIds = webhookEventCommandService.findProcessableIds(Instant.now(), limit);
+        for (Long eventId: eventIds) {
             try {
                 process(eventId);
             } catch (Exception e) {
-                log.error("[Webhook] 처리 중 예기치 못한 오류: eventId = {}", eventId, e);
+                log.error("event=WEBHOOK_PROCESS_ABORTED eventId={}", eventId, e);
             }
         }
+        return eventIds.size();
     }
 
     public void process(Long eventId) {
@@ -43,7 +49,7 @@ public class WebhookEventProcessor {
             pgId = webhookEventCommandService.claim(eventId, Instant.now());
         } catch (PessimisticLockingFailureException e) {
             // 다른 인스턴스가 같은 웹훅을 잠그고 있으면 그쪽에 맡긴다.
-            log.info("[Webhook] 다른 처리가 점유 중이라 건너뜀: eventId={}", eventId);
+            log.info("event=WEBHOOK_PROCESS_SKIPPED eventId={} reason=\"다른 처리가 점유 중\"", eventId);
             return;
         }
 
@@ -63,7 +69,7 @@ public class WebhookEventProcessor {
         } catch (BusinessException e) {
             if (e.getErrorCode() == ErrorCode.PAYMENT_WEBHOOK_INVALID_STATUS_TRANSITION) {
                 // 멈춘 행으로 보고 다시 점유한 사이 다른 처리가 먼저 결과를 기록한 경우
-                log.info("[Webhook] 다른 처리가 먼저 기록해 건너뜀: eventId={}", eventId);
+                log.info("event=WEBHOOK_PROCESS_SKIPPED eventId={} reason=\"다른 처리가 먼저 기록\"", eventId);
 
                 return;
             }
@@ -76,8 +82,8 @@ public class WebhookEventProcessor {
     private void logResult(Long eventId, String pgId, PaymentSyncResult result) {
         switch (result) {
             case STATE_CONFLICT ->
-                    log.error("[Webhook] 원장 상태와 충돌, 수동 확인 필요: eventId={}, pgId={}", eventId, pgId);
-            default -> log.info("[Webhook] 처리 완료: eventId={}, pgId={}, result={}", eventId, pgId, result);
+                    log.error("event=WEBHOOK_STATE_CONFLICTED eventId={} pgId={}", eventId, pgId);
+            default -> log.info("event=WEBHOOK_PROCESSED eventId={} pgId={} result={}", eventId, pgId, result);
         }
     }
 
@@ -89,14 +95,27 @@ public class WebhookEventProcessor {
         } catch (RuntimeException recordError) {
             // 기록 실패 예외만 위로 전파되므로 원래 처리 실패 원인을 여기서 남긴다.
             // 대부분 롤백돼 처리 중으로 남고 재점유로 재시도되지만, 다른 처리가 먼저 상태를 바꿨거나 커밋 결과가 불확실할 수 있어 단정하지 않는다.
-            log.error("[Webhook] 처리 실패를 기록하지 못함, 웹훅 상태 확인 필요: eventId={}, pgId={}", eventId, pgId, e);
+            log.error("event=WEBHOOK_FAILURE_RECORD_FAILED eventId={} pgId={} errorCode={}",
+                    eventId, pgId, errorCodeOf(e), unexpectedOrNull(e));
             throw recordError;
         }
 
         if (status == WebhookStatus.DEAD) {
-            log.error("[Webhook] 최대 시도 초과, 수동 확인 필요: eventId={}, pgId={}", eventId, pgId, e);
+            log.error("event=WEBHOOK_RETRY_EXHAUSTED eventId={} pgId={} errorCode={}",
+                    eventId, pgId, errorCodeOf(e), unexpectedOrNull(e));
             return;
         }
-        log.warn("[Webhook] 처리 실패, 재시도 예정: eventId={}, pgId={}", eventId, pgId, e);
+        log.warn("event=WEBHOOK_PROCESS_FAILED eventId={} pgId={} errorCode={}",
+                eventId, pgId, errorCodeOf(e), unexpectedOrNull(e));
+    }
+
+    // BusinessException은 예상된 실패라 errorCode만 남긴다. PG 연동 실패는 PortOneClient가 원인 예외와 함께 이미 남겼다.
+    // 예상하지 못한 예외만 스택 트레이스를 남긴다.
+    private String errorCodeOf(RuntimeException e) {
+        return e instanceof BusinessException businessException ? businessException.getErrorCode().name() : "";
+    }
+
+    private RuntimeException unexpectedOrNull(RuntimeException e) {
+        return e instanceof BusinessException ? null : e;
     }
 }

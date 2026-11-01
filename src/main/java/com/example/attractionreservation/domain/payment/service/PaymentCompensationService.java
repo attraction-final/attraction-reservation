@@ -24,7 +24,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class PaymentCompensationService {
     // 처리 중 상태로 이 시간이 지나면 서버가 멈춘 것으로 보고 다시 점유한다.
-    // PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) = 45초)보다 길어야 한다.
+    // PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) + 처리 중 응답 대기 1초·2초 = 48초)보다 길어야 한다.
     static final Duration STALE_PROCESSING_TIMEOUT = Duration.ofMinutes(5);
 
     private final PaymentCompensationRepository paymentCompensationRepository;

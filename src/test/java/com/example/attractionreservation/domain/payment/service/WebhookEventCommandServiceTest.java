@@ -150,6 +150,31 @@ class WebhookEventCommandServiceTest {
         assertThat(find(id).getAttemptCount()).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("처리 실패를 기록하면 FAILED가 되고, 최대 시도 횟수를 넘으면 DEAD를 반환한다.")
+    void recordFailure_untilMaxAttempts_FailedThenDead() {
+        //given
+        Long id = save("webhook-1", PG_ID);
+        Instant now = now();
+        WebhookStatus firstStatus = null;
+        WebhookStatus lastStatus = null;
+
+        //when
+        for (int i = 0; i < 5; i++) {
+            Instant attemptAt = now.plus(Duration.ofHours(i));
+            webhookEventCommandService.claim(id, attemptAt);
+            lastStatus = webhookEventCommandService.recordFailure(id, "PG 조회 실패", attemptAt);
+            if (i == 0) {
+                firstStatus = lastStatus;
+            }
+        }
+
+        //then
+        assertThat(firstStatus).isEqualTo(WebhookStatus.FAILED);
+        assertThat(lastStatus).isEqualTo(WebhookStatus.DEAD);
+        assertThat(find(id).getStatus()).isEqualTo(WebhookStatus.DEAD);
+    }
+
     @ParameterizedTest
     @EnumSource(value = PaymentSyncResult.class, names = {"STATE_CONFLICT", "REFUND_MISMATCH"})
     @DisplayName("수동 처리가 필요한 결과는 재시도 없이 DEAD로 기록한다.")

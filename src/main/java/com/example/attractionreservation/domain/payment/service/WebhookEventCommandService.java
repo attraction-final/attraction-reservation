@@ -96,9 +96,14 @@ public class WebhookEventCommandService {
         }
     }
 
+    /**
+     * @return 기록 후 상태 (FAILED 또는 최대 시도 초과로 DEAD)
+     */
     @Transactional
-    public void recordFailure(Long eventId, String error, Instant now) {
-        getWithLock(eventId).markAsFailed(error, now);
+    public WebhookStatus recordFailure(Long eventId, String error, Instant now) {
+        WebhookEvent event = getWithLock(eventId);
+        event.markAsFailed(error, now);
+        return event.getStatus();
     }
 
     private WebhookEvent getWithLock(Long eventId) {

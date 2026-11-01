@@ -1,15 +1,19 @@
 package com.example.attractionreservation.domain.attraction.service;
 
+import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
+import com.example.attractionreservation.global.config.CacheConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -30,6 +34,7 @@ public class AttractionService {
     private final AttractionRepository attractionRepository;
     private final UpcomingReservationReader upcomingReservationReader;
     private final AttractionSlotRepository attractionSlotRepository; // nextSlot 조회용
+    private final AttractionDetailCacheEvictor attractionDetailCacheEvictor; // ★ 추가: 상세 캐시 삭제용
 
     // 어트랙션 등록
     @Transactional
@@ -107,6 +112,9 @@ public class AttractionService {
     }
 
     // 어트랙션 상세 조회
+    // ★ 처음엔 DB에서 읽고 Redis에 "attractionDetail::{id}" 로 저장, 다음부터는 Redis에서 꺼낸다
+    //   (없는 어트랙션이면 예외가 나므로 저장되지 않는다)
+    @Cacheable(cacheNames = CacheConfig.ATTRACTION_DETAIL, key = "#attractionId")
     @Transactional(readOnly = true)
     public SearchAttractionResponse findAttractionById(Long attractionId) {
         Attraction attraction = findActiveAttraction(attractionId);
@@ -139,6 +147,9 @@ public class AttractionService {
         // updatedAt 은 DB에 반영(flush)될 때 채워지므로, 응답 전에 먼저 반영한다.
         attractionRepository.flush();
 
+        // ★ 추가: 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
+        attractionDetailCacheEvictor.evictAfterCommit(attractionId);
+
         return SearchAttractionResponse.from(attraction);
     }
 
@@ -161,6 +172,9 @@ public class AttractionService {
         attraction.changeOperationStatus(newStatus);
         attractionRepository.flush();
 
+        // ★ 추가: 커밋이 끝난 뒤 상세 캐시 삭제
+        attractionDetailCacheEvictor.evictAfterCommit(attractionId);
+
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
     }
 
@@ -181,5 +195,7 @@ public class AttractionService {
         Attraction attraction = findActiveAttraction(attractionId);
         validateNoUpcomingReservations(attractionId, "삭제"); // BR-ATR-06
         attraction.deleted();
+
+        attractionDetailCacheEvictor.evictAfterCommit(attractionId); // ★ 추가
     }
 }

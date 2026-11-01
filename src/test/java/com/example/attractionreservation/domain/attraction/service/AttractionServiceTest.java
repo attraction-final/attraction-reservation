@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.attraction.service;
 
+import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
@@ -41,6 +42,9 @@ class AttractionServiceTest {
 
     @Mock
     private UpcomingReservationReader upcomingReservationReader; // 위로 옮김 (다른 @Mock과 같이)
+
+    @Mock
+    private AttractionDetailCacheEvictor attractionDetailCacheEvictor; // 추가: 캐시 삭제 도우미 (가짜)
 
     @InjectMocks
     private AttractionService attractionService;

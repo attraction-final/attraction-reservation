@@ -144,6 +144,7 @@ public enum ErrorCode {
     PAYMENT_COMPENSATION_NOT_FOUND(HttpStatus.NOT_FOUND, "보상 요청을 찾을 수 없습니다."),
 
     // refund
+    REFUND_PG_CANCELLED_AMOUNT_STALE(HttpStatus.CONFLICT, "PG 취소 금액이 환불 기록보다 작습니다. 다시 조회해야 합니다."),
     REFUND_INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "유효하지 않은 환불 상태 전이입니다."),
     REFUND_INVALID_QUANTITY(HttpStatus.BAD_REQUEST, "환불 수량이 올바르지 않습니다."),
     REFUND_NOT_REFUNDABLE_PAYMENT(HttpStatus.CONFLICT, "환불할 수 없는 결제 상태입니다."),

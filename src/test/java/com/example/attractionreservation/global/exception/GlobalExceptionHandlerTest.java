@@ -46,7 +46,7 @@ class GlobalExceptionHandlerTest {
         // then
         assertThat(logLine(output, "event=REQUEST_REJECTED"))
                 .contains("INFO")
-                .contains("method=GET uri=/test/not-found errorCode=ATTRACTION_NOT_FOUND httpStatus=404");
+                .contains("method=GET uri=\"/test/not-found\" errorCode=ATTRACTION_NOT_FOUND httpStatus=404");
         assertThat(output).doesNotContain("BusinessException");
     }
 
@@ -61,7 +61,7 @@ class GlobalExceptionHandlerTest {
         // then
         assertThat(logLine(output, "event=REQUEST_FAILED"))
                 .contains("ERROR")
-                .contains("method=GET uri=/test/bad-gateway")
+                .contains("method=GET uri=\"/test/bad-gateway\"")
                 .contains("errorCode=PAYMENT_GATEWAY_ERROR httpStatus=502");
         assertThat(output).doesNotContain("BusinessException");
     }
@@ -83,7 +83,7 @@ class GlobalExceptionHandlerTest {
         // then
         assertThat(logLine(output, "event=REQUEST_REJECTED"))
                 .contains("INFO")
-                .contains("method=POST uri=/test/validation errorCode=INVALID_INPUT_VALUE httpStatus=400");
+                .contains("method=POST uri=\"/test/validation\" errorCode=INVALID_INPUT_VALUE httpStatus=400");
     }
 
     @Test
@@ -95,8 +95,21 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isNotFound());
 
         // then
-        assertThat(logLine(output, "event=REQUEST_REJECTED")).contains("uri=/test/not-found ");
+        assertThat(logLine(output, "event=REQUEST_REJECTED")).contains("uri=\"/test/not-found\" ");
         assertThat(output).doesNotContain("secret-token");
+    }
+
+    @Test
+    @DisplayName("요청 경로에 '='가 있어도 logfmt 파싱이 깨지지 않도록 uri를 따옴표로 감싸 남긴다")
+    void handleBusinessException_UriWithEquals_LogQuotedUri(CapturedOutput output) throws Exception {
+        // given
+        // when
+        mockMvc.perform(get("/test/not-found/foo=bar"))
+                .andExpect(status().isNotFound());
+
+        // then
+        assertThat(logLine(output, "event=REQUEST_REJECTED"))
+                .contains("method=GET uri=\"/test/not-found/foo=bar\" errorCode=ATTRACTION_NOT_FOUND");
     }
 
     @Test
@@ -110,7 +123,7 @@ class GlobalExceptionHandlerTest {
         // then
         assertThat(logLine(output, "event=REQUEST_FAILED"))
                 .contains("ERROR")
-                .contains("method=GET uri=/test/unexpected errorCode=INTERNAL_SERVER_ERROR httpStatus=500");
+                .contains("method=GET uri=\"/test/unexpected\" errorCode=INTERNAL_SERVER_ERROR httpStatus=500");
         assertThat(output).contains("java.lang.IllegalStateException: 예상하지 못한 오류");
     }
 
@@ -143,6 +156,11 @@ class GlobalExceptionHandlerTest {
 
         @GetMapping("/test/not-found")
         void notFound() {
+            throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND);
+        }
+
+        @GetMapping("/test/not-found/{value}")
+        void notFoundWithPath() {
             throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND);
         }
 

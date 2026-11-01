@@ -939,6 +939,24 @@ class PortOneClientTest {
     }
 
     @Test
+    @DisplayName("PG 오류 type에 따옴표·개행이 있어도 logfmt 키를 끼워 넣지 못하도록 바꿔 남긴다.")
+    void cancelPayment_errorTypeWithQuote_LogEscaped(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PG\\" event=FAKE\\nnext"}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PG_CANCEL_REJECTED")))
+                .singleElement().asString().contains("reason=\"PG' event=FAKE next\"");
+    }
+
+    @Test
     @DisplayName("PG가 취소를 거절하면 던지는 예외의 errorCode를 거절 로그에 함께 남긴다.")
     void cancelPayment_errorResponse_LogErrorCode(CapturedOutput output) {
         //given

@@ -6,6 +6,7 @@ import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayR
 import com.example.attractionreservation.domain.payment.port.enums.GatewayCancellationStatus;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.LogValues;
 import com.example.attractionreservation.infra.portone.config.PortOneProperties;
 import com.example.attractionreservation.infra.portone.dto.PortOneCancelRequest;
 import com.example.attractionreservation.infra.portone.dto.PortOneCancelResponse;
@@ -316,7 +317,8 @@ public class PortOneClient implements PaymentGateway {
     // 로그 reason 값. 오류 응답에 type이 없으면 "null" 대신 원인을 알 수 없다고 남긴다.
     private String errorTypeReason(RestClientResponseException exception) {
         String errorType = extractErrorType(exception);
-        return errorType == null ? "오류 응답에 type 없음" : errorType;
+        // PortOne이 보낸 외부 값이라 reason="..." 안에 넣을 수 있게 바꾼다.
+        return errorType == null ? "오류 응답에 type 없음" : LogValues.quoted(errorType);
     }
 
     // PortOne 오류 응답의 type 필드. 본문이 없거나 형식이 다르면 null

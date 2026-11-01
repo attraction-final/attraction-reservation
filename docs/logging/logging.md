@@ -51,6 +51,7 @@ log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, 
 4. **가변 값은 반드시 `{}` 플레이스홀더**로 넘긴다. `+`로 변수를 이어 붙이지 않는다. (리터럴끼리의 `+`는 허용)
 5. **공백이 들어갈 수 있는 값은 따옴표로 감싼다.** ID, enum 이름, 숫자처럼 공백이 없는 값은 그대로 쓴다.
    - `reason="{}"`, `userAgent="{}"`
+   - 외부에서 온 값(요청 경로, 헤더, 외부 응답)은 `LogValues.quoted()`를 거쳐 따옴표 안에 넣는다. 큰따옴표·역슬래시·개행으로 값을 끝내거나 줄을 나눠 키를 끼워 넣지 못하게 한다. 코드에 고정된 문자열은 그대로 쓴다.
 6. **이벤트 이름과 중복되는 키는 쓰지 않는다.** 예: `event=AUTHENTICATION_REJECTED result=REJECTED` 에서 `result`는 불필요하다.
 7. **객체를 통째로 찍지 않는다.** DTO의 `toString()` 대신 필요한 필드만 키로 꺼낸다.
 8. **반복문 안에서 진행 상황을 INFO 이상으로 찍지 않는다.** 처리 건수는 반복이 끝난 뒤 `count=` 로 한 번 남긴다. 단, 반복 안에서 처리한 건마다 일어난 비즈니스 이벤트(완료·보류 등)와 실패는 대상 ID와 함께 남긴다.
@@ -71,7 +72,7 @@ log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, 
 | `durationMs` | 소요 시간 (밀리초) | `42` | 단위는 항상 ms |
 | `count` | 처리 건수 | `120` | 배치·반복 처리 후 |
 | `method` | HTTP 메서드 | `POST` |  |
-| `uri` | 요청 경로 | `/api/orders` | `getRequestURI()`, 쿼리스트링 제외. 외부 API 호출은 경로 템플릿(`/payments/{pgId}`) |
+| `uri` | 요청 경로 | `"/api/orders"` | `getRequestURI()`, 쿼리스트링 제외. 요청 경로는 사용자가 보낸 값이라 `=` 등이 들어갈 수 있어 `uri="{}"` + `LogValues.quoted()`. 외부 API 호출은 코드에 고정된 경로 템플릿(`/payments/{pgId}`)이라 따옴표 없이 쓴다 |
 | `httpStatus` | HTTP 상태 코드 | `401` |  |
 | `target` | 외부 연동 대상 | `payment-gateway` | 외부 API, DB, 메시지 큐 등 |
 | `retry` | 재시도 횟수 | `2` | 첫 시도는 세지 않는다. 재시도 예정 로그는 이어서 할 재시도 순번(첫 시도 실패 시 `1`), 소진 로그는 실제로 한 재시도 횟수 |
@@ -224,8 +225,8 @@ avg_over_time({app="order-api"} | logfmt | event="EXTERNAL_API_CALLED" | unwrap 
 log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, amount);
 
 // 클라이언트 원인 실패 (4xx)
-log.info("event=AUTHENTICATION_REJECTED method={} uri={} errorCode={} httpStatus={}",
-        request.getMethod(), request.getRequestURI(), errorCode.name(), errorCode.getStatus().value());
+log.info("event=AUTHENTICATION_REJECTED method={} uri=\"{}\" errorCode={} httpStatus={}",
+        request.getMethod(), LogValues.quoted(request.getRequestURI()), errorCode.name(), errorCode.getStatus().value());
 
 // 외부 연동 호출
 log.info("event=EXTERNAL_API_CALLED target={} durationMs={} result={} httpStatus={}", "payment-gateway", ms, result, status);

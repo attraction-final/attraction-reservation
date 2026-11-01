@@ -1,6 +1,7 @@
 package com.example.attractionreservation.global.exception;
 
 import com.example.attractionreservation.global.response.ApiResponse;
+import com.example.attractionreservation.global.util.LogValues;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -33,8 +34,8 @@ public class GlobalExceptionHandler {
         if (errorCode.getStatus().is5xxServerError()) {
             // 서버 쪽 원인으로 사용자 요청이 실패했으므로 알림 대상인 ERROR로 남긴다.
             // 원인과 스택 트레이스는 예외를 바꿔 던진 곳에서 남기므로 여기서는 예외 객체 없이 요청 정보만 남긴다.
-            log.error("event=REQUEST_FAILED method={} uri={} errorCode={} httpStatus={}",
-                    request.getMethod(), request.getRequestURI(), errorCode.name(), errorCode.getStatus().value());
+            log.error("event=REQUEST_FAILED method={} uri=\"{}\" errorCode={} httpStatus={}",
+                    request.getMethod(), LogValues.quoted(request.getRequestURI()), errorCode.name(), errorCode.getStatus().value());
         } else {
             logRejected(request, errorCode);
         }
@@ -133,15 +134,16 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR));
     }
 
+    // 요청 경로는 사용자가 보낸 값이라 '='처럼 logfmt 파싱을 깨는 문자가 들어올 수 있어 따옴표로 감싸 남긴다.
     // 클라이언트 원인 실패(4xx). 예상한 실패이므로 스택 트레이스 없이 INFO로 남긴다.
     private void logRejected(HttpServletRequest request, ErrorCode errorCode) {
-        log.info("event=REQUEST_REJECTED method={} uri={} errorCode={} httpStatus={}",
-                request.getMethod(), request.getRequestURI(), errorCode.name(), errorCode.getStatus().value());
+        log.info("event=REQUEST_REJECTED method={} uri=\"{}\" errorCode={} httpStatus={}",
+                request.getMethod(), LogValues.quoted(request.getRequestURI()), errorCode.name(), errorCode.getStatus().value());
     }
 
     // 예상하지 못한 서버 오류(5xx). 예외를 마지막 인자로 넘겨 스택 트레이스를 남긴다.
     private void logFailed(HttpServletRequest request, ErrorCode errorCode, Exception exception) {
-        log.error("event=REQUEST_FAILED method={} uri={} errorCode={} httpStatus={}",
-                request.getMethod(), request.getRequestURI(), errorCode.name(), errorCode.getStatus().value(), exception);
+        log.error("event=REQUEST_FAILED method={} uri=\"{}\" errorCode={} httpStatus={}",
+                request.getMethod(), LogValues.quoted(request.getRequestURI()), errorCode.name(), errorCode.getStatus().value(), exception);
     }
 }

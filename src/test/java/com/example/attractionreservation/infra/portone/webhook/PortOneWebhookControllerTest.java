@@ -11,7 +11,10 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.infra.portone.webhook.dto.PortOneWebhookEvent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -20,6 +23,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
@@ -36,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         JwtAccessDeniedHandler.class
 })
 @EnableWebSecurity
+@ExtendWith(OutputCaptureExtension.class)
 class PortOneWebhookControllerTest {
 
     private static final String URL = "/api/payments/webhooks/portone";
@@ -85,6 +90,43 @@ class PortOneWebhookControllerTest {
         //when & then
         mockMvc.perform(webhookRequest())
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("새 웹훅을 저장하면 웹훅 ID·이벤트 종류·결제 ID를 INFO 로그로 남긴다.")
+    void receiveWebhook_valid_LogReceived(CapturedOutput output) throws Exception {
+        //given
+        given(portOneWebhookVerifier.verify(BODY, "webhook-1", "v1,signature", "1700000000"))
+                .willReturn(new PortOneWebhookEvent("WebhookTransactionPaid", "pg-id"));
+        given(webhookEventCommandService.register("webhook-1", "WebhookTransactionPaid", "pg-id", BODY))
+                .willReturn(true);
+
+        //when
+        mockMvc.perform(webhookRequest());
+
+        //then
+        assertThat(output).doesNotContain("event=WEBHOOK_DUPLICATED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_RECEIVED")))
+                .singleElement().asString().contains("INFO")
+                .contains("webhookId=webhook-1 eventType=WebhookTransactionPaid pgId=pg-id");
+    }
+
+    @Test
+    @DisplayName("이미 받은 웹훅이면 중복 수신을 INFO 로그로 남기고 수신 로그는 남기지 않는다.")
+    void receiveWebhook_duplicate_LogDuplicated(CapturedOutput output) throws Exception {
+        //given
+        given(portOneWebhookVerifier.verify(BODY, "webhook-1", "v1,signature", "1700000000"))
+                .willReturn(new PortOneWebhookEvent("WebhookTransactionPaid", "pg-id"));
+        given(webhookEventCommandService.register("webhook-1", "WebhookTransactionPaid", "pg-id", BODY))
+                .willReturn(false);
+
+        //when
+        mockMvc.perform(webhookRequest());
+
+        //then
+        assertThat(output).doesNotContain("event=WEBHOOK_RECEIVED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_DUPLICATED")))
+                .singleElement().asString().contains("INFO").contains("webhookId=webhook-1");
     }
 
     @Test

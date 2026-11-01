@@ -29,7 +29,8 @@ public class PortOneWebhookVerifier {
     public PortOneWebhookEvent verify(String body, String webhookId, String signature, String timestamp) {
         // SDK는 null 인자에 검증 예외가 아닌 NPE를 던지므로 먼저 막는다.
         if (body == null || webhookId == null || signature == null || timestamp == null) {
-            log.warn("PortOne 웹훅 검증 실패: 필수 헤더 누락, webhookId={}", webhookId);
+            log.info("event=WEBHOOK_VERIFICATION_FAILED webhookId=\"{}\" reason=\"필수 헤더 누락\" errorCode={}",
+                    toLogValue(webhookId), ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.name());
 
             throw new BusinessException(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE);
         }
@@ -38,7 +39,9 @@ public class PortOneWebhookVerifier {
         try {
             webhook = webhookVerifier.verify(body, webhookId, signature, timestamp);
         } catch (WebhookVerificationException e) {
-            log.warn("PortOne 웹훅 검증 실패: webhookId={}, reason={}", webhookId, e.getMessage());
+            // 클라이언트 원인의 예상한 실패라 스택 트레이스 없이 SDK가 알려준 원인만 남긴다.
+            log.info("event=WEBHOOK_VERIFICATION_FAILED webhookId=\"{}\" reason=\"{}\" errorCode={}",
+                    toLogValue(webhookId), toLogValue(e.getMessage()), ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.name());
 
             throw new BusinessException(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE);
         }
@@ -48,5 +51,15 @@ public class PortOneWebhookVerifier {
                 : null;
 
         return new PortOneWebhookEvent(webhook.getClass().getSimpleName(), pgId);
+    }
+
+    // 검증 전 헤더 값과 SDK 메시지는 외부에서 온 값이다. 따옴표·줄바꿈으로 logfmt 키를 끼워 넣지 못하도록
+    // 따옴표 안에 넣을 수 있는 값으로 바꾼다. 역슬래시는 닫는 따옴표를 이스케이프할 수 있어 함께 바꾼다.
+    // 값이 없으면 "null" 대신 빈 값으로 남긴다.
+    private String toLogValue(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace('\\', '/').replace('"', '\'').replaceAll("[\\r\\n\\t]", " ");
     }
 }

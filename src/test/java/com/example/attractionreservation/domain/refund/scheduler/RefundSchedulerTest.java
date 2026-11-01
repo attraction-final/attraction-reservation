@@ -3,15 +3,20 @@ package com.example.attractionreservation.domain.refund.scheduler;
 import com.example.attractionreservation.domain.refund.facade.RefundProcessor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+@ExtendWith(OutputCaptureExtension.class)
 class RefundSchedulerTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -56,5 +61,36 @@ class RefundSchedulerTest {
         contextRunner
                 .withPropertyValues("payment.refund.scheduler.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(RefundScheduler.class));
+    }
+
+    @Test
+    @DisplayName("처리한 환불이 있으면 처리 건수와 소요 시간을 INFO 로그로 남긴다.")
+    void processPendingRefunds_processed_LogCompleted(CapturedOutput output) {
+        //given
+        RefundProcessor processor = mock(RefundProcessor.class);
+        given(processor.processPending(20, 5)).willReturn(3);
+        RefundScheduler scheduler = new RefundScheduler(processor, 20, 5);
+
+        //when
+        scheduler.processPendingRefunds();
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_BATCH_COMPLETED")))
+                .singleElement().asString().contains("INFO").contains("count=3 durationMs=");
+    }
+
+    @Test
+    @DisplayName("처리한 환불이 없으면 배치 완료 로그를 남기지 않는다.")
+    void processPendingRefunds_nothingProcessed_NotLogCompleted(CapturedOutput output) {
+        //given
+        RefundProcessor processor = mock(RefundProcessor.class);
+        given(processor.processPending(20, 5)).willReturn(0);
+        RefundScheduler scheduler = new RefundScheduler(processor, 20, 5);
+
+        //when
+        scheduler.processPendingRefunds();
+
+        //then
+        assertThat(output).doesNotContain("event=REFUND_BATCH_COMPLETED");
     }
 }

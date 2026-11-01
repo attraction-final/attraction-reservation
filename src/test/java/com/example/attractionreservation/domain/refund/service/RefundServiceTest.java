@@ -30,6 +30,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.BeanUtils;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
@@ -50,7 +52,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class RefundServiceTest {
 
     private static final Long USER_ID = 1L;
@@ -108,6 +110,26 @@ class RefundServiceTest {
         assertThat(saved.getRefundItems())
                 .extracting(item -> item.getOrderItem().getId(), RefundItem::getQuantity)
                 .containsExactlyInAnyOrder(tuple(ADULT_ITEM_ID, 3), tuple(CHILD_ITEM_ID, 1));
+    }
+
+    @Test
+    @DisplayName("환불 요청을 저장하면 환불 ID·사용자·금액을 INFO 로그로 남기고 환불 사유는 남기지 않는다.")
+    void createRefund_saved_LogRequested(CapturedOutput output) {
+        //given
+        givenPayment(payment);
+        List<Ticket> tickets = tickets(adultItem(payment), 1L, 2, TicketStatus.UNUSED);
+        givenRefundTickets(tickets);
+        givenRefundedQuantities(List.of());
+        givenSaveReturnsWithId();
+
+        //when
+        refundService.createRefund(USER_ID, PG_ID, ticketIds(tickets), "단순 변심", NOW);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
+                .singleElement().asString().contains("INFO")
+                .contains("refundId=1 pgId=" + payment.getPgId() + " userId=" + USER_ID + " amount=20000");
+        assertThat(output).doesNotContain("단순 변심");
     }
 
     @Test

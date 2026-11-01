@@ -32,10 +32,11 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         // 인증 정보가 없는 요청은 401 Unauthorized로 처리한다.
         ErrorCode errorCode = ErrorCode.UNAUTHORIZED;
 
-        log.warn(
-                "event=AUTHENTICATION_REJECTED result=REJECTED "
-                        + "method={} errorCode={} httpStatus={}",
+        log.info(
+                "event=AUTHENTICATION_REJECTED "
+                        + "method={} uri={} errorCode={} httpStatus={}",
                 request.getMethod(),
+                request.getRequestURI(),
                 errorCode.name(),
                 errorCode.getStatus().value()
         );

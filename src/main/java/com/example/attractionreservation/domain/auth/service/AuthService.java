@@ -78,7 +78,7 @@ public class AuthService {
         );
 
         log.info(
-                "event=AUTH_TOKENS_ISSUED result=SUCCESS "
+                "event=AUTH_TOKENS_ISSUED "
                         + "userId={} authMethod={}",
                 userId,
                 authMethod
@@ -111,7 +111,7 @@ public class AuthService {
         );
 
         log.info(
-                "event=AUTH_ACCESS_TOKEN_REISSUED result=SUCCESS userId={}",
+                "event=AUTH_ACCESS_TOKEN_REISSUED userId={}",
                 userId
         );
 
@@ -150,7 +150,7 @@ public class AuthService {
         }
 
         log.info(
-                "event=AUTH_LOGOUT_COMPLETED result=SUCCESS "
+                "event=AUTH_LOGOUT_COMPLETED "
                         + "userId={} refreshTokenRevoked=true",
                 userId
         );

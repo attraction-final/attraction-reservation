@@ -39,7 +39,7 @@ public class OrderController {
                 .sum();
 
         log.info(
-                "event=ORDER_CREATED result=SUCCESS "
+                "event=ORDER_CREATED "
                         + "userId={} orderId={} totalAmount={} totalQuantity={} "
                         + "visitDate={} status={}",
                 userId,
@@ -89,7 +89,7 @@ public class OrderController {
                 orderService.updateOrderByCancel(userId, orderId);
 
         log.info(
-                "event=ORDER_CANCELLED result=SUCCESS "
+                "event=ORDER_CANCELLED "
                         + "userId={} orderId={} cancelType=USER status={}",
                 userId,
                 response.orderId(),

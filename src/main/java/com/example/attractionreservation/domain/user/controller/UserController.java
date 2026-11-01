@@ -43,7 +43,7 @@ public class UserController {
         CreateUserResponse response = userService.signup(request);
 
         log.info(
-                "event=USER_SIGNUP_COMPLETED result=SUCCESS userId={}",
+                "event=USER_SIGNUP_COMPLETED userId={}",
                 response.id()
         );
 
@@ -83,7 +83,7 @@ public class UserController {
         userWithdrawalFacade.withdraw(userId);
 
         log.info(
-                "event=USER_WITHDRAWAL_COMPLETED result=SUCCESS userId={}",
+                "event=USER_WITHDRAWAL_COMPLETED userId={}",
                 userId
         );
 
@@ -116,7 +116,7 @@ public class UserController {
         userService.updatePassword(userId, request);
 
         log.info(
-                "event=USER_PASSWORD_CHANGED result=SUCCESS userId={}",
+                "event=USER_PASSWORD_CHANGED userId={}",
                 userId
         );
 

@@ -41,11 +41,12 @@ public class JwtAccessDeniedHandler implements AccessDeniedHandler {
                 ? id
                 : null;
 
-        log.warn(
-                "event=ACCESS_DENIED result=REJECTED "
-                        + "userId={} method={} errorCode={} httpStatus={}",
+        log.info(
+                "event=ACCESS_DENIED "
+                        + "userId={} method={} uri={} errorCode={} httpStatus={}",
                 userId,
                 request.getMethod(),
+                request.getRequestURI(),
                 errorCode.name(),
                 errorCode.getStatus().value()
         );

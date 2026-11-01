@@ -13,7 +13,7 @@ public class UserStatusChangedLogListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onUserStatusChanged(UserStatusChangedEvent event) {
         log.info(
-                "event=USER_STATUS_CHANGED result=SUCCESS "
+                "event=USER_STATUS_CHANGED "
                         + "adminId={} userId={} previousStatus={} currentStatus={}",
                 event.adminId(),
                 event.userId(),

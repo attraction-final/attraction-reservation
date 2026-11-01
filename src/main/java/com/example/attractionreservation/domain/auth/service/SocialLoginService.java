@@ -21,7 +21,7 @@ public class SocialLoginService {
         String code = loginCodeRepository.issue(userId);
 
         log.info(
-                "event=SOCIAL_LOGIN_CODE_ISSUED result=SUCCESS "
+                "event=SOCIAL_LOGIN_CODE_ISSUED "
                         + "userId={} provider={}",
                 userId,
                 info.provider()

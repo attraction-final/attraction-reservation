@@ -2,12 +2,10 @@ package com.example.attractionreservation.domain.order.scheduler;
 
 import com.example.attractionreservation.domain.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-@Slf4j
 @Component
 @RequiredArgsConstructor
 @ConditionalOnProperty(
@@ -25,13 +23,6 @@ public class OrderCancelScheduler {
             initialDelayString = "${order.cancel.scheduler.initial-delay-ms:60000}"
     )
     public void cancelExpiredOrders() {
-        int cancelledCount = orderService.updateExpiredOrdersByCancel();
-
-        if (cancelledCount > 0) {
-            log.info(
-                    "event=ORDER_AUTO_CANCEL_SUMMARY cancelledCount={}",
-                    cancelledCount
-            );
-        }
+        orderService.updateExpiredOrdersByCancel();
     }
 }

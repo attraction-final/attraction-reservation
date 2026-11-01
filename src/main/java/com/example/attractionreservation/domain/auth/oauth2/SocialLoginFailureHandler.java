@@ -49,20 +49,20 @@ public class SocialLoginFailureHandler
         SocialLoginError error = resolveError(exception);
 
         if (exception instanceof AuthenticationServiceException) {
-            Throwable cause = exception.getCause();
-
             log.error(
-                    "event=SOCIAL_LOGIN_POSTPROCESS_FAILED result=FAILURE "
-                            + "errorCode={} exceptionType={}",
+                    "event=SOCIAL_LOGIN_POSTPROCESS_FAILED "
+                            + "method={} uri={} errorCode={}",
+                    request.getMethod(),
+                    request.getRequestURI(),
                     error.name(),
-                    cause == null
-                            ? exception.getClass().getSimpleName()
-                            : cause.getClass().getSimpleName()
+                    exception
             );
         } else {
-            log.warn(
-                    "event=SOCIAL_AUTHENTICATION_REJECTED result=REJECTED "
-                            + "errorCode={}",
+            log.info(
+                    "event=SOCIAL_AUTHENTICATION_REJECTED "
+                            + "method={} uri={} errorCode={}",
+                    request.getMethod(),
+                    request.getRequestURI(),
                     error.name()
             );
         }

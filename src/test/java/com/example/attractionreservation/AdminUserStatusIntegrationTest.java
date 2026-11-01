@@ -98,7 +98,7 @@ class AdminUserStatusIntegrationTest {
             assertThat(redisTemplate.hasKey("auth:refresh:" + userId))
                     .isFalse();
             assertThat(output.getAll()).contains(
-                    "event=USER_STATUS_CHANGED result=SUCCESS "
+                    "event=USER_STATUS_CHANGED "
                             + "adminId=1 userId=" + userId
                             + " previousStatus=ACTIVE currentStatus=SUSPENDED"
             );

@@ -159,7 +159,8 @@ public class ReservationService {
     @Transactional
     public UpdateReservationCancelResponse cancelReservation(Long userId, Long reservationId) {
 
-        Reservation reservation = getReservationByIdAndUserId(reservationId, userId);
+        Reservation reservation = reservationRepository.findByIdAndUserIdWithLock(reservationId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         // 예약 상태가 RESERVED인지 확인
         if (reservation.getStatus() != ReservationStatus.RESERVED) {
@@ -219,7 +220,8 @@ public class ReservationService {
     public UpdateAdminReservationCancelResponse adminReservationCancel(Long reservationId, UpdateAdminReservationCancelRequest request) {
 
         // 예약 존재 여부 및 RESERVED 상태 검증
-        Reservation reservation = getReservationById(reservationId);
+        Reservation reservation = reservationRepository.findByIdWithLock(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         if (reservation.getStatus() != ReservationStatus.RESERVED) {
             throw new BusinessException(ErrorCode.RESERVATION_CANCEL_NOT_ALLOWED_STATUS);
@@ -238,11 +240,12 @@ public class ReservationService {
     // 관리자 예약 상태 변경
     @Transactional
     public UpdateAdminReservationStatusResponse updateReservationStatus(Long reservationId, UpdateAdminReservationStatusRequest request) {
-        Reservation reservation = getReservationById(reservationId);
+        Reservation reservation = reservationRepository.findByIdWithLock(reservationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_RESERVATION));
 
         // KST 기준 슬롯 종료 이후인지 검증
         Instant now = Instant.now();
-        LocalDateTime currentTime = KstTime.toLocalDateTime(now);
+        LocalDateTime currentTime = LocalDateTime.ofInstant(now, KstTime.ZONE);
         LocalDateTime endTime = reservation.getAttractionSlot().getEndsAt();
         if (currentTime.isBefore(endTime)) {
             throw new BusinessException(ErrorCode.RESERVATION_SLOT_NOT_ENDED);

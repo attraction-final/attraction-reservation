@@ -500,6 +500,102 @@ class ReservationSlotConcurrencyIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("예약이 먼저 슬롯을 잠그면 삭제는 예약 commit 후 거절되고 슬롯과 예약 인원을 유지한다")
+    void createReservation_ReservationLocksFirst_RejectsSlotDeletion() throws Exception {
+        // given
+        CountDownLatch reservationApplied = new CountDownLatch(1);
+        CountDownLatch allowReservationCommit = new CountDownLatch(1);
+        CountDownLatch deletionStarted = new CountDownLatch(1);
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<CreateReservationResponse> reservationResult = executor.submit(() ->
+                    reserveAndWaitForCommit(request, reservationApplied, allowReservationCommit));
+            assertThat(reservationApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> deletionResult = executor.submit(() -> {
+                try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+                    timeMock.when(KstTime::now).thenReturn(NOW);
+                    deletionStarted.countDown();
+                    attractionSlotService.deleteAttractionSlot(ADMIN_ID, fixture.slotId());
+                }
+            });
+            assertThat(deletionStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(deletionResult);
+            allowReservationCommit.countDown();
+            CreateReservationResponse response = reservationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(response.slotId()).isEqualTo(fixture.slotId());
+            assertThat(response.startsAt()).isEqualTo(ORIGINAL_START);
+            assertThatThrownBy(() -> deletionResult.get(20, TimeUnit.SECONDS))
+                    .isInstanceOfSatisfying(ExecutionException.class, exception ->
+                            assertThat(exception.getCause()).isInstanceOfSatisfying(BusinessException.class, businessException ->
+                                    assertThat(businessException.getErrorCode()).isEqualTo(ErrorCode.SLOT_HAS_RESERVATIONS)));
+            SlotSnapshot snapshot = readSnapshot();
+            assertThat(snapshot.status()).isEqualTo(SlotStatus.OPEN);
+            assertThat(snapshot.startsAt()).isEqualTo(ORIGINAL_START);
+            assertThat(snapshot.reservationCount()).isEqualTo(1);
+            assertThat(snapshot.reservedCount()).isEqualTo(1);
+            assertThat(snapshot.remainingCount()).isEqualTo(snapshot.capacity() - 1);
+            assertThat(snapshot.autoClosed()).isFalse();
+        } finally {
+            allowReservationCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    @Test
+    @DisplayName("슬롯 삭제가 먼저 잠그면 예약은 삭제 commit 후 거절되고 취소 상태와 예약 인원 0을 유지한다")
+    void createReservation_SlotDeletionLocksFirst_RejectsReservation() throws Exception {
+        // given
+        CountDownLatch deletionApplied = new CountDownLatch(1);
+        CountDownLatch allowDeletionCommit = new CountDownLatch(1);
+        CountDownLatch reservationStarted = new CountDownLatch(1);
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<?> deletionResult = executor.submit(() -> {
+                try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+                    timeMock.when(KstTime::now).thenReturn(NOW);
+                    transactionTemplate.executeWithoutResult(status -> {
+                        // 실제 삭제 Service가 획득한 슬롯 잠금을 유지하고 commit만 지연한다.
+                        attractionSlotService.deleteAttractionSlot(ADMIN_ID, fixture.slotId());
+                        deletionApplied.countDown();
+                        awaitSignal(allowDeletionCommit);
+                    });
+                }
+            });
+            assertThat(deletionApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<ReservationResult> reservationResult = executor.submit(() -> {
+                reservationStarted.countDown();
+                return reserveAtFixedTime(request);
+            });
+            assertThat(reservationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(reservationResult);
+            allowDeletionCommit.countDown();
+            deletionResult.get(20, TimeUnit.SECONDS);
+            ReservationResult result = reservationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(result.response()).isNull();
+            assertThat(result.failure()).isInstanceOfSatisfying(BusinessException.class, exception ->
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.SLOT_RESERVATION_NOT_ALLOWED_STATUS));
+            SlotSnapshot snapshot = readSnapshot();
+            assertThat(snapshot.status()).isEqualTo(SlotStatus.CANCELLED);
+            assertThat(snapshot.startsAt()).isEqualTo(ORIGINAL_START);
+            assertThat(snapshot.reservationCount()).isZero();
+            assertThat(snapshot.reservedCount()).isZero();
+            assertThat(snapshot.remainingCount()).isEqualTo(snapshot.capacity());
+            assertThat(snapshot.autoClosed()).isFalse();
+        } finally {
+            allowDeletionCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
     private void prepareFourReservations() {
         try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
             timeMock.when(KstTime::now).thenReturn(NOW);

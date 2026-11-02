@@ -36,6 +36,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -64,7 +65,8 @@ import static org.mockito.Mockito.mockStatic;
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({JpaConfig.class, QuerydslConfig.class, TicketService.class, TicketStateConcurrencyIntegrationTest.MySqlConfig.class})
+@Import({JpaConfig.class, QuerydslConfig.class, TicketService.class, TicketExpirationService.class,
+        TicketStateConcurrencyIntegrationTest.MySqlConfig.class})
 class TicketStateConcurrencyIntegrationTest {
 
     private static final LocalDate VISIT_DATE = LocalDate.of(2026, 11, 2);
@@ -72,9 +74,14 @@ class TicketStateConcurrencyIntegrationTest {
     private static final Instant FIRST_SCAN_AT = LocalDateTime.of(2026, 11, 2, 14, 0)
             .atZone(KstTime.ZONE).toInstant();
     private static final Instant SECOND_SCAN_AT = FIRST_SCAN_AT.plusSeconds(1);
+    private static final Instant CLOSE_AT = VISIT_DATE.atTime(22, 0).atZone(KstTime.ZONE).toInstant();
+    private static final Instant BEFORE_CLOSE_AT = CLOSE_AT.minusSeconds(1);
 
     @Autowired
     private TicketService ticketService;
+
+    @Autowired
+    private TicketExpirationService ticketExpirationService;
 
     @Autowired
     private EntityManager entityManager;
@@ -91,6 +98,11 @@ class TicketStateConcurrencyIntegrationTest {
         @ServiceConnection
         MySQLContainer mysqlContainer() {
             return new MySQLContainer(DockerImageName.parse("mysql:9.6"));
+        }
+
+        @Bean
+        Clock clock() {
+            return Clock.fixed(CLOSE_AT, KstTime.ZONE);
         }
     }
 
@@ -214,6 +226,171 @@ class TicketStateConcurrencyIntegrationTest {
                         .as("테스트 작업은 DB 정리 전에 모두 종료되어야 한다").isTrue();
             }
         }
+    }
+
+    @Test
+    @DisplayName("폐장 직전 입장이 먼저 잠근 티켓은 자동 종료 후 USED가 되고 입장 시각과 폐장 시각을 보존한다")
+    void expireTickets_EntryBeforeCloseCommitsFirst_PreservesUsedStateAndTimestamps() throws Exception {
+        // given
+        CountDownLatch entryApplied = new CountDownLatch(1);
+        CountDownLatch allowEntryCommit = new CountDownLatch(1);
+        CountDownLatch expirationStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<CreateTicketEntryResponse> entryResult = executor.submit(() ->
+                    scanAndWaitForCommit(BEFORE_CLOSE_AT, entryApplied, allowEntryCommit));
+            assertThat(entryApplied.await(10, TimeUnit.SECONDS)).isTrue();
+
+            Future<Integer> expirationResult = executor.submit(() -> {
+                expirationStarted.countDown();
+                return ticketExpirationService.expireTickets(100);
+            });
+            assertThat(expirationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> expirationResult.get(500, TimeUnit.MILLISECONDS))
+                    .as("자동 종료는 선행 입장 transaction의 commit까지 대기해야 한다")
+                    .isInstanceOf(TimeoutException.class);
+
+            allowEntryCommit.countDown();
+            CreateTicketEntryResponse entryResponse = entryResult.get(20, TimeUnit.SECONDS);
+            int expiredCount = expirationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            TicketSnapshot afterExpiration = readTicketSnapshot();
+            assertThat(entryResponse.enteredAt()).isEqualTo(BEFORE_CLOSE_AT);
+            assertThat(expiredCount).isEqualTo(1);
+            assertSoftly(softly -> {
+                softly.assertThat(afterExpiration.status())
+                        .as("폐장 전에 입장에 성공한 티켓은 EXPIRED가 아닌 USED여야 한다")
+                        .isEqualTo(TicketStatus.USED);
+                softly.assertThat(afterExpiration.enteredAt())
+                        .as("자동 종료가 먼저 읽은 값으로 정상 입장의 enteredAt을 지우면 안 된다")
+                        .isEqualTo(BEFORE_CLOSE_AT);
+                softly.assertThat(afterExpiration.endTime()).isEqualTo(CLOSE_AT);
+            });
+        } finally {
+            allowEntryCommit.countDown();
+            executor.shutdown();
+            if (!executor.awaitTermination(45, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("테스트 작업은 DB 정리 전에 모두 종료되어야 한다").isTrue();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("자동 종료가 먼저 잠근 티켓은 입장이 commit까지 기다린 뒤 거절되고 만료 상태와 종료 시각을 유지한다")
+    void createTicketEntry_ExpirationLocksFirst_RejectsEntryAndPreservesExpiration() throws Exception {
+        // given
+        CountDownLatch expirationApplied = new CountDownLatch(1);
+        CountDownLatch allowExpirationCommit = new CountDownLatch(1);
+        CountDownLatch entryStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<Integer> expirationResult = executor.submit(() -> transactionTemplate.execute(status -> {
+                // 실제 종료 Service가 획득한 잠금을 유지하고 commit만 지연한다.
+                int count = ticketExpirationService.expireTickets(100);
+                expirationApplied.countDown();
+                awaitSignal(allowExpirationCommit);
+                return count;
+            }));
+            assertThat(expirationApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<ScanResult> entryResult = executor.submit(() -> {
+                entryStarted.countDown();
+                return scanAt(CLOSE_AT);
+            });
+            assertThat(entryStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> entryResult.get(500, TimeUnit.MILLISECONDS))
+                    .as("자동 종료 transaction이 commit되기 전에는 후행 입장이 완료되면 안 된다")
+                    .isInstanceOf(TimeoutException.class);
+            allowExpirationCommit.countDown();
+            assertThat(expirationResult.get(20, TimeUnit.SECONDS)).isEqualTo(1);
+            ScanResult entry = entryResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(entry.response()).isNull();
+            assertThat(entry.failure()).isInstanceOfSatisfying(BusinessException.class, exception ->
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TICKET_ENTRY_NOT_ALLOWED_STATUS));
+            TicketSnapshot snapshot = readTicketSnapshot();
+            assertThat(snapshot.status()).isEqualTo(TicketStatus.EXPIRED);
+            assertThat(snapshot.enteredAt()).isNull();
+            assertThat(snapshot.endTime()).isEqualTo(CLOSE_AT);
+            assertThat(ticketExpirationService.expireTickets(100)).isZero();
+            assertThat(readTicketSnapshot()).isEqualTo(snapshot);
+        } finally {
+            allowExpirationCommit.countDown();
+            executor.shutdown();
+            if (!executor.awaitTermination(45, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("테스트 작업은 DB 정리 전에 모두 종료되어야 한다").isTrue();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("환불용 잠금으로 환불 상태를 변경 중이면 자동 종료는 commit 후 대상을 제외하고 환불 상태를 유지한다")
+    void expireTickets_RefundLocksFirst_SkipsRefundedTicketAndPreservesTimestamps() throws Exception {
+        // given
+        CountDownLatch refundApplied = new CountDownLatch(1);
+        CountDownLatch allowRefundCommit = new CountDownLatch(1);
+        CountDownLatch expirationStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<?> refundResult = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                // 실제 환불 경로의 티켓 잠금·상태 변경 부분만 검증한다.
+                // 환불 API의 날짜 검증이나 결제·PG 처리는 호출하지 않으므로 정상 환불 업무 전체의 재현은 아니다.
+                List<Ticket> tickets = ticketService.findRefundTicketsForUpdate(
+                        List.of(fixture.orderItemId()), List.of(fixture.ticketId())
+                );
+                assertThat(tickets).singleElement().satisfies(ticket -> {
+                    assertThat(ticket.getStatus()).isEqualTo(TicketStatus.UNUSED);
+                    ticket.refund();
+                });
+                refundApplied.countDown();
+                awaitSignal(allowRefundCommit);
+            }));
+            assertThat(refundApplied.await(10, TimeUnit.SECONDS)).isTrue();
+
+            Future<Integer> expirationResult = executor.submit(() -> {
+                expirationStarted.countDown();
+                return ticketExpirationService.expireTickets(100);
+            });
+            assertThat(expirationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> expirationResult.get(500, TimeUnit.MILLISECONDS))
+                    .as("자동 종료는 선행 티켓 환불 transaction의 commit까지 대기해야 한다")
+                    .isInstanceOf(TimeoutException.class);
+            allowRefundCommit.countDown();
+            refundResult.get(20, TimeUnit.SECONDS);
+            int expiredCount = expirationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(expiredCount).isZero();
+            TicketSnapshot snapshot = readTicketSnapshot();
+            assertThat(snapshot.status()).isEqualTo(TicketStatus.REFUNDED);
+            assertThat(snapshot.enteredAt()).isNull();
+            assertThat(snapshot.endTime()).isNull();
+            assertThat(ticketExpirationService.expireTickets(100)).isZero();
+            assertThat(readTicketSnapshot()).isEqualTo(snapshot);
+        } finally {
+            allowRefundCommit.countDown();
+            executor.shutdown();
+            if (!executor.awaitTermination(45, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("테스트 작업은 DB 정리 전에 모두 종료되어야 한다").isTrue();
+            }
+        }
+    }
+
+    private TicketSnapshot readTicketSnapshot() {
+        return Objects.requireNonNull(transactionTemplate.execute(status -> {
+            Ticket ticket = entityManager.find(Ticket.class, fixture.ticketId());
+            return new TicketSnapshot(ticket.getStatus(), ticket.getEnteredAt(), ticket.getEndTime());
+        }));
     }
 
     private CreateTicketEntryResponse scanAndWaitForCommit(

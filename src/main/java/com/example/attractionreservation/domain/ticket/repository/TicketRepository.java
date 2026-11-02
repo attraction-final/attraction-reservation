@@ -18,6 +18,10 @@ public interface TicketRepository extends JpaRepository<Ticket, Long>, TicketCus
     @Query("SELECT t FROM Ticket t WHERE t.code = :code")
     Optional<Ticket> findByCode(@Param("code") String code);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM Ticket t WHERE t.code = :code")
+    Optional<Ticket> findByCodeWithLock(@Param("code") String code);
+
     // 오늘 또는 미래에 사용할 수 있는 미사용 입장권을 확인한다.
     boolean existsByOrderItem_Order_User_IdAndStatusAndValidDateGreaterThanEqual(
             Long userId,

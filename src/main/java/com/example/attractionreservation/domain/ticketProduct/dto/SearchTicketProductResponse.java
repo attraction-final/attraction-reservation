@@ -10,7 +10,8 @@ public record SearchTicketProductResponse(
         TicketType type,
         int price,
         String description,
-        TicketProductStatus status
+        TicketProductStatus status,
+        Long version
 ) {
     public static SearchTicketProductResponse from(TicketProduct ticketProduct) {
         return new SearchTicketProductResponse(
@@ -19,7 +20,8 @@ public record SearchTicketProductResponse(
                 ticketProduct.getType(),
                 ticketProduct.getPrice(),
                 ticketProduct.getDescription(),
-                ticketProduct.getStatus()
+                ticketProduct.getStatus(),
+                ticketProduct.getVersion()
         );
     }
 }

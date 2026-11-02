@@ -15,7 +15,8 @@ public record UpdateTicketProductResponse(
         TicketProductStatus saleStatus,
         int stock,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long version
 ) {
     public static UpdateTicketProductResponse from(TicketProduct ticketProduct) {
         return new UpdateTicketProductResponse(
@@ -27,7 +28,8 @@ public record UpdateTicketProductResponse(
                 ticketProduct.getStatus(),
                 ticketProduct.getStock(),
                 ticketProduct.getCreatedAt(),
-                ticketProduct.getUpdatedAt()
+                ticketProduct.getUpdatedAt(),
+                ticketProduct.getVersion()
         );
     }
 }

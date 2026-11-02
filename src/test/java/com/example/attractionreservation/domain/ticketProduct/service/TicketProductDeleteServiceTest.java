@@ -54,7 +54,7 @@ class TicketProductDeleteServiceTest {
         // given
         Long ticketProductId = 1L;
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when
@@ -64,7 +64,7 @@ class TicketProductDeleteServiceTest {
         assertThat(ticketProduct.getStatus())
                 .isEqualTo(TicketProductStatus.DELETED);
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).delete(any(TicketProduct.class));
         verify(ticketProductRepository, never()).deleteById(anyLong());
     }
@@ -77,7 +77,7 @@ class TicketProductDeleteServiceTest {
         TicketProduct stoppedProduct =
                 createTicketProduct(TicketProductStatus.STOPPED);
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(stoppedProduct));
 
         // when
@@ -99,7 +99,7 @@ class TicketProductDeleteServiceTest {
         TicketProduct deletedProduct =
                 createTicketProduct(TicketProductStatus.DELETED);
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(deletedProduct));
 
         // when
@@ -109,7 +109,7 @@ class TicketProductDeleteServiceTest {
         assertThat(deletedProduct.getStatus())
                 .isEqualTo(TicketProductStatus.DELETED);
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).delete(any(TicketProduct.class));
         verify(ticketProductRepository, never()).deleteById(anyLong());
     }
@@ -120,7 +120,7 @@ class TicketProductDeleteServiceTest {
         // given
         Long ticketProductId = 999L;
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -130,7 +130,7 @@ class TicketProductDeleteServiceTest {
                                 .isEqualTo(ErrorCode.TICKET_PRODUCT_NOT_FOUND)
                 );
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).delete(any(TicketProduct.class));
         verify(ticketProductRepository, never()).deleteById(anyLong());
     }

@@ -66,7 +66,8 @@ class TicketProductDetailControllerTest {
                 .andExpect(jsonPath("$.data.price").value(50000))
                 .andExpect(jsonPath("$.data.description")
                         .value("하루 동안 이용 가능한 입장권"))
-                .andExpect(jsonPath("$.data.status").value("ON_SALE"));
+                .andExpect(jsonPath("$.data.status").value("ON_SALE"))
+                .andExpect(jsonPath("$.data.version").value(3));
 
         verify(ticketProductService).findTicketProductById(ticketProductId);
     }
@@ -142,7 +143,8 @@ class TicketProductDetailControllerTest {
                 TicketType.ALL_DAY,
                 50000,
                 "하루 동안 이용 가능한 입장권",
-                status
+                status,
+                3L
         );
     }
 }

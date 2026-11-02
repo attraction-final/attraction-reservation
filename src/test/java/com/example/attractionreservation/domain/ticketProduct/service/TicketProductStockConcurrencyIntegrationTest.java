@@ -4,6 +4,8 @@ import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
 import com.example.attractionreservation.domain.order.service.OrderService;
+import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductRequest;
+import com.example.attractionreservation.domain.ticketProduct.dto.UpdateTicketProductResponse;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -23,6 +27,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -205,6 +210,228 @@ class TicketProductStockConcurrencyIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("최신 version으로 상품을 수정하면 응답에 flush 이후 version을 반환하고 DB 상태와 일치한다")
+    void updateTicketProduct_CurrentVersion_ReturnsFlushedVersion() {
+        // given
+        StockSnapshot before = readSnapshot();
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "수정 상품", 60000, "수정 설명", TicketProductStatus.ON_SALE, 12, before.version()
+        );
+
+        // when
+        UpdateTicketProductResponse response = ticketProductService.updateTicketProduct(productId, request);
+
+        // then
+        StockSnapshot after = readSnapshot();
+        assertThat(response.version()).isEqualTo(before.version() + 1);
+        assertThat(response.version()).isEqualTo(after.version());
+        assertThat(response.stock()).isEqualTo(12);
+        assertThat(after.stock()).isEqualTo(12);
+        assertThat(after.name()).isEqualTo("수정 상품");
+        assertThat(after.price()).isEqualTo(60000);
+    }
+
+    @Test
+    @DisplayName("관리자 가격 수정이 먼저 잠그면 주문은 수정 commit 이후 최신 가격으로 구매하고 재고를 차감한다")
+    void updateTicketProduct_UpdateLocksFirst_OrderUsesUpdatedPriceAndStock() throws Exception {
+        // given
+        StockSnapshot before = readSnapshot();
+        UpdateTicketProductRequest updateRequest = new UpdateTicketProductRequest(
+                before.name(), 60000, "가격 수정", TicketProductStatus.ON_SALE, 10, before.version()
+        );
+        CreateOrderRequest orderRequest = createOrderRequest();
+        CountDownLatch updateApplied = new CountDownLatch(1);
+        CountDownLatch allowUpdateCommit = new CountDownLatch(1);
+        CountDownLatch orderStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<UpdateTicketProductResponse> updateResult = executor.submit(() -> transactionTemplate.execute(status -> {
+                UpdateTicketProductResponse response = ticketProductService.updateTicketProduct(productId, updateRequest);
+                updateApplied.countDown();
+                awaitSignal(allowUpdateCommit);
+                return response;
+            }));
+            assertThat(updateApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<CreateOrderResponse> orderResult = executor.submit(() -> {
+                orderStarted.countDown();
+                return orderService.createOrder(userId, orderRequest);
+            });
+            assertThat(orderStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(orderResult);
+            allowUpdateCommit.countDown();
+            UpdateTicketProductResponse updateResponse = updateResult.get(20, TimeUnit.SECONDS);
+            CreateOrderResponse orderResponse = orderResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(updateResponse.version()).isEqualTo(before.version() + 1);
+            assertThat(orderResponse.totalAmount()).isEqualTo(120000);
+            assertThat(orderResponse.items()).singleElement().satisfies(item -> {
+                assertThat(item.price()).isEqualTo(60000);
+                assertThat(item.quantity()).isEqualTo(2);
+            });
+            StockSnapshot after = readSnapshot();
+            assertThat(after.stock()).isEqualTo(8);
+            assertThat(after.price()).isEqualTo(60000);
+            assertThat(after.status()).isEqualTo(TicketProductStatus.ON_SALE);
+            assertThat(after.version()).isEqualTo(before.version() + 2);
+            assertThat(after.orderCount()).isEqualTo(1);
+            assertThat(after.orderedQuantity()).isEqualTo(2);
+        } finally {
+            allowUpdateCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    @Test
+    @DisplayName("주문이 먼저 잠그면 관리자 수정은 주문 commit 후 오래된 version으로 거절되고 재고 8개를 유지한다")
+    void updateTicketProduct_OrderLocksFirst_RejectsStaleRequestWithoutRestoringStock() throws Exception {
+        // given
+        StockSnapshot before = readSnapshot();
+        UpdateTicketProductRequest updateRequest = new UpdateTicketProductRequest(
+                "오래된 화면 수정", 60000, "이전 재고를 포함한 요청", TicketProductStatus.ON_SALE, 10, before.version()
+        );
+        CreateOrderRequest orderRequest = createOrderRequest();
+        CountDownLatch orderApplied = new CountDownLatch(1);
+        CountDownLatch allowOrderCommit = new CountDownLatch(1);
+        CountDownLatch updateStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<CreateOrderResponse> orderResult = executor.submit(() -> transactionTemplate.execute(status -> {
+                CreateOrderResponse response = orderService.createOrder(userId, orderRequest);
+                orderApplied.countDown();
+                awaitSignal(allowOrderCommit);
+                return response;
+            }));
+            assertThat(orderApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<UpdateTicketProductResponse> updateResult = executor.submit(() -> {
+                updateStarted.countDown();
+                return ticketProductService.updateTicketProduct(productId, updateRequest);
+            });
+            assertThat(updateStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(updateResult);
+            allowOrderCommit.countDown();
+            CreateOrderResponse orderResponse = orderResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(orderResponse.totalAmount()).isEqualTo(100000);
+            assertThatThrownBy(() -> updateResult.get(20, TimeUnit.SECONDS))
+                    .isInstanceOfSatisfying(ExecutionException.class, exception ->
+                            assertThat(exception.getCause()).isInstanceOfSatisfying(
+                                    BusinessException.class, businessException ->
+                                            assertThat(businessException.getErrorCode())
+                                                    .isEqualTo(ErrorCode.CONCURRENT_UPDATE_CONFLICT)));
+            StockSnapshot after = readSnapshot();
+            assertThat(after.stock()).isEqualTo(8);
+            assertThat(after.name()).isEqualTo(before.name());
+            assertThat(after.price()).isEqualTo(50000);
+            assertThat(after.status()).isEqualTo(TicketProductStatus.ON_SALE);
+            assertThat(after.version()).isEqualTo(before.version() + 1);
+            assertThat(after.orderCount()).isEqualTo(1);
+            assertThat(after.orderedQuantity()).isEqualTo(2);
+        } finally {
+            allowOrderCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    @Test
+    @DisplayName("공통 재고 복구가 version을 갱신하면 오래된 요청을 거절하고 최신 version으로 재요청 시 수정할 수 있다")
+    void updateTicketProduct_StockRestored_RejectsStaleVersionAndAcceptsLatestVersion() {
+        // given
+        StockSnapshot before = readSnapshot();
+        UpdateTicketProductRequest staleRequest = new UpdateTicketProductRequest(
+                "오래된 화면 수정", 60000, "이전 재고를 포함한 요청", TicketProductStatus.ON_SALE, 10, before.version()
+        );
+        // 주문 취소·결제 실패·환불이 공통으로 사용하는 복구 Service만 검증한다. PG 환불 전체 흐름은 포함하지 않는다.
+        ticketProductService.updateTicketProductsStockIncrease(Map.of(productId, 2));
+        StockSnapshot restored = readSnapshot();
+
+        // when & then
+        assertThat(restored.stock()).isEqualTo(12);
+        assertThat(restored.version()).isEqualTo(before.version() + 1);
+        assertThatThrownBy(() -> ticketProductService.updateTicketProduct(productId, staleRequest))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.CONCURRENT_UPDATE_CONFLICT));
+        assertThat(readSnapshot()).isEqualTo(restored);
+
+        UpdateTicketProductRequest freshRequest = new UpdateTicketProductRequest(
+                restored.name(), 55000, "다시 조회한 후 수정", TicketProductStatus.ON_SALE, 12, restored.version()
+        );
+        UpdateTicketProductResponse response = ticketProductService.updateTicketProduct(productId, freshRequest);
+        StockSnapshot after = readSnapshot();
+        assertThat(after.stock()).isEqualTo(12);
+        assertThat(after.price()).isEqualTo(55000);
+        assertThat(after.version()).isEqualTo(restored.version() + 1);
+        assertThat(response.version()).isEqualTo(after.version());
+    }
+
+    @ParameterizedTest(name = "재고 복구 선행={0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("관리자 재고 수정과 공통 재고 복구가 겹쳐도 선행 순서에 맞게 충돌을 거절하거나 복구 수량을 보존한다")
+    void updateTicketProduct_ConcurrentStockRestore_PreservesStockOrRejectsStaleRequest(
+            boolean restoreFirst
+    ) throws Exception {
+        // given
+        StockSnapshot before = readSnapshot();
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                before.name(), 60000, "관리자 재고 조정", TicketProductStatus.ON_SALE, 20, before.version()
+        );
+        CountDownLatch firstApplied = new CountDownLatch(1);
+        CountDownLatch allowFirstCommit = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<?> firstResult = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                if (restoreFirst) {
+                    ticketProductService.updateTicketProductsStockIncrease(Map.of(productId, 2));
+                } else {
+                    ticketProductService.updateTicketProduct(productId, request);
+                }
+                firstApplied.countDown();
+                awaitSignal(allowFirstCommit);
+            }));
+            assertThat(firstApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> secondResult = executor.submit(() -> {
+                secondStarted.countDown();
+                if (restoreFirst) {
+                    ticketProductService.updateTicketProduct(productId, request);
+                } else {
+                    ticketProductService.updateTicketProductsStockIncrease(Map.of(productId, 2));
+                }
+            });
+            assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(secondResult);
+            allowFirstCommit.countDown();
+            firstResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            if (restoreFirst) {
+                assertThatThrownBy(() -> secondResult.get(20, TimeUnit.SECONDS))
+                        .isInstanceOfSatisfying(ExecutionException.class, exception ->
+                                assertThat(exception.getCause()).isInstanceOfSatisfying(
+                                        BusinessException.class, businessException ->
+                                                assertThat(businessException.getErrorCode())
+                                                        .isEqualTo(ErrorCode.CONCURRENT_UPDATE_CONFLICT)));
+            } else {
+                secondResult.get(20, TimeUnit.SECONDS);
+            }
+            StockSnapshot after = readSnapshot();
+            assertThat(after.stock()).isEqualTo(restoreFirst ? 12 : 22);
+            assertThat(after.price()).isEqualTo(restoreFirst ? 50000 : 60000);
+            assertThat(after.version()).isEqualTo(before.version() + (restoreFirst ? 1 : 2));
+            assertThat(after.status()).isEqualTo(TicketProductStatus.ON_SALE);
+            assertThat(after.orderCount()).isZero();
+            assertThat(after.orderedQuantity()).isZero();
+        } finally {
+            allowFirstCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
     private CreateOrderRequest createOrderRequest() {
         return new CreateOrderRequest(
                 List.of(new CreateOrderRequest.Item(productId, 2)),
@@ -250,10 +477,12 @@ class TicketProductStockConcurrencyIntegrationTest {
             long orderedQuantity = entityManager.createQuery(
                             "select coalesce(sum(i.quantity), 0) from OrderItem i where i.order.user.id = :userId", Long.class)
                     .setParameter("userId", userId).getSingleResult();
-            return new StockSnapshot(product.getStock(), product.getStatus(), orderCount, orderedQuantity);
+            return new StockSnapshot(product.getStock(), product.getStatus(), orderCount, orderedQuantity,
+                    product.getVersion(), product.getPrice(), product.getName());
         }));
     }
 
-    private record StockSnapshot(int stock, TicketProductStatus status, long orderCount, long orderedQuantity) {
+    private record StockSnapshot(int stock, TicketProductStatus status, long orderCount, long orderedQuantity,
+                                 Long version, int price, String name) {
     }
 }

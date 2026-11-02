@@ -25,6 +25,10 @@ public record UpdateTicketProductRequest(
 
         @NotNull(message = "재고를 입력해주세요.")
         @Min(value = 0, message = "재고는 0이상 입력해야 합니다.")
-        Integer stock
+        Integer stock,
+
+        @NotNull
+        @Min(0)
+        Long version
 ) {
 }

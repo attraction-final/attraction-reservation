@@ -40,6 +40,9 @@ public class TicketProduct extends BaseTimeEntity {
     @Enumerated(EnumType.STRING)
     private TicketProductStatus status;
 
+    @Version
+    private Long version;
+
     public TicketProduct(String name, int price, String description, TicketType type, int stock, TicketProductStatus status) {
         validateName(name);
         validateDescription(description);

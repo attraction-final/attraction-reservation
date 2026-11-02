@@ -5,6 +5,8 @@ import com.example.attractionreservation.domain.attraction.cache.AttractionDetai
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.service.AttractionService;
+import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotCapacityRequest;
+import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotCapacityResponse;
 import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotTimeRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotTimeResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
@@ -54,6 +56,8 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -117,6 +121,7 @@ class ReservationSlotConcurrencyIntegrationTest {
 
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
+    private final List<MemberFixture> extraMembers = new ArrayList<>();
 
     @TestConfiguration(proxyBeanMethods = false)
     static class MySqlConfig {
@@ -166,8 +171,14 @@ class ReservationSlotConcurrencyIntegrationTest {
         }
         // 실패로 예약이 생성되어도 이번 fixture에 속한 데이터만 FK 참조 순서대로 정리한다.
         transactionTemplate.executeWithoutResult(status -> {
-            entityManager.createQuery("delete from Reservation r where r.user.id = :userId")
-                    .setParameter("userId", fixture.userId()).executeUpdate();
+            entityManager.createQuery("delete from Reservation r where r.attractionSlot.id = :slotId")
+                    .setParameter("slotId", fixture.slotId()).executeUpdate();
+            for (MemberFixture member : extraMembers) {
+                entityManager.remove(entityManager.find(Ticket.class, member.ticketId()));
+                entityManager.remove(entityManager.find(OrderItem.class, member.orderItemId()));
+                entityManager.remove(entityManager.find(Order.class, member.orderId()));
+                entityManager.remove(entityManager.find(User.class, member.userId()));
+            }
             entityManager.remove(entityManager.find(Ticket.class, fixture.ticketId()));
             entityManager.remove(entityManager.find(AttractionSlot.class, fixture.slotId()));
             entityManager.remove(entityManager.find(Attraction.class, fixture.attractionId()));
@@ -383,6 +394,156 @@ class ReservationSlotConcurrencyIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("마지막 자리 예약이 먼저 잠그면 정원 축소는 예약 commit 후 거절되고 정원과 예약 인원 5명을 유지한다")
+    void createReservation_LastSeatLocksFirst_RejectsCapacityReduction() throws Exception {
+        // given
+        prepareFourReservations();
+        CountDownLatch reservationApplied = new CountDownLatch(1);
+        CountDownLatch allowReservationCommit = new CountDownLatch(1);
+        CountDownLatch capacityChangeStarted = new CountDownLatch(1);
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<CreateReservationResponse> reservationResult = executor.submit(() ->
+                    reserveAndWaitForCommit(request, reservationApplied, allowReservationCommit));
+            assertThat(reservationApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<UpdateAttractionSlotCapacityResponse> capacityResult = executor.submit(() -> {
+                try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+                    timeMock.when(KstTime::now).thenReturn(NOW);
+                    capacityChangeStarted.countDown();
+                    return attractionSlotService.updateAttractionSlotCapacity(
+                            ADMIN_ID, fixture.slotId(), new UpdateAttractionSlotCapacityRequest(4)
+                    );
+                }
+            });
+            assertThat(capacityChangeStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(capacityResult);
+            allowReservationCommit.countDown();
+            CreateReservationResponse response = reservationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(response.slotId()).isEqualTo(fixture.slotId());
+            assertThatThrownBy(() -> capacityResult.get(20, TimeUnit.SECONDS))
+                    .isInstanceOfSatisfying(ExecutionException.class, exception ->
+                            assertThat(exception.getCause()).isInstanceOfSatisfying(BusinessException.class, businessException ->
+                                    assertThat(businessException.getErrorCode())
+                                            .isEqualTo(ErrorCode.SLOT_CAPACITY_BELOW_RESERVED)));
+            SlotSnapshot snapshot = readSnapshot();
+            assertThat(snapshot.capacity()).isEqualTo(5);
+            assertThat(snapshot.reservedCount()).isEqualTo(5);
+            assertThat(snapshot.reservationCount()).isEqualTo(5);
+            assertThat(snapshot.remainingCount()).isZero();
+            assertThat(snapshot.status()).isEqualTo(SlotStatus.CLOSED);
+            assertThat(snapshot.autoClosed()).isTrue();
+        } finally {
+            allowReservationCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    @Test
+    @DisplayName("정원 축소가 먼저 잠그면 마지막 자리 예약은 축소 commit 후 거절되고 정원과 예약 인원 4명을 유지한다")
+    void createReservation_CapacityReductionLocksFirst_RejectsLastSeatReservation() throws Exception {
+        // given
+        prepareFourReservations();
+        CountDownLatch capacityChangeApplied = new CountDownLatch(1);
+        CountDownLatch allowCapacityCommit = new CountDownLatch(1);
+        CountDownLatch reservationStarted = new CountDownLatch(1);
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<UpdateAttractionSlotCapacityResponse> capacityResult = executor.submit(() -> {
+                try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+                    timeMock.when(KstTime::now).thenReturn(NOW);
+                    return transactionTemplate.execute(status -> {
+                        UpdateAttractionSlotCapacityResponse response = attractionSlotService.updateAttractionSlotCapacity(
+                                ADMIN_ID, fixture.slotId(), new UpdateAttractionSlotCapacityRequest(4)
+                        );
+                        capacityChangeApplied.countDown();
+                        awaitSignal(allowCapacityCommit);
+                        return response;
+                    });
+                }
+            });
+            assertThat(capacityChangeApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<ReservationResult> reservationResult = executor.submit(() -> {
+                reservationStarted.countDown();
+                return reserveAtFixedTime(request);
+            });
+            assertThat(reservationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(reservationResult);
+            allowCapacityCommit.countDown();
+            UpdateAttractionSlotCapacityResponse response = capacityResult.get(20, TimeUnit.SECONDS);
+            ReservationResult result = reservationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThat(response.capacity()).isEqualTo(4);
+            assertThat(response.reservedCount()).isEqualTo(4);
+            assertThat(response.remainingCount()).isZero();
+            assertThat(response.status()).isEqualTo(SlotStatus.CLOSED);
+            assertThat(result.response()).isNull();
+            assertThat(result.failure()).isInstanceOfSatisfying(BusinessException.class, exception ->
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.SLOT_RESERVATION_NOT_ALLOWED_STATUS));
+            SlotSnapshot snapshot = readSnapshot();
+            assertThat(snapshot.capacity()).isEqualTo(4);
+            assertThat(snapshot.reservedCount()).isEqualTo(4);
+            assertThat(snapshot.reservationCount()).isEqualTo(4);
+            assertThat(snapshot.remainingCount()).isZero();
+            assertThat(snapshot.status()).isEqualTo(SlotStatus.CLOSED);
+            assertThat(snapshot.autoClosed()).isTrue();
+        } finally {
+            allowCapacityCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    private void prepareFourReservations() {
+        try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            timeMock.when(KstTime::now).thenReturn(NOW);
+            attractionSlotService.updateAttractionSlotCapacity(
+                    ADMIN_ID, fixture.slotId(), new UpdateAttractionSlotCapacityRequest(5)
+            );
+            // 기존 예약 수를 필드에 주입하지 않고, 서로 다른 회원의 실제 예약 4건을 생성한다.
+            for (int count = 0; count < 4; count++) {
+                MemberFixture member = createMemberWithTicket();
+                extraMembers.add(member);
+                reservationService.createReservation(
+                        member.userId(), new CreateReservationRequest(member.ticketId(), fixture.slotId())
+                );
+            }
+        }
+        SlotSnapshot snapshot = readSnapshot();
+        assertThat(snapshot.capacity()).isEqualTo(5);
+        assertThat(snapshot.reservedCount()).isEqualTo(4);
+        assertThat(snapshot.reservationCount()).isEqualTo(4);
+        assertThat(snapshot.remainingCount()).isEqualTo(1);
+        assertThat(snapshot.status()).isEqualTo(SlotStatus.OPEN);
+        assertThat(snapshot.autoClosed()).isFalse();
+    }
+
+    private MemberFixture createMemberWithTicket() {
+        return Objects.requireNonNull(transactionTemplate.execute(status -> {
+            User user = User.builder()
+                    .email("kan101-" + UUID.randomUUID().toString().substring(0, 12) + "@test.com")
+                    .password("test-password")
+                    .nickname("마지막자리회원")
+                    .build();
+            entityManager.persist(user);
+            TicketProduct product = entityManager.find(TicketProduct.class, fixture.productId());
+            Order order = Order.create(user, 50000, NOW.toLocalDate());
+            entityManager.persist(order);
+            OrderItem orderItem = OrderItem.create(order, product, 1);
+            entityManager.persist(orderItem);
+            Ticket ticket = new Ticket(NOW.toLocalDate(), orderItem);
+            ticket.entryTicket(NOW.withHour(10).atZone(KstTime.ZONE).toInstant());
+            entityManager.persist(ticket);
+            return new MemberFixture(user.getId(), order.getId(), orderItem.getId(), ticket.getId());
+        }));
+    }
+
     private void changeAttractionAtFixedTime(OperationStatus targetStatus) {
         try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
             timeMock.when(KstTime::now).thenReturn(NOW);
@@ -447,7 +608,8 @@ class ReservationSlotConcurrencyIntegrationTest {
                     .setParameter("slotId", fixture.slotId()).getSingleResult();
             Attraction attraction = slot.getAttraction();
             return new SlotSnapshot(slot.getStartsAt(), slot.getStatus(), slot.getReservedCount(), reservationCount,
-                    attraction.getOperationStatus(), attraction.getDeletedAt());
+                    attraction.getOperationStatus(), attraction.getDeletedAt(),
+                    slot.getCapacity(), slot.getRemainingCount(), slot.isAutoClosed());
         }));
     }
 
@@ -469,7 +631,11 @@ class ReservationSlotConcurrencyIntegrationTest {
     private record ReservationResult(CreateReservationResponse response, RuntimeException failure) {
     }
 
+    private record MemberFixture(Long userId, Long orderId, Long orderItemId, Long ticketId) {
+    }
+
     private record SlotSnapshot(LocalDateTime startsAt, SlotStatus status, int reservedCount, long reservationCount,
-                                OperationStatus attractionStatus, Instant attractionDeletedAt) {
+                                OperationStatus attractionStatus, Instant attractionDeletedAt,
+                                int capacity, int remainingCount, boolean autoClosed) {
     }
 }

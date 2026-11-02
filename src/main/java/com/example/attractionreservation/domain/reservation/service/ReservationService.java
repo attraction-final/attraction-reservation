@@ -73,7 +73,7 @@ public class ReservationService {
         }
 
         // 티켓 날짜와 슬롯 날짜 검증
-        AttractionSlot attractionSlot = attractionSlotService.findAttractionSlotById(request.slotId());
+        AttractionSlot attractionSlot = attractionSlotService.findSlot(request.slotId());
 
         /* 슬롯 시작, 종료 시간 */
         LocalDateTime slotStartsAt = attractionSlot.getStartsAt();

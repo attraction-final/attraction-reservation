@@ -113,7 +113,7 @@ class ReservationServiceTest {
         lenient().when(ticket.getValidDate()).thenReturn(VISIT_DATE);
         lenient().when(ticket.getType()).thenReturn(TicketType.ALL_DAY);
 
-        lenient().when(attractionSlotService.findAttractionSlotById(SLOT_ID))
+        lenient().when(attractionSlotService.findSlot(SLOT_ID))
                 .thenReturn(slot);
         lenient().when(slot.getId()).thenReturn(SLOT_ID);
         lenient().when(slot.getStartsAt()).thenReturn(STARTS_AT);

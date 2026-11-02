@@ -56,7 +56,7 @@ public class TicketService {
     public CreateTicketEntryResponse createTicketEntry(CreateTicketEntryRequest request) {
 
         // 티켓 코드로 입장권을 조회
-        Ticket ticket = ticketRepository.findByCode(request.ticketCode())
+        Ticket ticket = ticketRepository.findByCodeWithLock(request.ticketCode())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
 
         // 현재 순간을 저장

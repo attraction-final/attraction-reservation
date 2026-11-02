@@ -48,6 +48,7 @@ import static org.mockito.Mockito.mockStatic;
         AttractionService.class
 })
 class ReservationUpcomingReservationReaderIntegrationTest {
+    private static final Long ADMIN_ID = 1L; // 로그용 관리자 ID
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 28, 14, 0);
 
@@ -128,7 +129,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
             clock.when(KstTime::now).thenReturn(NOW);
 
             // when & then
-            assertThatThrownBy(() -> attractionService.updateAttractionStatus(attractionId, request))
+            assertThatThrownBy(() -> attractionService.updateAttractionStatus(ADMIN_ID, attractionId, request))
                     .isInstanceOfSatisfying(BusinessException.class, exception -> {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
@@ -154,7 +155,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
             clock.when(KstTime::now).thenReturn(NOW);
 
             // when & then
-            assertThatThrownBy(() -> attractionService.deleteAttraction(attractionId))
+            assertThatThrownBy(() -> attractionService.deleteAttraction(ADMIN_ID, attractionId))
                     .isInstanceOfSatisfying(BusinessException.class, exception -> {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
@@ -183,7 +184,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
         // when
         try (MockedStatic<KstTime> clock = mockStatic(KstTime.class)) {
             clock.when(KstTime::now).thenReturn(NOW);
-            attractionService.updateAttractionStatus(attractionId, request);
+            attractionService.updateAttractionStatus(ADMIN_ID, attractionId, request);
         }
         flushAndClear();
 
@@ -203,7 +204,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
         // when
         try (MockedStatic<KstTime> clock = mockStatic(KstTime.class)) {
             clock.when(KstTime::now).thenReturn(NOW);
-            attractionService.deleteAttraction(attractionId);
+            attractionService.deleteAttraction(ADMIN_ID, attractionId);
         }
         flushAndClear();
 

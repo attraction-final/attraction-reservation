@@ -27,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Import(TestcontainersConfiguration.class)
 class AttractionDetailCacheTest {
 
+    private static final Long ADMIN_ID = 1L; // 로그용 관리자 ID
+
     @Autowired private AttractionService attractionService;
     @Autowired private AttractionRepository attractionRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -82,7 +84,7 @@ class AttractionDetailCacheTest {
         attractionService.findAttractionById(attractionId);   // 캐시 채우기
 
         String newName = "새이름-" + System.nanoTime();
-        attractionService.updateAttraction(attractionId,
+        attractionService.updateAttraction(ADMIN_ID, attractionId,
                 new UpdateAttractionRequest(newName, null, null, null, null));
 
         assertThat(attractionService.findAttractionById(attractionId).name())
@@ -94,7 +96,7 @@ class AttractionDetailCacheTest {
     void changeStatus_EvictsCache() {
         attractionService.findAttractionById(attractionId);
 
-        attractionService.updateAttractionStatus(attractionId,
+        attractionService.updateAttractionStatus(ADMIN_ID, attractionId,
                 new UpdateAttractionStatusRequest("MAINTENANCE"));
 
         assertThat(attractionService.findAttractionById(attractionId).operationStatus())
@@ -106,7 +108,7 @@ class AttractionDetailCacheTest {
     void delete_EvictsCache() {
         attractionService.findAttractionById(attractionId);
 
-        attractionService.deleteAttraction(attractionId);
+        attractionService.deleteAttraction(ADMIN_ID, attractionId);
 
         assertThatThrownBy(() -> attractionService.findAttractionById(attractionId))
                 .isInstanceOfSatisfying(BusinessException.class,

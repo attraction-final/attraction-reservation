@@ -265,4 +265,12 @@ public class AttractionSlotService {
         entityManager.refresh(slot);
         slot.syncStatusWithRemainingCount();
     }
+
+    // 예약 - 예약용 어트랙션 잠금 조회
+    @Transactional
+    public Attraction findAttractionByIdForUpdate(Long attractionId) {
+        return attractionRepository.findByIdForUpdate(attractionId).orElseThrow(
+                () -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND)
+        );
+    }
 }

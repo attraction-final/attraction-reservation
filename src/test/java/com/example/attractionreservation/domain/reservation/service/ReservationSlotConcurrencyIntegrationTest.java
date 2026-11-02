@@ -1,6 +1,10 @@
 package com.example.attractionreservation.domain.reservation.service;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
+import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
+import com.example.attractionreservation.domain.attraction.service.AttractionService;
 import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotTimeRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotTimeResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
@@ -28,6 +32,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -46,6 +52,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.UUID;
@@ -64,7 +71,7 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 
 // 실제 MySQL에서 예약 생성과 관리자 시간 변경의 두 선행 순서를 검증한다.
-// 검증·자리 확보·저장은 실제 Service를 사용하며, spy로 실행 경로를 대체하지 않는다.
+// 시간 변경·운영 상태 변경 검증에 실제 Service와 Repository를 사용하고 commit 시점만 제어한다.
 @DataJpaTest(properties = {
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.datasource.hikari.maximum-pool-size=4"
@@ -73,7 +80,8 @@ import static org.mockito.Mockito.mockStatic;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, UserService.class,
-        TicketService.class, AttractionSlotService.class, ReservationSlotConcurrencyIntegrationTest.MySqlConfig.class})
+        TicketService.class, AttractionSlotService.class, AttractionService.class,
+        ReservationUpcomingReservationReader.class, ReservationSlotConcurrencyIntegrationTest.MySqlConfig.class})
 class ReservationSlotConcurrencyIntegrationTest {
 
     private static final Long ADMIN_ID = 99L;
@@ -86,6 +94,13 @@ class ReservationSlotConcurrencyIntegrationTest {
 
     @Autowired
     private AttractionSlotService attractionSlotService;
+
+    @Autowired
+    private AttractionService attractionService;
+
+    // DB의 운영 상태·예약 수 검사는 실제 구현을 사용하고, Redis 캐시 삭제만 제외한다.
+    @MockitoBean
+    private AttractionDetailCacheEvictor attractionDetailCacheEvictor;
 
     @Autowired
     private EntityManager entityManager;
@@ -267,6 +282,121 @@ class ReservationSlotConcurrencyIntegrationTest {
         }
     }
 
+    @ParameterizedTest(name = "관리자 변경={0}")
+    @EnumSource(value = OperationStatus.class, names = {"SUSPENDED", "DELETED"})
+    @DisplayName("예약이 먼저 어트랙션을 잠그면 운영 중단과 삭제는 예약 commit 후 예정 예약이 있어 거절된다")
+    void createReservation_ReservationLocksFirst_RejectsAttractionChange(
+            OperationStatus targetStatus
+    ) throws Exception {
+        // given
+        CountDownLatch reservationApplied = new CountDownLatch(1);
+        CountDownLatch allowReservationCommit = new CountDownLatch(1);
+        CountDownLatch adminStarted = new CountDownLatch(1);
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<CreateReservationResponse> reservationResult = executor.submit(() ->
+                    reserveAndWaitForCommit(request, reservationApplied, allowReservationCommit));
+            assertThat(reservationApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> adminResult = executor.submit(() -> {
+                adminStarted.countDown();
+                changeAttractionAtFixedTime(targetStatus);
+            });
+            assertThat(adminStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(adminResult);
+            allowReservationCommit.countDown();
+            CreateReservationResponse response = reservationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            assertThatThrownBy(() -> adminResult.get(20, TimeUnit.SECONDS))
+                    .isInstanceOfSatisfying(ExecutionException.class, exception ->
+                            assertThat(exception.getCause()).isInstanceOfSatisfying(BusinessException.class, businessException ->
+                                    assertThat(businessException.getErrorCode())
+                                            .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS)));
+            SlotSnapshot snapshot = readSnapshot();
+            assertThat(response.slotId()).isEqualTo(fixture.slotId());
+            assertThat(response.startsAt()).isEqualTo(ORIGINAL_START);
+            assertThat(snapshot.attractionStatus()).isEqualTo(OperationStatus.OPERATING);
+            assertThat(snapshot.attractionDeletedAt()).isNull();
+            assertThat(snapshot.reservationCount()).isEqualTo(1);
+            assertThat(snapshot.reservedCount()).isEqualTo(1);
+            assertThat(snapshot.startsAt()).isEqualTo(ORIGINAL_START);
+        } finally {
+            allowReservationCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    @ParameterizedTest(name = "관리자 선행 변경={0}")
+    @EnumSource(value = OperationStatus.class, names = {"SUSPENDED", "DELETED"})
+    @DisplayName("운영 중단 또는 삭제가 먼저 어트랙션을 잠그면 예약은 commit 후 최신 상태를 확인하고 거절된다")
+    void createReservation_AttractionChangeLocksFirst_RejectsNonOperatingAttraction(
+            OperationStatus targetStatus
+    ) throws Exception {
+        // given
+        CountDownLatch adminApplied = new CountDownLatch(1);
+        CountDownLatch allowAdminCommit = new CountDownLatch(1);
+        CountDownLatch reservationStarted = new CountDownLatch(1);
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // when
+            Future<?> adminResult = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                changeAttractionAtFixedTime(targetStatus);
+                adminApplied.countDown();
+                awaitSignal(allowAdminCommit);
+            }));
+            assertThat(adminApplied.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<ReservationResult> reservationResult = executor.submit(() -> {
+                reservationStarted.countDown();
+                return reserveAtFixedTime(request);
+            });
+            assertThat(reservationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertStillRunning(reservationResult);
+            allowAdminCommit.countDown();
+            adminResult.get(20, TimeUnit.SECONDS);
+            ReservationResult result = reservationResult.get(20, TimeUnit.SECONDS);
+
+            // then
+            SlotSnapshot snapshot = readSnapshot();
+            assertSoftly(softly -> {
+                softly.assertThat(result.response())
+                        .as("관리자가 %s로 변경하고 commit한 뒤에는 예약에 성공하면 안 된다", targetStatus)
+                        .isNull();
+                softly.assertThat(result.failure()).isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ATTRACTION_NOT_OPERATING));
+                softly.assertThat(snapshot.attractionStatus()).isEqualTo(targetStatus);
+                if (targetStatus == OperationStatus.DELETED) {
+                    softly.assertThat(snapshot.attractionDeletedAt()).isNotNull();
+                } else {
+                    softly.assertThat(snapshot.attractionDeletedAt()).isNull();
+                }
+                softly.assertThat(snapshot.reservationCount()).isZero();
+                softly.assertThat(snapshot.reservedCount()).isZero();
+                softly.assertThat(snapshot.startsAt()).isEqualTo(ORIGINAL_START);
+                softly.assertThat(snapshot.status()).isEqualTo(SlotStatus.OPEN);
+            });
+        } finally {
+            allowAdminCommit.countDown();
+            shutdownExecutor(executor);
+        }
+    }
+
+    private void changeAttractionAtFixedTime(OperationStatus targetStatus) {
+        try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            timeMock.when(KstTime::now).thenReturn(NOW);
+            if (targetStatus == OperationStatus.DELETED) {
+                // DELETED는 상태 변경 요청이 아닌 기존 소프트 삭제 Service로 처리한다.
+                attractionService.deleteAttraction(ADMIN_ID, fixture.attractionId());
+            } else {
+                attractionService.updateAttractionStatus(
+                        ADMIN_ID, fixture.attractionId(), new UpdateAttractionStatusRequest(targetStatus.name())
+                );
+            }
+        }
+    }
+
     private CreateReservationResponse reserveAndWaitForCommit(
             CreateReservationRequest request, CountDownLatch applied, CountDownLatch allowCommit
     ) {
@@ -315,7 +445,9 @@ class ReservationSlotConcurrencyIntegrationTest {
             long reservationCount = entityManager.createQuery(
                             "select count(r) from Reservation r where r.attractionSlot.id = :slotId", Long.class)
                     .setParameter("slotId", fixture.slotId()).getSingleResult();
-            return new SlotSnapshot(slot.getStartsAt(), slot.getStatus(), slot.getReservedCount(), reservationCount);
+            Attraction attraction = slot.getAttraction();
+            return new SlotSnapshot(slot.getStartsAt(), slot.getStatus(), slot.getReservedCount(), reservationCount,
+                    attraction.getOperationStatus(), attraction.getDeletedAt());
         }));
     }
 
@@ -337,6 +469,7 @@ class ReservationSlotConcurrencyIntegrationTest {
     private record ReservationResult(CreateReservationResponse response, RuntimeException failure) {
     }
 
-    private record SlotSnapshot(LocalDateTime startsAt, SlotStatus status, int reservedCount, long reservationCount) {
+    private record SlotSnapshot(LocalDateTime startsAt, SlotStatus status, int reservedCount, long reservationCount,
+                                OperationStatus attractionStatus, Instant attractionDeletedAt) {
     }
 }

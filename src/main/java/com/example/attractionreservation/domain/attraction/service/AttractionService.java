@@ -168,10 +168,13 @@ public class AttractionService {
 
     // 어트랙션 운영 상태 변경
     @Transactional
-    public UpdateAttractionStatusResponse updateAttractionStatus(Long adminId, Long attractionId,
-                                                                 UpdateAttractionStatusRequest request) {
+    public UpdateAttractionStatusResponse updateAttractionStatus(
+            Long adminId,
+            Long attractionId,
+            UpdateAttractionStatusRequest request
+    ) {
         OperationStatus newStatus = OperationStatus.from(request.operationStatus());
-        Attraction attraction = findActiveAttraction(attractionId);
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
         OperationStatus previousStatus = attraction.getOperationStatus();
 
         if (previousStatus == newStatus) {
@@ -209,7 +212,7 @@ public class AttractionService {
     // 어트랙션 삭제
     @Transactional
     public void deleteAttraction(Long adminId, Long attractionId) {
-        Attraction attraction = findActiveAttraction(attractionId);
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
         validateNoUpcomingReservations(attractionId, "삭제");
         attraction.deleted();
 
@@ -217,5 +220,12 @@ public class AttractionService {
 
         // 추가
         log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId);
+    }
+
+    // 예약 - 잠금 전용 조회 메서드
+    private Attraction findActiveAttractionForUpdate(Long attractionId) {
+        return attractionRepository.findActiveByIdForUpdate(attractionId).orElseThrow(
+                () -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND)
+        );
     }
 }

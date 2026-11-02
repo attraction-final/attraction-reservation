@@ -57,7 +57,8 @@ public class TicketProductService {
     // 티켓 상품 삭제
     @Transactional
     public void deleteTicketProduct(Long ticketProductId) {
-        TicketProduct ticketProduct = getTicketProductById(ticketProductId);
+        TicketProduct ticketProduct = ticketProductRepository.findByIdWithLock(ticketProductId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
         ticketProduct.delete();
     }
 

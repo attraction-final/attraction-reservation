@@ -16,12 +16,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.CannotAcquireLockException;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -35,7 +38,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PaymentCompensationProcessorTest {
 
     private static final Long COMPENSATION_ID = 1L;
@@ -231,6 +234,119 @@ class PaymentCompensationProcessorTest {
 
         //when & then
         assertThatCode(() -> paymentCompensationProcessor.process(COMPENSATION_ID)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("PG 취소가 실패해 재시도 예정이면 시도 횟수와 함께 WARN 로그를 남긴다.")
+    void process_cancelFailed_LogWarnWithRetry(CapturedOutput output) {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(1), any(), any()))
+                .willReturn(CompensationStatus.FAILED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        assertThat(output).doesNotContain("event=PAYMENT_COMPENSATION_RETRY_EXHAUSTED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_FAILED")))
+                .singleElement().asString().contains("WARN").contains("retry=1");
+    }
+
+    @Test
+    @DisplayName("PG 취소 실패로 최대 시도를 넘기면 수동 확인 대상으로 ERROR 로그를 남긴다.")
+    void process_cancelFailedDead_LogError(CapturedOutput output) {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(1), any(), any()))
+                .willReturn(CompensationStatus.DEAD);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        assertThat(output).doesNotContain("event=PAYMENT_COMPENSATION_FAILED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_RETRY_EXHAUSTED")))
+                .singleElement().asString().contains("ERROR").contains("amount=9999");
+    }
+
+    @Test
+    @DisplayName("재시도 끝에 최대 시도를 넘기면 소진 로그의 retry에는 첫 시도를 뺀 재시도 횟수를 남긴다.")
+    void process_retryFailedDead_LogRetryExcludingFirstAttempt(CapturedOutput output) {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED_RETRY));
+        given(paymentGateway.getPayment(PG_ID)).willReturn(Optional.of(pgPayment(GatewayPaymentStatus.PAID,
+                new PaymentCancellationResponse("cancel-1", GatewayCancellationStatus.FAILED))));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(2), any(), any()))
+                .willReturn(CompensationStatus.DEAD);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_RETRY_EXHAUSTED")))
+                .singleElement().asString().contains("retry=1");
+    }
+
+    @Test
+    @DisplayName("PG 연동 실패는 PortOneClient가 원인을 남기므로 실패 로그에는 스택 트레이스 없이 errorCode만 남긴다.")
+    void process_gatewayFailure_LogErrorCodeWithoutStackTrace(CapturedOutput output) {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(1), any(), any()))
+                .willReturn(CompensationStatus.FAILED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_FAILED")))
+                .singleElement().asString().contains("errorCode=PAYMENT_CANCELLATION_FAILED");
+        assertThat(output).doesNotContain("BusinessException");
+    }
+
+    @Test
+    @DisplayName("예상하지 못한 예외로 PG 취소가 실패하면 원인을 알 수 있도록 스택 트레이스를 남긴다.")
+    void process_unexpectedFailure_LogStackTrace(CapturedOutput output) {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new IllegalStateException("unexpected"))
+                .given(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(1), any(), any()))
+                .willReturn(CompensationStatus.FAILED);
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        assertThat(output).contains("event=PAYMENT_COMPENSATION_FAILED").contains("java.lang.IllegalStateException: unexpected");
+    }
+
+    @Test
+    @DisplayName("실패를 기록하려는 사이 다른 처리가 다시 점유했으면 스택 트레이스 없이 INFO로 건너뜀을 남긴다.")
+    void process_reclaimedByOtherBeforeFailureRecord_LogSkippedWithoutStackTrace(CapturedOutput output) {
+        //given
+        given(paymentCompensationService.claim(eq(COMPENSATION_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(PG_ID, "결제 금액 불일치", null);
+        given(paymentCompensationService.recordFailure(eq(COMPENSATION_ID), eq(1), any(), any()))
+                .willThrow(new BusinessException(ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION));
+
+        //when
+        paymentCompensationProcessor.process(COMPENSATION_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_SKIPPED")))
+                .singleElement().asString().contains("INFO");
+        assertThat(output).doesNotContain("BusinessException");
     }
 
     @Test

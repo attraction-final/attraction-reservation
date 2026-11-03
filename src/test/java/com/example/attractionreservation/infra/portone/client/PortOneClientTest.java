@@ -10,6 +10,9 @@ import com.example.attractionreservation.infra.portone.config.PortOneProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -34,6 +37,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+@ExtendWith(OutputCaptureExtension.class)
 class PortOneClientTest {
 
     private static final String BASE_URL = "https://api.portone.test";
@@ -875,5 +879,212 @@ class PortOneClientTest {
 
         //then
         assertThat(idempotencyKeys.get(0)).isNotEqualTo(idempotencyKeys.get(1));
+    }
+
+    @Test
+    @DisplayName("결제 조회에 성공하면 경로 템플릿과 소요 시간을 담은 호출 로그를 남긴다.")
+    void getPayment_paid_LogCalled(CapturedOutput output) {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andRespond(withSuccess("""
+                        {
+                          "id": "pg-id",
+                          "status": "PAID",
+                          "amount": { "total": 10000, "paid": 10000 },
+                          "paidAt": "2026-10-20T01:00:00Z"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        portOneClient.getPayment(PG_ID);
+
+        //then
+        assertThat(output)
+                .contains("event=EXTERNAL_API_CALLED target=portone method=GET uri=/payments/{pgId} pgId=pg-id durationMs=")
+                .contains("result=SUCCESS httpStatus=200");
+    }
+
+    @Test
+    @DisplayName("결제 조회 오류 응답은 본문 없이 오류 type만 로그에 남긴다.")
+    void getPayment_errorResponse_LogErrorTypeWithoutBody(CapturedOutput output) {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"INVALID_REQUEST","message":"응답 본문 메시지"}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.getPayment(PG_ID))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output)
+                .contains("event=EXTERNAL_API_FAILED")
+                .contains("httpStatus=400 reason=\"INVALID_REQUEST\"")
+                .doesNotContain("응답 본문 메시지");
+    }
+
+    @Test
+    @DisplayName("결제 조회가 실패하면 던지는 예외의 errorCode를 실패 로그에 함께 남긴다.")
+    void getPayment_errorResponse_LogErrorCode(CapturedOutput output) {
+        //given
+        server.expect(requestTo(PAYMENT_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.getPayment(PG_ID))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_FAILED")))
+                .singleElement().asString().contains("errorCode=PAYMENT_GATEWAY_ERROR");
+    }
+
+    @Test
+    @DisplayName("PG 오류 type에 따옴표·개행이 있어도 logfmt 키를 끼워 넣지 못하도록 바꿔 남긴다.")
+    void cancelPayment_errorTypeWithQuote_LogEscaped(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PG\\" event=FAKE\\nnext"}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PG_CANCEL_REJECTED")))
+                .singleElement().asString().contains("reason=\"PG' event=FAKE next\"");
+    }
+
+    @Test
+    @DisplayName("PG가 취소를 거절하면 던지는 예외의 errorCode를 거절 로그에 함께 남긴다.")
+    void cancelPayment_errorResponse_LogErrorCode(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PG_PROVIDER","message":"응답 본문 메시지"}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PG_CANCEL_REJECTED")))
+                .singleElement().asString().contains("errorCode=PAYMENT_CANCELLATION_FAILED");
+    }
+
+    @Test
+    @DisplayName("통신 재시도를 모두 실패하면 던지는 예외의 errorCode를 소진 로그에 함께 남긴다.")
+    void cancelPayment_timeoutAllAttempts_LogErrorCode(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.times(3), requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_FAILED")))
+                .singleElement().asString().contains("errorCode=PAYMENT_CANCELLATION_FAILED");
+    }
+
+    @Test
+    @DisplayName("결제 취소 오류 응답은 본문 없이 오류 type만 남기고, 호출 로그는 실패로 한 번 남긴다.")
+    void cancelPayment_errorResponse_LogWithoutBody(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"type":"PG_PROVIDER","message":"응답 본문 메시지"}
+                                """));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output)
+                .contains("event=PG_CANCEL_REJECTED")
+                .contains("reason=\"PG_PROVIDER\"")
+                .doesNotContain("응답 본문 메시지");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_CALLED")))
+                .singleElement().asString().contains("result=FAILURE");
+    }
+
+    @Test
+    @DisplayName("통신 실패로 취소를 재시도하면 재시도 횟수를 WARN으로 남기고 호출 로그는 한 번만 남긴다.")
+    void cancelPayment_timeoutThenSuccess_LogRetried(CapturedOutput output) {
+        //given
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+        server.expect(requestTo(CANCEL_URL))
+                .andRespond(withSuccess("""
+                        { "cancellation": { "id": "cancel-1", "status": "SUCCEEDED" } }
+                        """, MediaType.APPLICATION_JSON));
+
+        //when
+        portOneClient.cancelPayment(PG_ID, "결제 금액 불일치", null);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_RETRIED")))
+                .singleElement().asString().contains("WARN").contains("retry=1");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_CALLED")))
+                .singleElement().asString().contains("result=SUCCESS status=SUCCEEDED");
+    }
+
+    @Test
+    @DisplayName("전체 취소 오류 응답에 type이 없으면 null 문자열 없이 amount는 빈 값, reason은 type 없음으로 남기고 호출 로그에 status를 남기지 않는다.")
+    void cancelPayment_fullCancelErrorWithoutType_LogWithoutNull(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.once(), requestTo(CANCEL_URL))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PG_CANCEL_REJECTED")))
+                .singleElement().asString()
+                .contains("amount= currentCancellableAmount= httpStatus=400 reason=\"오류 응답에 type 없음\"");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_CALLED")))
+                .singleElement().asString()
+                .contains("amount= ")
+                .endsWith("result=FAILURE");
+        assertThat(output).doesNotContain("=null");
+    }
+
+    @Test
+    @DisplayName("통신 실패로 재시도를 모두 쓰면 실제로 보낸 재시도만 RETRIED로 남기고, 소진 로그에는 재시도 횟수를 남긴다.")
+    void cancelPayment_timeoutAllAttempts_LogRetriedExceptLastAttempt(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.times(3), requestTo(CANCEL_URL))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+
+        //when & then
+        assertThatThrownBy(() -> portOneClient.cancelPayment(PG_ID, "금액 불일치", null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_RETRIED")))
+                .hasSize(2)
+                .allMatch(line -> line.contains("method=POST"))
+                .anyMatch(line -> line.contains("retry=1"))
+                .anyMatch(line -> line.contains("retry=2"));
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_FAILED")))
+                .singleElement().asString().contains("retry=2");
+    }
+
+    @Test
+    @DisplayName("모든 시도가 앞선 요청 처리 중이면 마지막 시도는 RETRIED로 남기지 않고 결과 미확인으로 남긴다.")
+    void cancelPayment_outstandingAllAttempts_LogRetriedExceptLastAttempt(CapturedOutput output) {
+        //given
+        server.expect(ExpectedCount.times(3), requestTo(CANCEL_URL))
+                .andRespond(outstandingRequest());
+
+        //when
+        portOneClient.cancelPayment(PG_ID, "부분 환불", 3000L, 10000L);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=EXTERNAL_API_RETRIED")))
+                .hasSize(2)
+                .noneMatch(line -> line.contains("retry=3"));
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PG_CANCEL_UNCONFIRMED")))
+                .singleElement().asString().contains("앞선 요청 처리 결과 미확인");
     }
 }

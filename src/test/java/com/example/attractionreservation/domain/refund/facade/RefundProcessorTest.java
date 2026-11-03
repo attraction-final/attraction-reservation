@@ -19,6 +19,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
 
@@ -26,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,7 +43,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class RefundProcessorTest {
 
     private static final Long REFUND_ID = 1L;
@@ -586,6 +589,158 @@ class RefundProcessorTest {
         //then
         verify(refundCommandService).findPgCheckable(eq(3L), any());
         verify(refundCommandService, never()).claim(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("스케줄러 처리는 PG 취소와 PG 취소 확인을 시도한 환불 수의 합을 반환한다.")
+    void processPending_targets_ReturnAttemptedCount() {
+        //given
+        given(refundCommandService.findProcessableIds(any(), anyInt())).willReturn(List.of(1L, 2L));
+        given(refundCommandService.claim(anyLong(), any())).willReturn(Optional.empty());
+        given(refundCommandService.findPgCheckableIds(any(), eq(5))).willReturn(List.of(3L));
+        given(refundCommandService.findPgCheckable(eq(3L), any())).willReturn(Optional.empty());
+
+        //when
+        int count = refundProcessor.processPending(20, 5);
+
+        //then
+        assertThat(count).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("PG 취소가 완료되면 환불 ID와 금액을 INFO 로그로 남긴다.")
+    void process_claimed_LogCompleted(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(CLAIMED));
+        given(paymentGateway.cancelPayment("pg-id", "단순 변심", 20000L, 50000L))
+                .willReturn(cancellation("cancel-1", GatewayCancellationStatus.SUCCEEDED));
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_COMPLETED")))
+                .singleElement().asString().contains("INFO").contains("refundId=1 pgId=pg-id amount=20000");
+    }
+
+    @Test
+    @DisplayName("PG 취소가 실패해 재시도 예정이면 시도 횟수와 함께 WARN 로그를 남긴다.")
+    void process_cancelFailed_LogWarnWithRetry(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+        given(refundCommandService.recordFailure(eq(REFUND_ID), eq(1), anyString(), any())).willReturn(RefundStatus.FAILED);
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output).doesNotContain("event=REFUND_RETRY_EXHAUSTED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_FAILED")))
+                .singleElement().asString().contains("WARN").contains("retry=1");
+    }
+
+    @Test
+    @DisplayName("PG 연동 실패는 PortOneClient가 원인을 남기므로 실패 로그에는 스택 트레이스 없이 errorCode만 남긴다.")
+    void process_gatewayFailure_LogErrorCodeWithoutStackTrace(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+        given(refundCommandService.recordFailure(eq(REFUND_ID), eq(1), anyString(), any())).willReturn(RefundStatus.FAILED);
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_FAILED")))
+                .singleElement().asString().contains("errorCode=PAYMENT_CANCELLATION_FAILED");
+        assertThat(output).doesNotContain("BusinessException");
+    }
+
+    @Test
+    @DisplayName("예상하지 못한 예외로 PG 취소가 실패하면 원인을 알 수 있도록 스택 트레이스를 남긴다.")
+    void process_unexpectedFailure_LogStackTrace(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new IllegalStateException("unexpected"))
+                .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+        given(refundCommandService.recordFailure(eq(REFUND_ID), eq(1), anyString(), any())).willReturn(RefundStatus.FAILED);
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output).contains("event=REFUND_FAILED").contains("java.lang.IllegalStateException: unexpected");
+    }
+
+    @Test
+    @DisplayName("PG에 이미 반영됐을 수 있는 거절이면 수동 확인 대상으로 ERROR를 남기되 스택 트레이스는 남기지 않는다.")
+    void process_nonRetryableCancelFailure_LogRejectedWithoutStackTrace(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(CLAIMED));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_ALREADY_CANCELLED))
+                .given(paymentGateway).cancelPayment(anyString(), anyString(), anyLong(), anyLong());
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_CANCEL_REJECTED")))
+                .singleElement().asString().contains("ERROR").contains("errorCode=PAYMENT_ALREADY_CANCELLED");
+        assertThat(output).doesNotContain("BusinessException");
+    }
+
+    @Test
+    @DisplayName("재시도 끝에 최대 시도를 넘기면 소진 로그의 retry에는 첫 시도를 뺀 재시도 횟수를 ERROR로 남긴다.")
+    void process_retryFailedDead_LogRetryExcludingFirstAttempt(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any())).willReturn(Optional.of(RECLAIMED));
+        given(paymentGateway.getPayment("pg-id")).willReturn(Optional.of(pgPayment(0L)));
+        willThrow(new BusinessException(ErrorCode.PAYMENT_CANCELLATION_FAILED))
+                .given(paymentGateway).cancelPayment("pg-id", "단순 변심", 20000L, 50000L);
+        given(refundCommandService.recordFailure(eq(REFUND_ID), eq(2), anyString(), any())).willReturn(RefundStatus.DEAD);
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output).doesNotContain("event=REFUND_FAILED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_RETRY_EXHAUSTED")))
+                .singleElement().asString().contains("ERROR").contains("amount=20000 retry=1");
+    }
+
+    @Test
+    @DisplayName("다른 처리가 결제를 잠그고 있어 건너뛰면 스택 트레이스 없이 INFO로 건너뜀을 남긴다.")
+    void process_lockConflict_LogSkippedWithoutStackTrace(CapturedOutput output) {
+        //given
+        given(refundCommandService.claim(eq(REFUND_ID), any()))
+                .willThrow(new PessimisticLockingFailureException("locked"));
+
+        //when
+        refundProcessor.process(REFUND_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_SKIPPED")))
+                .singleElement().asString().contains("INFO").contains("refundId=1 reason=\"다른 처리가 점유 중\"");
+        assertThat(output).doesNotContain("PessimisticLockingFailureException");
+    }
+
+    @Test
+    @DisplayName("PG 취소 누적 금액과 환불이 맞지 않으면 수동 확인 대상으로 ERROR 로그를 남긴다.")
+    void syncWithPg_mismatch_LogAmountMismatched(CapturedOutput output) {
+        //given
+        given(paymentGateway.getPayment("pg-id")).willReturn(Optional.of(pgPayment(20000L)));
+        given(refundCommandService.syncWithPgCancelledAmount(eq("pg-id"), eq(20000L), any()))
+                .willReturn(PaymentSyncResult.REFUND_MISMATCH);
+
+        //when
+        refundProcessor.syncWithPg("pg-id");
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_AMOUNT_MISMATCHED")))
+                .singleElement().asString().contains("ERROR").contains("pgId=pg-id pgCancelledAmount=20000");
     }
 
     private static PaymentCancellationResponse cancellation(String cancellationId, GatewayCancellationStatus status) {

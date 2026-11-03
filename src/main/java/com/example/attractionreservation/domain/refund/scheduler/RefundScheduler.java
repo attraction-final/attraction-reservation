@@ -7,6 +7,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * 즉시 시도에 실패했거나 시도 전에 서버가 종료된 환불의 PG 취소를 주기적으로 재시도한다.
  * 이전 실행이 끝난 뒤 fixed-delay만큼 기다리므로 실행이 겹치지 않는다.
@@ -33,11 +35,17 @@ public class RefundScheduler {
 
     @Scheduled(fixedDelayString = "${payment.refund.scheduler.fixed-delay:30s}")
     public void processPendingRefunds() {
+        long startedAt = System.nanoTime();
         try {
-            refundProcessor.processPending(batchSize, pgCheckBatchSize);
+            int count = refundProcessor.processPending(batchSize, pgCheckBatchSize);
+            // 처리 대상이 없는 주기는 남기지 않는다.
+            if (count > 0) {
+                log.info("event=REFUND_BATCH_COMPLETED count={} durationMs={}",
+                        count, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt));
+            }
         } catch (RuntimeException e) {
             // 처리 대상 조회 실패 등. 다음 주기에 다시 시도한다.
-            log.error("[Refund] 스케줄러 실행 실패", e);
+            log.error("event=REFUND_BATCH_FAILED", e);
         }
     }
 }

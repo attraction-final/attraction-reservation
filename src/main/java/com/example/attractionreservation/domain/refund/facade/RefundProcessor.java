@@ -16,6 +16,7 @@ import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -43,7 +44,7 @@ public class RefundProcessor {
             process(refundId);
         } catch (RuntimeException e) {
             // 즉시 시도가 실패해도 환불 요청은 남아 있으므로 스케줄러가 이어받는다.
-            log.error("[Refund] 즉시 처리 중 예기치 않은 오류: refundId={}", refundId, e);
+            log.error("event=REFUND_ABORTED refundId={}", refundId, e);
         }
     }
 
@@ -52,23 +53,27 @@ public class RefundProcessor {
      *
      * @param limit        한 번에 처리할 PG 취소 대상 수
      * @param pgCheckLimit 한 번에 확인할 PG_PENDING 수. 확인마다 PG를 조회하므로 PG 장애로 쌓여도 PG 취소 처리가 밀리지 않게 따로 제한한다
+     * @return 이번 주기에 PG 취소와 PG 취소 확인을 시도한 환불 수의 합
      */
-    public void processPending(int limit, int pgCheckLimit) {
-        for (Long refundId : refundCommandService.findProcessableIds(Instant.now(), limit)) {
+    public int processPending(int limit, int pgCheckLimit) {
+        List<Long> processableIds = refundCommandService.findProcessableIds(Instant.now(), limit);
+        for (Long refundId : processableIds) {
             try {
                 process(refundId);
             } catch (RuntimeException e) {
-                log.error("[Refund] 처리 중 예기치 않은 오류: refundId={}", refundId, e);
+                log.error("event=REFUND_ABORTED refundId={}", refundId, e);
             }
         }
 
-        for (Long refundId : refundCommandService.findPgCheckableIds(Instant.now(), pgCheckLimit)) {
+        List<Long> pgCheckableIds = refundCommandService.findPgCheckableIds(Instant.now(), pgCheckLimit);
+        for (Long refundId : pgCheckableIds) {
             try {
                 confirmPending(refundId);
             } catch (RuntimeException e) {
-                log.error("[Refund] PG 취소 확인 중 예기치 않은 오류: refundId={}", refundId, e);
+                log.error("event=REFUND_CHECK_ABORTED refundId={}", refundId, e);
             }
         }
+        return processableIds.size() + pgCheckableIds.size();
     }
 
     // 점유 → (재시도면 이전 취소 반영 확인) → PG 부분 취소 → 결과 기록
@@ -78,7 +83,7 @@ public class RefundProcessor {
             claimed = refundCommandService.claim(refundId, Instant.now());
         } catch (PessimisticLockingFailureException e) {
             // 즉시 시도와 스케줄러, 또는 다른 인스턴스가 같은 결제를 잠그고 있으면 그쪽에 맡긴다.
-            log.info("[Refund] 다른 처리가 점유 중이라 건너뜀: refundId={}", refundId);
+            log.info("event=REFUND_SKIPPED refundId={} reason=\"다른 처리가 점유 중\"", refundId);
             return;
         }
 
@@ -127,7 +132,7 @@ public class RefundProcessor {
                 throw e;
             }
             // 다른 처리(웹훅·다른 인스턴스)가 먼저 확인 결과를 기록했거나, 그 뒤 재취소로 새 PG_PENDING 주기가 된 경우
-            log.info("[Refund] 다른 처리가 먼저 PG 취소 확인을 기록해 건너뜀: refundId={}", refundId);
+            log.info("event=REFUND_SKIPPED refundId={} reason=\"다른 처리가 먼저 PG 취소 확인을 기록\"", refundId);
         }
     }
 
@@ -155,10 +160,9 @@ public class RefundProcessor {
 
         PaymentSyncResult result = refundCommandService.syncWithPgCancelledAmount(pgId, pgCancelledAmount, Instant.now());
         switch (result) {
-            case REFUND_SYNCED -> log.info("[Refund] PG 취소 반영 확인, 환불 완료 처리: pgId={}, pgCancelledAmount={}",
-                    pgId, pgCancelledAmount);
+            case REFUND_SYNCED -> log.info("event=REFUND_SYNCED pgId={} pgCancelledAmount={}", pgId, pgCancelledAmount);
             // 수동 확인 알림은 이 로그 하나로 남긴다. 웹훅 쪽은 처리 결과만 info로 남긴다.
-            case REFUND_MISMATCH -> log.error("[Refund] PG 취소 금액과 환불 불일치, 수동 확인 필요: pgId={}, pgCancelledAmount={}",
+            case REFUND_MISMATCH -> log.error("event=REFUND_AMOUNT_MISMATCHED pgId={} pgCancelledAmount={}",
                     pgId, pgCancelledAmount);
             default -> {
             }
@@ -175,7 +179,7 @@ public class RefundProcessor {
     private Optional<PaymentSyncResult> syncPgPending(ClaimedRefund refund, PaymentGatewayResponse pgPayment) {
         GatewayCancellationStatus result = judgePgCancellation(refund, pgPayment);
         if (result == GatewayCancellationStatus.REQUESTED) {
-            log.info("[Refund] PG 취소 확정 대기 중, 스케줄러가 확인 예정: refundId={}, pgId={}, cancellationId={}",
+            log.info("event=REFUND_SYNC_DEFERRED refundId={} pgId={} cancellationId={}",
                     refund.refundId(), refund.pgId(), refund.pgCancellationId());
             return Optional.of(PaymentSyncResult.REFUND_PENDING);
         }
@@ -186,7 +190,7 @@ public class RefundProcessor {
             if (e.getErrorCode() != ErrorCode.REFUND_INVALID_STATUS_TRANSITION) {
                 throw e;
             }
-            log.info("[Refund] 다른 처리가 먼저 PG 취소 확인을 기록함: refundId={}", refund.refundId());
+            log.info("event=REFUND_SKIPPED refundId={} reason=\"다른 처리가 먼저 PG 취소 확인을 기록\"", refund.refundId());
             return Optional.empty();
         }
 
@@ -199,7 +203,7 @@ public class RefundProcessor {
         switch (result) {
             case SUCCEEDED -> {
                 refundCommandService.recordPgCancelled(refund.refundId(), refund.pgPendingSince(), Instant.now());
-                log.info("[Refund] PG 취소 완료 확인: refundId={}, pgId={}, amount={}",
+                log.info("event=REFUND_CONFIRMED refundId={} pgId={} amount={}",
                         refund.refundId(), refund.pgId(), refund.amount());
             }
             case FAILED -> {
@@ -211,7 +215,7 @@ public class RefundProcessor {
                 RefundStatus status = refundCommandService.reschedulePgCheck(
                         refund.refundId(), refund.pgPendingSince(), Instant.now());
                 if (status == RefundStatus.DEAD) {
-                    log.error("[Refund] PG 취소 확인 기한 초과, 수동 확인 필요: refundId={}, pgId={}, cancellationId={}, amount={}",
+                    log.error("event=REFUND_CHECK_EXPIRED refundId={} pgId={} cancellationId={} amount={}",
                             refund.refundId(), refund.pgId(), refund.pgCancellationId(), refund.amount());
                 }
             }
@@ -241,13 +245,13 @@ public class RefundProcessor {
 
         Optional<PaymentCancellationResponse> requested = findRequestedCancellation(refund, pgPayment.get());
         if (requested.isPresent()) {
-            log.info("[Refund] 재시도 전 확인: 접수된 PG 취소가 있어 다시 보내지 않음: refundId={}, pgId={}, cancellationId={}",
+            log.info("event=REFUND_ALREADY_APPLIED refundId={} pgId={} cancellationId={} reason=\"접수된 PG 취소가 있음\"",
                     refund.refundId(), refund.pgId(), requested.get().cancellationId());
             return requested;
         }
 
         if (isCancelledAmountApplied(refund, pgPayment.get())) {
-            log.info("[Refund] 재시도 전 확인: PG 취소 누적 금액에 이미 반영됨: refundId={}, pgId={}, amount={}",
+            log.info("event=REFUND_ALREADY_APPLIED refundId={} pgId={} amount={} reason=\"PG 취소 누적 금액에 반영됨\"",
                     refund.refundId(), refund.pgId(), refund.amount());
             return Optional.of(new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED));
         }
@@ -261,13 +265,13 @@ public class RefundProcessor {
         try {
             pgPayment = paymentGateway.getPayment(refund.pgId());
         } catch (RuntimeException e) {
-            log.warn("[Refund] PG 취소 확인 조회 실패, 다시 확인 예정: refundId={}, pgId={}",
-                    refund.refundId(), refund.pgId(), e);
+            log.warn("event=REFUND_CHECK_FAILED refundId={} pgId={} errorCode={} reason=\"PG 결제 조회 실패\"",
+                    refund.refundId(), refund.pgId(), errorCodeOf(e), unexpectedOrNull(e));
             return GatewayCancellationStatus.REQUESTED;
         }
 
         if (pgPayment.isEmpty()) {
-            log.warn("[Refund] PG 취소 확인 중 PG 결제가 없음, 다시 확인 예정: refundId={}, pgId={}",
+            log.warn("event=REFUND_CHECK_FAILED refundId={} pgId={} reason=\"PG 결제 없음\"",
                     refund.refundId(), refund.pgId());
             return GatewayCancellationStatus.REQUESTED;
         }
@@ -315,12 +319,12 @@ public class RefundProcessor {
     private void recordComplete(ClaimedRefund refund, PaymentCancellationResponse result) {
         try {
             refundCommandService.recordComplete(refund.refundId(), refund.attemptCount(), Instant.now());
-            log.info("[Refund] PG 취소 완료: refundId={}, pgId={}, amount={}",
+            log.info("event=REFUND_COMPLETED refundId={} pgId={} amount={}",
                     refund.refundId(), refund.pgId(), refund.amount());
         } catch (BusinessException e) {
             if (e.getErrorCode() == ErrorCode.REFUND_INVALID_STATUS_TRANSITION) {
                 // 취소 웹훅이 먼저 완료했거나, 멈춘 처리로 보고 다른 처리가 다시 점유한 경우
-                log.info("[Refund] 다른 처리가 먼저 기록해 건너뜀: refundId={}", refund.refundId());
+                log.info("event=REFUND_SKIPPED refundId={} reason=\"다른 처리가 먼저 기록\"", refund.refundId());
                 return;
             }
             recordCompletionFailure(refund, result, e);
@@ -333,7 +337,7 @@ public class RefundProcessor {
     // 확인 대기로 기록해 조회로 완료되게 한다. 그것도 실패하면 PROCESSING으로 남고, 멈춘 처리 기준 시간이 지나
     // 다시 점유될 때 재시도 전 확인(findAppliedCancellation)이 PG 취소 누적 금액으로 완료 처리한다.
     private void recordCompletionFailure(ClaimedRefund refund, PaymentCancellationResponse result, RuntimeException e) {
-        log.error("[Refund] PG 취소 성공 후 완료 기록 실패, 확인 대기로 전환: refundId={}, pgId={}, amount={}",
+        log.error("event=REFUND_COMPLETE_RECORD_FAILED refundId={} pgId={} amount={}",
                 refund.refundId(), refund.pgId(), refund.amount(), e);
         recordPgPending(refund, result);
     }
@@ -342,11 +346,11 @@ public class RefundProcessor {
         try {
             refundCommandService.recordPgPending(
                     refund.refundId(), refund.attemptCount(), result.cancellationId(), Instant.now());
-            log.info("[Refund] PG 취소 확정 대기, 조회로 확인 예정: refundId={}, pgId={}, cancellationId={}, status={}",
+            log.info("event=REFUND_DEFERRED refundId={} pgId={} cancellationId={} status={}",
                     refund.refundId(), refund.pgId(), result.cancellationId(), result.status());
         } catch (BusinessException e) {
             if (e.getErrorCode() == ErrorCode.REFUND_INVALID_STATUS_TRANSITION) {
-                log.info("[Refund] 다른 처리가 먼저 기록해 건너뜀: refundId={}", refund.refundId());
+                log.info("event=REFUND_SKIPPED refundId={} reason=\"다른 처리가 먼저 기록\"", refund.refundId());
                 return;
             }
             logPgPendingFailure(refund, result, e);
@@ -357,7 +361,7 @@ public class RefundProcessor {
 
     // PROCESSING으로 남아 멈춘 처리 기준 시간이 지나 다시 점유될 때 재시도 전 확인이 접수된 취소를 찾아 확인 대기로 기록한다.
     private void logPgPendingFailure(ClaimedRefund refund, PaymentCancellationResponse result, RuntimeException e) {
-        log.error("[Refund] PG 취소 확정 대기 기록 실패, 다시 점유될 때 확인 예정: refundId={}, pgId={}, cancellationId={}, amount={}",
+        log.error("event=REFUND_DEFER_RECORD_FAILED refundId={} pgId={} cancellationId={} amount={}",
                 refund.refundId(), refund.pgId(), result.cancellationId(), refund.amount(), e);
     }
 
@@ -373,7 +377,7 @@ public class RefundProcessor {
             if (recordException.getErrorCode() != ErrorCode.REFUND_INVALID_STATUS_TRANSITION) {
                 throw recordException;
             }
-            log.info("[Refund] 다른 처리가 먼저 결과를 기록해 실패 기록 건너뜀: refundId={}", refund.refundId());
+            log.info("event=REFUND_SKIPPED refundId={} reason=\"다른 처리가 먼저 결과를 기록\"", refund.refundId());
         }
     }
 
@@ -385,8 +389,9 @@ public class RefundProcessor {
 
     private void recordDead(ClaimedRefund refund, BusinessException e) {
         refundCommandService.recordDead(refund.refundId(), refund.attemptCount(), e.getMessage());
-        log.error("[Refund] PG에 이미 반영됐을 수 있어 재시도하지 않음, 수동 확인 필요: refundId={}, pgId={}, amount={}, errorCode={}",
-                refund.refundId(), refund.pgId(), refund.amount(), e.getErrorCode(), e);
+        // 예상된 PG 거절이고 PortOneClient가 거절 사유를 남기므로 스택 트레이스 없이 errorCode만 남긴다.
+        log.error("event=REFUND_CANCEL_REJECTED refundId={} pgId={} amount={} errorCode={}",
+                refund.refundId(), refund.pgId(), refund.amount(), e.getErrorCode().name());
     }
 
     private void recordFailure(ClaimedRefund refund, RuntimeException e) {
@@ -395,13 +400,27 @@ public class RefundProcessor {
         logFailureStatus(refund, status, e);
     }
 
+    // attemptCount는 이번 시도의 순번(첫 시도는 1)이다. retry는 재시도 예정이면 이어서 할 재시도 순번,
+    // 소진이면 실제로 한 재시도 횟수라 첫 시도를 빼고 센다.
     private void logFailureStatus(ClaimedRefund refund, RefundStatus status, RuntimeException e) {
         if (status == RefundStatus.DEAD) {
-            log.error("[Refund] PG 취소 최대 시도 초과, 수동 확인 필요: refundId={}, pgId={}, amount={}",
-                    refund.refundId(), refund.pgId(), refund.amount(), e);
+            log.error("event=REFUND_RETRY_EXHAUSTED refundId={} pgId={} amount={} retry={} errorCode={}",
+                    refund.refundId(), refund.pgId(), refund.amount(), refund.attemptCount() - 1,
+                    errorCodeOf(e), unexpectedOrNull(e));
             return;
         }
 
-        log.warn("[Refund] PG 취소 실패, 재시도 예정: refundId={}, pgId={}", refund.refundId(), refund.pgId(), e);
+        log.warn("event=REFUND_FAILED refundId={} pgId={} retry={} errorCode={}",
+                refund.refundId(), refund.pgId(), refund.attemptCount(), errorCodeOf(e), unexpectedOrNull(e));
+    }
+
+    // PG 연동 실패(BusinessException)는 PortOneClient가 원인 예외와 함께 이미 남겼으므로 errorCode만 남긴다.
+    // 예상하지 못한 예외만 스택 트레이스를 남긴다. 예외가 없으면(PG 조회로 실패 확인) errorCode는 빈 값이다.
+    private String errorCodeOf(RuntimeException e) {
+        return e instanceof BusinessException businessException ? businessException.getErrorCode().name() : "";
+    }
+
+    private RuntimeException unexpectedOrNull(RuntimeException e) {
+        return e instanceof BusinessException ? null : e;
     }
 }

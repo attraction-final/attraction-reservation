@@ -15,8 +15,10 @@ import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +32,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RefundService {
@@ -146,7 +149,14 @@ public class RefundService {
 
         tickets.forEach(Ticket::refund);
 
-        return refundRepository.save(refund).getId();
+        Long refundId = refundRepository.save(refund).getId();
+        // 환불 사유는 사용자가 입력한 문장이라 로그에 남기지 않는다.
+        String pgId = payment.getPgId();
+        Long userId = payment.getOrder().getUser().getId();
+        int amount = refund.getRefundAmount();
+        AfterCommit.run(() -> log.info("event=REFUND_REQUESTED refundId={} pgId={} userId={} amount={}",
+                refundId, pgId, userId, amount));
+        return refundId;
     }
 
     private Set<Long> orderItemIds(Payment payment) {

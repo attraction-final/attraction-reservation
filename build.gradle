@@ -32,6 +32,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // 외부 API 호출용 RestClient.Builder 자동 설정 (요청 메트릭·traceId 전파 포함)
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     
@@ -52,6 +54,12 @@ dependencies {
 
     // portone 연동
     implementation 'io.portone:server-sdk:0.24.0'
+
+    // 모니터링: Prometheus 메트릭, 로그 traceId(MDC)
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-micrometer-tracing-brave'
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-redis-test'

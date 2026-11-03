@@ -5,7 +5,7 @@ on:
     branches: [ main, dev, cd ]
     types: [opened, synchronize, reopened]
   push:
-    branches: [ main ]
+    branches: [ main, cd ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

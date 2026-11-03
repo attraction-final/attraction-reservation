@@ -13,8 +13,9 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -51,7 +52,29 @@ public class AttractionService {
                 request.durationMinutes(),
                 request.entranceMoveMinutes() // 추가
         );
-        Attraction savedAttraction = attractionRepository.save(attraction); // 생성한 엔티티를 Repository를 통해 저장, 저장 결과를 savedAttraction 변수에 담음
+        Attraction savedAttraction;
+        try {
+            savedAttraction = attractionRepository.saveAndFlush(attraction);
+        } catch (DataIntegrityViolationException e) {
+            Throwable throwable = e;
+
+            while (throwable != null) {
+                if (throwable instanceof ConstraintViolationException violation) {
+                    String constraintName = violation.getConstraintName();
+
+                    boolean isNameDuplicated = constraintName != null
+                            && (constraintName.equals("uk_attraction_name_active")
+                            || constraintName.endsWith(".uk_attraction_name_active")
+                    );
+
+                    if (isNameDuplicated) {
+                        throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+                    }
+                }
+                throwable = throwable.getCause();
+            }
+            throw e;
+        }
 
         // 추가
         log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",

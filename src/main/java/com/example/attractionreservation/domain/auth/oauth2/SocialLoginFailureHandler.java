@@ -12,8 +12,12 @@ import org.springframework.security.web.authentication.AuthenticationFailureHand
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.AuthenticationServiceException;
+
 import java.io.IOException;
 
+@Slf4j
 @Component
 @Profile("oauth")
 public class SocialLoginFailureHandler
@@ -43,6 +47,25 @@ public class SocialLoginFailureHandler
         SecurityContextHolder.clearContext();
 
         SocialLoginError error = resolveError(exception);
+
+        if (exception instanceof AuthenticationServiceException) {
+            log.error(
+                    "event=SOCIAL_LOGIN_POSTPROCESS_FAILED "
+                            + "method={} uri={} errorCode={}",
+                    request.getMethod(),
+                    request.getRequestURI(),
+                    error.name(),
+                    exception
+            );
+        } else {
+            log.info(
+                    "event=SOCIAL_AUTHENTICATION_REJECTED "
+                            + "method={} uri={} errorCode={}",
+                    request.getMethod(),
+                    request.getRequestURI(),
+                    error.name()
+            );
+        }
 
         // 제공자의 원본 오류 메시지 대신 서비스에서 정한 코드만 전달한다.
         String redirectUri = UriComponentsBuilder

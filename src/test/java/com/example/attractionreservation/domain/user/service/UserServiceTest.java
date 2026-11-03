@@ -22,6 +22,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.sql.SQLException;
 import java.util.Optional;
@@ -42,6 +43,9 @@ class UserServiceTest {
     private PasswordEncoder passwordEncoder;
     private UserService userService;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
@@ -49,7 +53,8 @@ class UserServiceTest {
         userService = new UserService(
                 userRepository,
                 passwordEncoder,
-                refreshTokenRepository
+                refreshTokenRepository,
+                eventPublisher
         );
     }
 

@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.user.facade;
 
+import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepository;
 import com.example.attractionreservation.domain.user.service.UserWithdrawalService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,8 @@ public class UserWithdrawalFacade {
     }
 
     private void deleteRefreshToken(Long userId) {
+        DataAccessException lastException = null;
+
         for (int attempt = 1;
              attempt <= TOKEN_DELETE_MAX_ATTEMPTS;
              attempt++) {
@@ -33,16 +36,19 @@ public class UserWithdrawalFacade {
                 refreshTokenRepository.delete(userId);
                 return;
             } catch (DataAccessException exception) {
-                if (attempt == TOKEN_DELETE_MAX_ATTEMPTS) {
-                    // 삭제 장애가 이미 완료된 탈퇴의 성공 응답을 막지 않게 한다.
-                    log.error(
-                            "탈퇴 회원의 토큰 삭제 실패: userId={}, attempts={}",
-                            userId,
-                            attempt,
-                            exception
-                    );
-                }
+                lastException = exception;
             }
         }
+
+        // 모든 시도가 실패한 경우에만 반복문 밖에서 한 번 기록한다.
+        // 이미 완료된 DB 탈퇴의 성공 응답은 유지한다.
+        log.error(
+                "event=USER_REFRESH_TOKEN_DELETE_FAILED "
+                        + "userId={} target=redis retry={} errorCode={}",
+                userId,
+                TOKEN_DELETE_MAX_ATTEMPTS - 1,
+                ErrorCode.INTERNAL_SERVER_ERROR.name(),
+                lastException
+        );
     }
 }

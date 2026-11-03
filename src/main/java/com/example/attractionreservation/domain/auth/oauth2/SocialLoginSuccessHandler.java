@@ -14,6 +14,7 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.security.authentication.AuthenticationServiceException;
 
 import java.io.IOException;
 
@@ -73,16 +74,14 @@ public class SocialLoginSuccessHandler
 
         } catch (RuntimeException exception) {
             // DB·Redis 오류 등으로 처리가 완료되지 않으면 성공으로 응답하지 않는다.
-            // 개인정보나 원본 로그인 코드는 로그에 남기지 않는다.
-            log.error(
-                    "소셜 로그인 후처리 실패: {}",
-                    exception.getClass().getSimpleName()
-            );
-
+            // 원인은 실패 처리기로 전달하고 로그는 그곳에서 한 번 기록한다.
             failureHandler.onAuthenticationFailure(
                     request,
                     response,
-                    SocialLoginError.AUTHENTICATION_FAILED.toException()
+                    new AuthenticationServiceException(
+                            "소셜 로그인 후처리 실패",
+                            exception
+                    )
             );
             return;
         }

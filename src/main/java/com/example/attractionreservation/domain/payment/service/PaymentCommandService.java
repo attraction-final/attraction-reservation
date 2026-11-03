@@ -8,16 +8,20 @@ import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentCommandService {
     private static final String CANCELLED_PAYMENT_REASON = "취소된 주문의 결제";
+    private static final String PG_FAILED_REASON = "PG 결제 실패";
 
     private final PaymentRepository paymentRepository;
     private final PaymentCompensationService paymentCompensationService;
@@ -63,6 +67,7 @@ public class PaymentCommandService {
         if (payment.getStatus() == PaymentStatus.CANCELLED) {
             if (isCancelledWithoutCompensation(payment)) {
                 paymentCompensationService.saveCompensatingEvent(pgId, pgAmount, CANCELLED_PAYMENT_REASON);
+                logCompensationRequested(payment, pgAmount, CANCELLED_PAYMENT_REASON);
             }
             return ConfirmPaymentResponse.from(payment);
         }
@@ -74,6 +79,11 @@ public class PaymentCommandService {
         // 결제 승인 후 티켓 발급
         ticketService.issueTickets(payment.getOrder());
 
+        Long orderId = payment.getOrder().getId();
+        Long userId = payment.getOrder().getUser().getId();
+        int amount = payment.getAmount();
+        AfterCommit.run(() -> log.info("event=PAYMENT_APPROVED pgId={} orderId={} userId={} amount={}",
+                pgId, orderId, userId, amount));
         return ConfirmPaymentResponse.from(payment);
     }
 
@@ -87,7 +97,7 @@ public class PaymentCommandService {
      */
     @Transactional
     public boolean failPayment(String pgId) {
-        return markAsFailedIfPending(getPaymentByPgIdForUpdate(pgId));
+        return markAsFailedIfPending(getPaymentByPgIdForUpdate(pgId), PG_FAILED_REASON);
     }
 
     /**
@@ -105,15 +115,16 @@ public class PaymentCommandService {
     @Transactional
     public boolean failPaymentWithCompensation(String pgId, Long pgAmount, String reason) {
         Payment payment = getPaymentByPgIdForUpdate(pgId);
-        if (!markAsFailedIfPending(payment) && !isCancelledWithoutCompensation(payment)) {
+        if (!markAsFailedIfPending(payment, reason) && !isCancelledWithoutCompensation(payment)) {
             return false;
         }
 
         paymentCompensationService.saveCompensatingEvent(pgId, pgAmount, reason);
+        logCompensationRequested(payment, pgAmount, reason);
         return true;
     }
 
-    private boolean markAsFailedIfPending(Payment payment) {
+    private boolean markAsFailedIfPending(Payment payment, String reason) {
         if (payment.getStatus() != PaymentStatus.PENDING) {
             return false;
         }
@@ -124,7 +135,21 @@ public class PaymentCommandService {
         // 재고 복구
         ticketProductService.updateTicketProductsStockIncrease(payment.getOrder().getQuantityByTicketProductId());
 
+        // 서버 오류가 아니라 결제를 실패 상태로 바꾼 비즈니스 이벤트라 PAYMENT_FAILED(서버 오류 예시)와 구분한다.
+        String pgId = payment.getPgId();
+        Long orderId = payment.getOrder().getId();
+        Long userId = payment.getOrder().getUser().getId();
+        AfterCommit.run(() -> log.info("event=PAYMENT_MARKED_FAILED pgId={} orderId={} userId={} reason=\"{}\"",
+                pgId, orderId, userId, reason));
         return true;
+    }
+
+    private void logCompensationRequested(Payment payment, Long amount, String reason) {
+        String pgId = payment.getPgId();
+        Long orderId = payment.getOrder().getId();
+        Long userId = payment.getOrder().getUser().getId();
+        AfterCommit.run(() -> log.info("event=PAYMENT_COMPENSATION_REQUESTED pgId={} orderId={} userId={} amount={} reason=\"{}\"",
+                pgId, orderId, userId, amount, reason));
     }
 
     // 사용자가 취소한 결제는 PG 결제가 남아 있을 수 있다. 보상 요청은 결제당 하나(pg_id UNIQUE)라 이미 있으면 만들지 않는다.

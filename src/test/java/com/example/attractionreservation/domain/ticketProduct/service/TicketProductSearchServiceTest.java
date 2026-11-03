@@ -58,6 +58,7 @@ class TicketProductSearchServiceTest {
                 TicketProductStatus.ON_SALE
         );
         ReflectionTestUtils.setField(product, "id", 10L);
+        ReflectionTestUtils.setField(product, "version", 3L);
 
         Page<TicketProduct> products =
                 new PageImpl<>(List.of(product), pageable, 3);
@@ -81,7 +82,8 @@ class TicketProductSearchServiceTest {
                         TicketType.ALL_DAY,
                         50000,
                         "테스트 상품 설명",
-                        TicketProductStatus.ON_SALE
+                        TicketProductStatus.ON_SALE,
+                        3L
                 )
         );
         assertThat(result.getNumber()).isEqualTo(1);

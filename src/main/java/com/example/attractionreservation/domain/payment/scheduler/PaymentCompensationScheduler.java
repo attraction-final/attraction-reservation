@@ -7,6 +7,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * 즉시 시도에 실패했거나 시도 전에 서버가 종료된 PG 보상 취소 요청을 주기적으로 재시도한다.
  * 이전 실행이 끝난 뒤 fixed-delay만큼 기다리므로 실행이 겹치지 않는다.
@@ -35,11 +37,17 @@ public class PaymentCompensationScheduler {
     // 30초마다 실행
     @Scheduled(fixedDelayString = "${payment.compensation.scheduler.fixed-delay:30s}")
     public void processPendingCompensations() {
+        long startedAt = System.nanoTime();
         try {
-            paymentCompensationProcessor.processPending(batchSize, pgCheckBatchSize);
+            int count = paymentCompensationProcessor.processPending(batchSize, pgCheckBatchSize);
+            // 처리 대상이 없는 주기는 남기지 않는다.
+            if (count > 0) {
+                log.info("event=PAYMENT_COMPENSATION_BATCH_COMPLETED count={} durationMs={}",
+                        count, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt));
+            }
         } catch (RuntimeException e) {
             // 처리 대상 조회 실패 등. 다음 주기에 다시 시도한다.
-            log.error("[Compensation] 스케줄러 실행 실패", e);
+            log.error("event=PAYMENT_COMPENSATION_BATCH_FAILED", e);
         }
     }
 }

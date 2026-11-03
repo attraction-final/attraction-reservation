@@ -83,6 +83,11 @@ public class SecurityConfig {
                         // PortOne 웹훅은 사용자 토큰 없이 호출되며, 요청 서명으로 검증한다.
                         .requestMatchers(HttpMethod.POST, "/api/payments/webhooks/portone").permitAll()
 
+                        // 헬스 체크와 Prometheus 메트릭 수집은 인증 없이 접근할 수 있다.
+                        // actuator는 관리 포트(management.server.port)에서만 응답하고, 그 포트의 접근은 보안 그룹으로 제한한다.
+                        // 관리 포트에도 이 필터 체인이 적용되므로 permitAll이 없으면 수집이 401로 실패한다.
+                        .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/prometheus").permitAll()
+
                         // 관리자 전용 API는 ADMIN 권한이 있는 회원만 접근할 수 있다.
                         .requestMatchers("/api/admin/**").hasRole(ADMIN_ROLE)
 

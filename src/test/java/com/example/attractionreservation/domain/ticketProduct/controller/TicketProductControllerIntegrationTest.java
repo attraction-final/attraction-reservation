@@ -4,11 +4,16 @@ import com.example.attractionreservation.domain.ticketProduct.entity.TicketProdu
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import java.util.Map;
+import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -37,6 +43,9 @@ class TicketProductControllerIntegrationTest {
 
     @Autowired
     private TicketProductRepository ticketProductRepository;
+
+    @Autowired
+    private TicketProductService ticketProductService;
 
     @AfterEach
     void tearDown() {
@@ -259,7 +268,8 @@ class TicketProductControllerIntegrationTest {
                 "price", 55000,
                 "description", "수정된 설명",
                 "saleStatus", "ON_SALE",
-                "stock", 80
+                "stock", 80,
+                "version", product.getVersion()
         );
 
         // when & then
@@ -276,7 +286,8 @@ class TicketProductControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.price").value(55000))
                 .andExpect(jsonPath("$.data.description").value("수정된 설명"))
                 .andExpect(jsonPath("$.data.stock").value(80))
-                .andExpect(jsonPath("$.data.saleStatus").value("ON_SALE"));
+                .andExpect(jsonPath("$.data.saleStatus").value("ON_SALE"))
+                .andExpect(jsonPath("$.data.version").value(product.getVersion() + 1));
 
         // DB 반영 검증
         TicketProduct updatedProduct = ticketProductRepository
@@ -290,6 +301,77 @@ class TicketProductControllerIntegrationTest {
         assertThat(updatedProduct.getStatus())
                 .isEqualTo(TicketProductStatus.ON_SALE);
         assertThat(updatedProduct.getType()).isEqualTo(TicketType.ALL_DAY);
+        assertThat(updatedProduct.getVersion()).isEqualTo(product.getVersion() + 1);
         assertThat(ticketProductRepository.count()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {-1})
+    @DisplayName("수정 요청의 version이 누락되거나 음수이면 400을 반환하고 상품을 변경하지 않는다")
+    void updateTicketProduct_InvalidVersion_ReturnsBadRequest(Long version) throws Exception {
+        // given
+        TicketProduct product = createVersionTestProduct();
+        Map<String, Object> request = createUpdateRequest(version);
+
+        // when
+        var result = mockMvc.perform(put("/api/admin/ticket-products/{ticketProductId}", product.getId())
+                .with(user("test-admin").roles("ADMIN"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)));
+
+        // then
+        result.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data.version").exists());
+        TicketProduct actual = ticketProductRepository.findById(product.getId()).orElseThrow();
+        assertThat(actual.getName()).isEqualTo(product.getName());
+        assertThat(actual.getPrice()).isEqualTo(product.getPrice());
+        assertThat(actual.getStock()).isEqualTo(product.getStock());
+        assertThat(actual.getVersion()).isEqualTo(product.getVersion());
+    }
+
+    @Test
+    @DisplayName("재고 복구 이전 version으로 수정하면 409를 반환하고 복구된 재고를 유지한다")
+    void updateTicketProduct_StaleVersion_ReturnsConflict() throws Exception {
+        // given
+        TicketProduct product = createVersionTestProduct();
+        Map<String, Object> request = createUpdateRequest(product.getVersion());
+        ticketProductService.updateTicketProductsStockIncrease(Map.of(product.getId(), 2));
+        TicketProduct restored = ticketProductRepository.findById(product.getId()).orElseThrow();
+        assertThat(restored.getVersion()).isGreaterThan(product.getVersion());
+
+        // when
+        var result = mockMvc.perform(put("/api/admin/ticket-products/{ticketProductId}", product.getId())
+                .with(user("test-admin").roles("ADMIN"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)));
+
+        // then
+        result.andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(ErrorCode.CONCURRENT_UPDATE_CONFLICT.getMessage()));
+        TicketProduct actual = ticketProductRepository.findById(product.getId()).orElseThrow();
+        assertThat(actual.getName()).isEqualTo(product.getName());
+        assertThat(actual.getPrice()).isEqualTo(product.getPrice());
+        assertThat(actual.getStock()).isEqualTo(102);
+        assertThat(actual.getVersion()).isEqualTo(restored.getVersion());
+    }
+
+    private TicketProduct createVersionTestProduct() {
+        return ticketProductRepository.save(new TicketProduct(
+                "기존 상품", 50000, "기존 설명", TicketType.ALL_DAY, 100, TicketProductStatus.ON_SALE
+        ));
+    }
+
+    private Map<String, Object> createUpdateRequest(Long version) {
+        Map<String, Object> request = new HashMap<>(Map.of(
+                "name", "수정 상품", "price", 60000, "description", "수정 설명",
+                "saleStatus", "ON_SALE", "stock", 80
+        ));
+        if (version != null) {
+            request.put("version", version);
+        }
+        return request;
     }
 }

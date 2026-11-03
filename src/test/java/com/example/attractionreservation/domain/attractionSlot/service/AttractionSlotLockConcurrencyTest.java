@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 @Import(TestcontainersConfiguration.class)
 class AttractionSlotLockConcurrencyTest {
+    private static final Long ADMIN_ID = 1L; // 로그용 관리자 ID
 
     private static final LocalDate TOMORROW = KstTime.now().toLocalDate().plusDays(1);
 
@@ -72,7 +73,7 @@ class AttractionSlotLockConcurrencyTest {
         Long slotId = createSlot(5, 3); // 정원 5, 예약 3
 
         Future<?> customer = runSecondBeforeFirstCommits(
-                () -> attractionSlotService.updateAttractionSlotCapacity(
+                () -> attractionSlotService.updateAttractionSlotCapacity(ADMIN_ID, 
                         slotId, new UpdateAttractionSlotCapacityRequest(6)),   // 관리자: 정원 5 → 6
                 () -> attractionSlotService.tryReservationCapacity(slotId));  // 손님: 예약 +1
 
@@ -89,7 +90,7 @@ class AttractionSlotLockConcurrencyTest {
         Long slotId = createSlot(5, 0); // 예약 0명이라 삭제 가능한 슬롯
 
         Future<?> customer = runSecondBeforeFirstCommits(
-                () -> attractionSlotService.deleteAttractionSlot(slotId),
+                () -> attractionSlotService.deleteAttractionSlot(ADMIN_ID, slotId),
                 () -> attractionSlotService.tryReservationCapacity(slotId));
 
         assertFailsWith(customer, ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
@@ -105,9 +106,9 @@ class AttractionSlotLockConcurrencyTest {
     @DisplayName("두 관리자가 겹치는 슬롯을 동시에 등록하면 하나만 저장된다")
     void create_OverlappingAtSameTime_SavesOnlyOne() {
         Future<?> secondAdmin = runSecondBeforeFirstCommits(
-                () -> attractionSlotService.createAttractionSlot(attractionId,
+                () -> attractionSlotService.createAttractionSlot(ADMIN_ID, attractionId,
                         new CreateAttractionSlotRequest(TOMORROW.atTime(10, 0), 20)),  // 10:00~10:10
-                () -> attractionSlotService.createAttractionSlot(attractionId,
+                () -> attractionSlotService.createAttractionSlot(ADMIN_ID, attractionId,
                         new CreateAttractionSlotRequest(TOMORROW.atTime(10, 5), 20))); // 10:05~10:15 (겹침)
 
         assertFailsWith(secondAdmin, ErrorCode.SLOT_TIME_OVERLAP);

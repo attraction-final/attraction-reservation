@@ -15,6 +15,7 @@ import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -43,7 +44,7 @@ public class PaymentCompensationProcessor {
             paymentCompensationService.findIdByPgId(pgId).ifPresent(this::process);
         } catch (RuntimeException e) {
             // 즉시 시도가 실패해도 보상 요청은 남아 있으므로 스케줄러가 이어받는다.
-            log.error("[Compensation] 즉시 처리 중 예기치 않은 오류: pgId={}", pgId, e);
+            log.error("event=PAYMENT_COMPENSATION_ABORTED pgId={}", pgId, e);
         }
     }
 
@@ -52,23 +53,27 @@ public class PaymentCompensationProcessor {
      *
      * @param limit        한 번에 처리할 PG 취소 대상 수
      * @param pgCheckLimit 한 번에 확인할 PG_PENDING 수. 확인마다 PG를 조회하므로 PG 장애로 쌓여도 PG 취소 처리가 밀리지 않게 따로 제한한다
+     * @return 이번 주기에 PG 취소와 PG 취소 확인을 시도한 보상 요청 수의 합
      */
-    public void processPending(int limit, int pgCheckLimit) {
-        for (Long compensationId : paymentCompensationService.findProcessableIds(Instant.now(), limit)) {
+    public int processPending(int limit, int pgCheckLimit) {
+        List<Long> processableIds = paymentCompensationService.findProcessableIds(Instant.now(), limit);
+        for (Long compensationId : processableIds) {
             try {
                 process(compensationId);
             } catch (RuntimeException e) {
-                log.error("[Compensation] 처리 중 예기치 않은 오류: compensationId={}", compensationId, e);
+                log.error("event=PAYMENT_COMPENSATION_ABORTED compensationId={}", compensationId, e);
             }
         }
 
-        for (Long compensationId : paymentCompensationService.findPgCheckableIds(Instant.now(), pgCheckLimit)) {
+        List<Long> pgCheckableIds = paymentCompensationService.findPgCheckableIds(Instant.now(), pgCheckLimit);
+        for (Long compensationId : pgCheckableIds) {
             try {
                 confirmPending(compensationId);
             } catch (RuntimeException e) {
-                log.error("[Compensation] PG 취소 확인 중 예기치 않은 오류: compensationId={}", compensationId, e);
+                log.error("event=PAYMENT_COMPENSATION_CHECK_ABORTED compensationId={}", compensationId, e);
             }
         }
+        return processableIds.size() + pgCheckableIds.size();
     }
 
     // 점유 → PG 취소 → 결과 기록
@@ -78,7 +83,7 @@ public class PaymentCompensationProcessor {
             claimed = paymentCompensationService.claim(compensationId, Instant.now());
         } catch (PessimisticLockingFailureException e) {
             // 즉시 시도와 스케줄러, 또는 다른 인스턴스가 같은 요청을 잠그고 있으면 그쪽에 맡긴다.
-            log.info("[Compensation] 다른 처리가 점유 중이라 건너뜀: compensationId={}", compensationId);
+            log.info("event=PAYMENT_COMPENSATION_SKIPPED compensationId={} reason=\"다른 처리가 점유 중\"", compensationId);
             return;
         }
 
@@ -95,7 +100,7 @@ public class PaymentCompensationProcessor {
 
             if (result.isSucceeded()) {
                 paymentCompensationService.recordDone(compensationId, compensation.attemptCount(), Instant.now());
-                log.info("[Compensation] PG 보상 취소 완료: compensationId={}, pgId={}, amount={}",
+                log.info("event=PAYMENT_COMPENSATION_COMPLETED compensationId={} pgId={} amount={}",
                         compensationId, compensation.pgId(), compensation.amount());
                 return;
             }
@@ -103,12 +108,12 @@ public class PaymentCompensationProcessor {
             // REQUESTED·UNKNOWN: 취소가 반영됐을 수 있으므로 다시 보내지 않고 조회로 확정한다.
             paymentCompensationService.recordPgPending(
                     compensationId, compensation.attemptCount(), result.cancellationId(), Instant.now());
-            log.info("[Compensation] PG 취소 확정 대기, 조회로 확인 예정: compensationId={}, pgId={}, cancellationId={}, status={}",
+            log.info("event=PAYMENT_COMPENSATION_DEFERRED compensationId={} pgId={} cancellationId={} status={}",
                     compensationId, compensation.pgId(), result.cancellationId(), result.status());
         } catch (BusinessException e) {
             if (e.getErrorCode() == ErrorCode.PAYMENT_COMPENSATION_INVALID_STATUS_TRANSITION) {
                 // 멈춘 행으로 보고 다시 점유한 사이 다른 처리가 먼저 결과를 기록했거나 다시 점유한 경우
-                log.info("[Compensation] 다른 처리가 먼저 기록해 건너뜀: compensationId={}", compensationId);
+                log.info("event=PAYMENT_COMPENSATION_SKIPPED compensationId={} reason=\"다른 처리가 먼저 기록\"", compensationId);
                 return;
             }
             recordFailure(compensation, e);
@@ -135,7 +140,7 @@ public class PaymentCompensationProcessor {
                 case SUCCEEDED -> {
                     paymentCompensationService.recordPgCancelled(
                             compensationId, compensation.pgPendingSince(), Instant.now());
-                    log.info("[Compensation] PG 취소 완료 확인: compensationId={}, pgId={}, amount={}",
+                    log.info("event=PAYMENT_COMPENSATION_CONFIRMED compensationId={} pgId={} amount={}",
                             compensationId, compensation.pgId(), compensation.amount());
                 }
                 case FAILED -> {
@@ -147,7 +152,7 @@ public class PaymentCompensationProcessor {
                     CompensationStatus status = paymentCompensationService.reschedulePgCheck(
                             compensationId, compensation.pgPendingSince(), Instant.now());
                     if (status == CompensationStatus.DEAD) {
-                        log.error("[Compensation] PG 취소 확인 기한 초과, 수동 확인 필요: compensationId={}, pgId={}, cancellationId={}, amount={}",
+                        log.error("event=PAYMENT_COMPENSATION_CHECK_EXPIRED compensationId={} pgId={} cancellationId={} amount={}",
                                 compensationId, compensation.pgId(), compensation.pgCancellationId(), compensation.amount());
                     }
                 }
@@ -157,7 +162,8 @@ public class PaymentCompensationProcessor {
                 throw e;
             }
             // 다른 처리가 먼저 확인 결과를 기록했거나, 그 뒤 재취소로 새 PG_PENDING 주기가 된 경우
-            log.info("[Compensation] 다른 처리가 먼저 PG 취소 확인을 기록해 건너뜀: compensationId={}", compensationId);
+            log.info("event=PAYMENT_COMPENSATION_SKIPPED compensationId={} reason=\"다른 처리가 먼저 PG 취소 확인을 기록\"",
+                    compensationId);
         }
     }
 
@@ -181,14 +187,14 @@ public class PaymentCompensationProcessor {
         }
 
         if (pgPayment.get().isCancelled()) {
-            log.info("[Compensation] 재시도 전 확인: PG 결제가 이미 취소됨: compensationId={}, pgId={}",
+            log.info("event=PAYMENT_COMPENSATION_ALREADY_APPLIED compensationId={} pgId={} reason=\"PG 결제가 이미 취소됨\"",
                     compensation.id(), compensation.pgId());
             return Optional.of(new PaymentCancellationResponse(null, GatewayCancellationStatus.SUCCEEDED));
         }
 
         Optional<PaymentCancellationResponse> requested = pgPayment.get().findRequestedCancellation();
         requested.ifPresent(cancellation ->
-                log.info("[Compensation] 재시도 전 확인: 접수된 PG 취소가 있어 다시 보내지 않음: compensationId={}, pgId={}, cancellationId={}",
+                log.info("event=PAYMENT_COMPENSATION_ALREADY_APPLIED compensationId={} pgId={} cancellationId={} reason=\"접수된 PG 취소가 있음\"",
                         compensation.id(), compensation.pgId(), cancellation.cancellationId()));
         return requested;
     }
@@ -202,13 +208,13 @@ public class PaymentCompensationProcessor {
         try {
             pgPayment = paymentGateway.getPayment(compensation.pgId());
         } catch (RuntimeException e) {
-            log.warn("[Compensation] PG 취소 확인 조회 실패, 다시 확인 예정: compensationId={}, pgId={}",
-                    compensation.id(), compensation.pgId(), e);
+            log.warn("event=PAYMENT_COMPENSATION_CHECK_FAILED compensationId={} pgId={} errorCode={} reason=\"PG 결제 조회 실패\"",
+                    compensation.id(), compensation.pgId(), errorCodeOf(e), unexpectedOrNull(e));
             return GatewayCancellationStatus.REQUESTED;
         }
 
         if (pgPayment.isEmpty()) {
-            log.warn("[Compensation] PG 취소 확인 중 PG 결제가 없음, 다시 확인 예정: compensationId={}, pgId={}",
+            log.warn("event=PAYMENT_COMPENSATION_CHECK_FAILED compensationId={} pgId={} reason=\"PG 결제 없음\"",
                     compensation.id(), compensation.pgId());
             return GatewayCancellationStatus.REQUESTED;
         }
@@ -234,20 +240,33 @@ public class PaymentCompensationProcessor {
                 throw recordException;
             }
             // 이 처리가 멈춘 것으로 보고 다른 처리가 다시 점유했다. 늦은 실패 결과로 그 처리를 덮어쓰지 않는다.
-            log.info("[Compensation] 다른 처리가 다시 점유해 실패 기록 건너뜀: compensationId={}", compensation.id(), e);
+            log.info("event=PAYMENT_COMPENSATION_SKIPPED compensationId={} reason=\"다른 처리가 다시 점유\"", compensation.id());
             return;
         }
         logFailureStatus(compensation, status, e);
     }
 
+    // attemptCount는 이번 시도의 순번(첫 시도는 1)이다. retry는 재시도 예정이면 이어서 할 재시도 순번,
+    // 소진이면 실제로 한 재시도 횟수라 첫 시도를 빼고 센다.
     private void logFailureStatus(ClaimedCompensation compensation, CompensationStatus status, RuntimeException e) {
         if (status == CompensationStatus.DEAD) {
-            log.error("[Compensation] PG 보상 취소 최대 시도 초과, 수동 환불 필요: compensationId={}, pgId={}, amount={}",
-                    compensation.id(), compensation.pgId(), compensation.amount(), e);
+            log.error("event=PAYMENT_COMPENSATION_RETRY_EXHAUSTED compensationId={} pgId={} amount={} retry={} errorCode={}",
+                    compensation.id(), compensation.pgId(), compensation.amount(), compensation.attemptCount() - 1,
+                    errorCodeOf(e), unexpectedOrNull(e));
             return;
         }
 
-        log.warn("[Compensation] PG 보상 취소 실패, 재시도 예정: compensationId={}, pgId={}",
-                compensation.id(), compensation.pgId(), e);
+        log.warn("event=PAYMENT_COMPENSATION_FAILED compensationId={} pgId={} retry={} errorCode={}",
+                compensation.id(), compensation.pgId(), compensation.attemptCount(), errorCodeOf(e), unexpectedOrNull(e));
+    }
+
+    // PG 연동 실패(BusinessException)는 PortOneClient가 원인 예외와 함께 이미 남겼으므로 errorCode만 남긴다.
+    // 예상하지 못한 예외만 스택 트레이스를 남긴다. 예외가 없으면(PG 조회로 실패 확인) errorCode는 빈 값이다.
+    private String errorCodeOf(RuntimeException e) {
+        return e instanceof BusinessException businessException ? businessException.getErrorCode().name() : "";
+    }
+
+    private RuntimeException unexpectedOrNull(RuntimeException e) {
+        return e instanceof BusinessException ? null : e;
     }
 }

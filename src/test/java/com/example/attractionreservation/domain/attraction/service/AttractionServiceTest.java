@@ -33,6 +33,7 @@ import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class AttractionServiceTest {
+    private static final Long ADMIN_ID = 1L; // 로그용 관리자 ID
 
     @Mock
     private AttractionRepository attractionRepository;
@@ -96,7 +97,7 @@ class AttractionServiceTest {
         given(attractionRepository.save(any(Attraction.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         // when
-        CreateAttractionResponse response = attractionService.createAttraction(request);
+        CreateAttractionResponse response = attractionService.createAttraction(ADMIN_ID, request);
 
         // then
         assertThat(response.name()).isEqualTo("롤러코스터");
@@ -111,7 +112,7 @@ class AttractionServiceTest {
         given(attractionRepository.existsByNameAndDeletedAtIsNull("롤러코스터")).willReturn(true);
 
         // when & then
-        assertThatThrownBy(() -> attractionService.createAttraction(request))
+        assertThatThrownBy(() -> attractionService.createAttraction(ADMIN_ID, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
@@ -218,7 +219,7 @@ class AttractionServiceTest {
         UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, 12, null); // 수정: null 추가
 
         // when
-        SearchAttractionResponse response = attractionService.updateAttraction(1L, request);
+        SearchAttractionResponse response = attractionService.updateAttraction(ADMIN_ID, 1L, request);
 
         // then
         assertThat(response.name()).isEqualTo("슈퍼 롤러코스터");
@@ -240,7 +241,7 @@ class AttractionServiceTest {
         UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null, null); // 수정: null 추가
 
         // when & then
-        assertThatThrownBy(() -> attractionService.updateAttraction(1L, request))
+        assertThatThrownBy(() -> attractionService.updateAttraction(ADMIN_ID, 1L, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
@@ -260,7 +261,7 @@ class AttractionServiceTest {
         UpdateAttractionRequest request = new UpdateAttractionRequest("롤러코스터", "더 빨라진 코스터", null, null, null); // 수정: null 추가
 
         // when
-        SearchAttractionResponse response = attractionService.updateAttraction(1L, request);
+        SearchAttractionResponse response = attractionService.updateAttraction(ADMIN_ID, 1L, request);
 
         // then
         verify(attractionRepository, never()).existsByNameAndIdNotAndDeletedAtIsNull(any(), any());
@@ -276,7 +277,7 @@ class AttractionServiceTest {
         UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, null, null); // 수정: null 추가
 
         // when & then
-        assertThatThrownBy(() -> attractionService.updateAttraction(99L, request))
+        assertThatThrownBy(() -> attractionService.updateAttraction(ADMIN_ID, 99L, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
@@ -291,12 +292,12 @@ class AttractionServiceTest {
     void updateAttractionStatus_NoUpcomingReservations_Success() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         givenUpcomingReservationCount(1L, 0L);
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("MAINTENANCE");
 
         // when
-        UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(1L, request);
+        UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(ADMIN_ID, 1L, request);
 
         // then
         assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.MAINTENANCE);
@@ -311,11 +312,11 @@ class AttractionServiceTest {
     void updateAttractionStatus_ToOperating_DoesNotCheckReservations() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.MAINTENANCE);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("OPERATING");
 
         // when
-        UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(1L, request);
+        UpdateAttractionStatusResponse response = attractionService.updateAttractionStatus(ADMIN_ID, 1L, request);
 
         // then
         assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.OPERATING);
@@ -329,12 +330,12 @@ class AttractionServiceTest {
     void updateAttractionStatus_NonOperatingToNonOperating_ChecksReservations() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.MAINTENANCE);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         givenUpcomingReservationCount(1L, 0L);
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("SUSPENDED");
 
         // when
-        attractionService.updateAttractionStatus(1L, request);
+        attractionService.updateAttractionStatus(ADMIN_ID, 1L, request);
 
         // then
         assertThat(attraction.getOperationStatus()).isEqualTo(OperationStatus.SUSPENDED);
@@ -350,22 +351,22 @@ class AttractionServiceTest {
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("BROKEN");
 
         // when & then
-        assertThatThrownBy(() -> attractionService.updateAttractionStatus(1L, request))
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(ADMIN_ID, 1L, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INVALID_ATTRACTION_STATUS);
-        verify(attractionRepository, never()).findByIdAndDeletedAtIsNull(anyLong());
+        verify(attractionRepository, never()).findActiveByIdForUpdate(anyLong());
     }
 
     @Test
     @DisplayName("없거나 삭제된 어트랙션이면 ATTRACTION_NOT_FOUND 예외가 발생한다")
     void updateAttractionStatus_NotExists_ThrowsException() {
         // given
-        given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+        given(attractionRepository.findActiveByIdForUpdate(99L)).willReturn(Optional.empty());
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("MAINTENANCE");
 
         // when & then
-        assertThatThrownBy(() -> attractionService.updateAttractionStatus(99L, request))
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(ADMIN_ID, 99L, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
@@ -377,11 +378,11 @@ class AttractionServiceTest {
     void updateAttractionStatus_SameStatus_ThrowsException() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest("OPERATING");
 
         // when & then
-        assertThatThrownBy(() -> attractionService.updateAttractionStatus(1L, request))
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(ADMIN_ID, 1L, request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_STATUS_SAME);
@@ -396,12 +397,12 @@ class AttractionServiceTest {
     void updateAttractionStatus_HasUpcomingReservations_ThrowsException(String status) {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         givenUpcomingReservationCount(1L, 3L);
         UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest(status);
 
         // when & then
-        assertThatThrownBy(() -> attractionService.updateAttractionStatus(1L, request))
+        assertThatThrownBy(() -> attractionService.updateAttractionStatus(ADMIN_ID, 1L, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("이용 예정 예약이 3건 있어 상태를 변경할 수 없습니다. 예약을 먼저 처리해 주세요.")
                 .extracting("errorCode")
@@ -417,12 +418,12 @@ class AttractionServiceTest {
     void deleteAttraction_NoUpcomingReservations_SoftDeleted() {
         // given
         Attraction attraction = createRollerCoaster();
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         given(upcomingReservationReader.countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class)))
                 .willReturn(0L);
 
         // when
-        attractionService.deleteAttraction(1L);
+        attractionService.deleteAttraction(ADMIN_ID, 1L);
 
         // then
         assertThat(attraction.getDeletedAt()).isNotNull();   // 삭제 표시가 남았는지
@@ -435,10 +436,10 @@ class AttractionServiceTest {
     @DisplayName("존재하지 않는 어트랙션을 삭제하면 예외가 발생한다")
     void deleteAttraction_NotFound_ThrowsException() {
         // given
-        given(attractionRepository.findByIdAndDeletedAtIsNull(999L)).willReturn(Optional.empty());
+        given(attractionRepository.findActiveByIdForUpdate(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> attractionService.deleteAttraction(999L))
+        assertThatThrownBy(() -> attractionService.deleteAttraction(ADMIN_ID, 999L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
@@ -453,12 +454,12 @@ class AttractionServiceTest {
     void deleteAttraction_HasUpcomingReservations_ThrowsException() {
         // given
         Attraction attraction = createRollerCoaster();
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         given(upcomingReservationReader.countUpcomingReservationsByAttractionId(eq(1L), any(LocalDateTime.class)))
                 .willReturn(3L);
 
         // when & then
-        assertThatThrownBy(() -> attractionService.deleteAttraction(1L))
+        assertThatThrownBy(() -> attractionService.deleteAttraction(ADMIN_ID, 1L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
@@ -473,11 +474,11 @@ class AttractionServiceTest {
     void deleteAttraction_AlreadyDeleted_ThrowsNotFound() {
         // given
         // 이미 삭제된 어트랙션은 deletedAt이 채워져 있으므로
-        // findByIdAndDeletedAtIsNull 조회 결과가 비어 있다
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.empty());
+        // findActiveByIdForUpdate 조회 결과가 비어 있다
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> attractionService.deleteAttraction(1L))
+        assertThatThrownBy(() -> attractionService.deleteAttraction(ADMIN_ID, 1L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);

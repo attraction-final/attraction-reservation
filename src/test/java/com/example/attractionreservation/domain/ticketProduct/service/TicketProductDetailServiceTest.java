@@ -61,7 +61,8 @@ class TicketProductDetailServiceTest {
                         TicketType.ALL_DAY,
                         50000,
                         "하루 동안 이용 가능한 입장권",
-                        status
+                        status,
+                        3L
                 )
         );
 
@@ -94,7 +95,8 @@ class TicketProductDetailServiceTest {
                         TicketType.ALL_DAY,
                         50000,
                         "하루 동안 이용 가능한 입장권",
-                        TicketProductStatus.DELETED
+                        TicketProductStatus.DELETED,
+                        3L
                 )
         );
         assertThat(product.getStatus())
@@ -138,6 +140,7 @@ class TicketProductDetailServiceTest {
                 status
         );
         ReflectionTestUtils.setField(product, "id", id);
+        ReflectionTestUtils.setField(product, "version", 3L);
         return product;
     }
 }

@@ -21,6 +21,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -31,6 +33,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -38,7 +41,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PaymentServiceTest {
 
     private static final Long USER_ID = 1L;
@@ -137,6 +140,37 @@ class PaymentServiceTest {
         assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
         // 주문 취소는 호출한 주문 취소 흐름의 책임이다.
         assertEquals(OrderStatus.PENDING, payment.getOrder().getStatus());
+    }
+
+    @Test
+    @DisplayName("사용자가 결제를 취소하면 결제·주문·사용자 ID를 INFO 로그로 남긴다.")
+    void cancelledByUser_pending_LogCancelled(CapturedOutput output) {
+        //given
+        Payment payment = createPayment(USER_ID);
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentService.cancelledByUser(USER_ID, ORDER_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_CANCELLED")))
+                .singleElement().asString().contains("INFO")
+                .contains("pgId=" + payment.getPgId() + " orderId=" + ORDER_ID + " userId=" + USER_ID);
+    }
+
+    @Test
+    @DisplayName("취소할 수 없는 상태의 결제면 취소 로그를 남기지 않는다.")
+    void cancelledByUser_notPending_NotLogCancelled(CapturedOutput output) {
+        //given
+        Payment payment = createPaymentWithStatus(USER_ID, PaymentStatus.PAID);
+        given(paymentRepository.findWithLockByOrderId(ORDER_ID)).willReturn(Optional.of(payment));
+
+        //when
+        assertThatThrownBy(() -> paymentService.cancelledByUser(USER_ID, ORDER_ID))
+                .isInstanceOf(BusinessException.class);
+
+        //then
+        assertThat(output).doesNotContain("event=PAYMENT_CANCELLED");
     }
 
     @Test

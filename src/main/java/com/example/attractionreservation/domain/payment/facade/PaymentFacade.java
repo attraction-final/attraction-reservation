@@ -98,6 +98,8 @@ public class PaymentFacade {
         }
 
         if (!amountMatches(payment, pgPayment)) {
+            log.warn("event=PAYMENT_AMOUNT_MISMATCHED pgId={} amount={} pgAmount={}",
+                    payment.getPgId(), payment.getAmount(), pgPayment.totalAmount());
             // 결제 실패 처리(원장 CANCELLED면 생략)와 보상 요청을 함께 커밋한 뒤 PG 취소를 즉시 한 번 시도한다.
             // 즉시 시도가 실패해도 보상 요청이 남아 재시도되므로 여기서는 예외를 던지지 않는다.
             if (paymentCommandService.failPaymentWithCompensation(
@@ -105,7 +107,7 @@ public class PaymentFacade {
                 paymentCompensationProcessor.processByPgId(payment.getPgId());
             } else {
                 // 다른 요청이 먼저 실패 처리와 보상 요청까지 마친 경우
-                log.info("금액 불일치 결제가 이미 처리됨, 보상 요청 생략: pgId={}", payment.getPgId());
+                log.info("event=PAYMENT_COMPENSATION_SKIPPED pgId={} reason=\"금액 불일치 결제 이미 처리됨\"", payment.getPgId());
             }
 
             throw new BusinessException(ErrorCode.PAYMENT_INCORRECT_AMOUNT);

@@ -27,4 +27,8 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long>, A
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId AND a.deletedAt IS NULL")
     Optional<Attraction> findActiveByIdForUpdate(@Param("attractionId") Long attractionId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId")
+    Optional<Attraction> findByIdForUpdate(@Param("attractionId") Long attractionId);
 }

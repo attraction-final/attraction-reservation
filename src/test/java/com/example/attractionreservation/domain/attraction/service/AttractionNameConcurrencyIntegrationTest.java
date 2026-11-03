@@ -3,8 +3,10 @@ package com.example.attractionreservation.domain.attraction.service;
 import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
+import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.reservation.service.ReservationUpcomingReservationReader;
 import com.example.attractionreservation.global.config.JpaConfig;
@@ -33,6 +35,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -266,6 +269,105 @@ class AttractionNameConcurrencyIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("삭제된 어트랙션의 이름으로 신규 등록할 수 있고 기존 삭제 이력은 유지된다")
+    void createAttraction_DeletedNameExists_ReusesNameAndPreservesHistory() {
+        // given
+        Long deletedId = createFixture(attractionName);
+        attractionService.deleteAttraction(ADMIN_ID, deletedId);
+        NameState deletedState = readNameHistory().get(0);
+        assertThat(deletedState.status()).isEqualTo(OperationStatus.DELETED);
+        assertThat(deletedState.deletedAt()).isNotNull();
+        assertThat(deletedState.activeAttraction()).isNull();
+
+        // when
+        Long createdId = createFixture(attractionName);
+
+        // then
+        assertThat(createdId).isNotEqualTo(deletedId);
+        assertThat(readNameHistory()).containsExactlyInAnyOrder(
+                deletedState,
+                new NameState(createdId, attractionName, OperationStatus.OPERATING, null, 1)
+        );
+    }
+
+    @Test
+    @DisplayName("다른 어트랙션을 삭제된 이름으로 수정할 수 있고 기존 삭제 이력은 유지된다")
+    void updateAttraction_DeletedNameExists_ReusesNameAndPreservesHistory() {
+        // given
+        Long deletedId = createFixture(attractionName);
+        attractionService.deleteAttraction(ADMIN_ID, deletedId);
+        NameState deletedState = readNameHistory().get(0);
+        assertThat(deletedState.status()).isEqualTo(OperationStatus.DELETED);
+        assertThat(deletedState.deletedAt()).isNotNull();
+        assertThat(deletedState.activeAttraction()).isNull();
+        Long targetId = createFixture(attractionName + "-other");
+        UpdateAttractionRequest request = new UpdateAttractionRequest(
+                attractionName, null, null, null, null
+        );
+
+        // when
+        SearchAttractionResponse response = attractionService.updateAttraction(ADMIN_ID, targetId, request);
+
+        // then
+        assertThat(response.attractionId()).isEqualTo(targetId);
+        assertThat(response.name()).isEqualTo(attractionName);
+        assertThat(readNameHistory()).containsExactlyInAnyOrder(
+                deletedState,
+                new NameState(targetId, attractionName, OperationStatus.OPERATING, null, 1)
+        );
+    }
+
+    @Test
+    @DisplayName("재사용한 이름의 어트랙션을 다시 삭제해도 같은 이름으로 등록하고 여러 삭제 이력을 보존할 수 있다")
+    void createAttraction_ReusedNameDeletedAgain_PreservesMultipleDeletedRows() {
+        // given
+        Long firstId = createFixture(attractionName);
+        attractionService.deleteAttraction(ADMIN_ID, firstId);
+        Long secondId = createFixture(attractionName);
+        attractionService.deleteAttraction(ADMIN_ID, secondId);
+        List<NameState> deletedHistory = readNameHistory();
+        assertThat(deletedHistory).hasSize(2).allSatisfy(state -> {
+            assertThat(state.status()).isEqualTo(OperationStatus.DELETED);
+            assertThat(state.deletedAt()).isNotNull();
+            assertThat(state.activeAttraction()).isNull();
+        });
+
+        // when
+        Long thirdId = createFixture(attractionName);
+
+        // then
+        assertThat(thirdId).isNotIn(firstId, secondId);
+        List<NameState> history = readNameHistory();
+        assertThat(history).hasSize(3).containsAll(deletedHistory);
+        assertThat(history).contains(
+                new NameState(thirdId, attractionName, OperationStatus.OPERATING, null, 1)
+        );
+    }
+
+    private Long createFixture(String name) {
+        CreateAttractionResponse response = attractionService.createAttraction(
+                ADMIN_ID, new CreateAttractionRequest(name, "이름 재사용 테스트", "A구역", 10, 5)
+        );
+        fixtureIds.add(response.attractionId());
+        return response.attractionId();
+    }
+
+    private List<NameState> readNameHistory() {
+        // 별도 트랜잭션에서 삭제 이력을 포함해 읽어 DB가 계산한 보조 컬럼 값도 검증한다.
+        return Objects.requireNonNull(transactionTemplate.execute(status -> entityManager.createQuery("""
+                        SELECT a FROM Attraction a WHERE a.name = :name ORDER BY a.id
+                        """, Attraction.class)
+                .setParameter("name", attractionName)
+                .getResultList()
+                .stream()
+                .map(attraction -> new NameState(
+                        attraction.getId(), attraction.getName(), attraction.getOperationStatus(),
+                        attraction.getDeletedAt(), attraction.getActiveAttraction()
+                ))
+                .toList()));
+    }
+
     private RenameResult rename(Long attractionId, UpdateAttractionRequest request) {
         try {
             attractionService.updateAttraction(ADMIN_ID, attractionId, request);
@@ -303,5 +405,9 @@ class AttractionNameConcurrencyIntegrationTest {
     }
 
     private record RenameSnapshot(Long attractionId, String name) {
+    }
+
+    private record NameState(Long attractionId, String name, OperationStatus status,
+                             Instant deletedAt, Integer activeAttraction) {
     }
 }

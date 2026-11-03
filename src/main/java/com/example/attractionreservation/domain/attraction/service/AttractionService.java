@@ -54,25 +54,14 @@ public class AttractionService {
         );
         Attraction savedAttraction;
         try {
+            // DB 반영까지 시도하여 이름 중복 제약 위반을 이 catch에서 처리한다.
             savedAttraction = attractionRepository.saveAndFlush(attraction);
         } catch (DataIntegrityViolationException e) {
-            Throwable throwable = e;
-
-            while (throwable != null) {
-                if (throwable instanceof ConstraintViolationException violation) {
-                    String constraintName = violation.getConstraintName();
-
-                    boolean isNameDuplicated = constraintName != null
-                            && (constraintName.equals("uk_attraction_name_active")
-                            || constraintName.endsWith(".uk_attraction_name_active")
-                    );
-
-                    if (isNameDuplicated) {
-                        throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
-                    }
-                }
-                throwable = throwable.getCause();
+            // 동시 요청으로 사전 중복 검사를 통과했더라도 이름 중복은 기존 업무 예외로 변환한다.
+            if (isAttractionNameDuplicate(e)) {
+                throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
             }
+            // 다른 DB 제약 위반은 이름 중복으로 처리하지 않고 원래 예외를 전달한다.
             throw e;
         }
 
@@ -87,6 +76,31 @@ public class AttractionService {
         if (attractionRepository.existsByNameAndDeletedAtIsNull(name)) {
             throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
         }
+    }
+
+    // 원인 예외를 순회하여 어트랙션 이름 중복 제약 위반인지 판별한다.
+    // 등록·수정에서 함께 사용하며, 업무 예외로 변환하는 처리는 호출부에서 수행한다.
+    private boolean isAttractionNameDuplicate(DataIntegrityViolationException exception) {
+        Throwable throwable = exception;
+
+        while (throwable != null) {
+            // Spring 예외 안에 감싸진 Hibernate 예외에서 DB 제약 이름을 확인한다.
+            if (throwable instanceof ConstraintViolationException violation) {
+                String constraintName = violation.getConstraintName();
+
+                boolean isNameDuplicated = constraintName != null
+                        && (constraintName.equals("uk_attraction_name_active")
+                        || constraintName.endsWith(".uk_attraction_name_active")
+                );
+                if (isNameDuplicated) {
+                    return true;
+                }
+            }
+            // 현재 예외에서 찾지 못했으면 안쪽 원인을 확인한다.
+            throwable = throwable.getCause();
+        }
+        // 원인 예외를 모두 확인해도 이름 중복 제약을 찾지 못한 경우다.
+        return false;
     }
 
 
@@ -177,7 +191,14 @@ public class AttractionService {
                 request.entranceMoveMinutes() // 추가
         );
         // updatedAt 은 DB에 반영(flush)될 때 채워지므로, 응답 전에 먼저 반영한다.
-        attractionRepository.flush();
+        try {
+            attractionRepository.flush();
+        } catch (DataIntegrityViolationException e) {
+            if (isAttractionNameDuplicate(e)) {
+                throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+            }
+            throw e;
+        }
 
         // 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);

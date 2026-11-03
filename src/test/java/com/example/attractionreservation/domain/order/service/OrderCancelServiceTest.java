@@ -308,8 +308,8 @@ class OrderCancelServiceTest {
     }
 
     @Test
-    @DisplayName("재고 복구는 주문 상태 변경 후, 결제 취소 전에 실행한다")
-    void updateOrderByCancel_pendingOrder_restoresStockBetweenOrderAndPaymentCancel() {
+    @DisplayName("상품 잠금 보유 시간을 줄이도록 결제 취소 후 재고를 복구한다")
+    void updateOrderByCancel_pendingOrder_cancelsPaymentBeforeRestoringStock() {
         // given
         Order order = createOrder(1L);
         addItem(order, 10L, 2);
@@ -329,14 +329,14 @@ class OrderCancelServiceTest {
                 eq(OrderStatus.PENDING), eq(OrderStatus.CANCELLED),
                 any(Instant.class)
         );
-        executionOrder.verify(ticketProductService)
-                .updateTicketProductsStockIncrease(Map.of(10L, 2));
         executionOrder.verify(paymentService)
                 .cancelledByUser(1L, 101L);
+        executionOrder.verify(ticketProductService)
+                .updateTicketProductsStockIncrease(Map.of(10L, 2));
     }
 
     @Test
-    @DisplayName("다른 요청이 먼저 취소했다면 재고를 복구하지 않는다")
+    @DisplayName("결제 취소에 실패하면 예외를 전파한다")
     void updateOrderByCancel_updateConditionNoLongerMatches_doesNotRestoreStock() {
         // given
         Order order = createOrder(1L);

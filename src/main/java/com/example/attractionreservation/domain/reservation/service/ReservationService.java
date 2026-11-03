@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -73,7 +74,11 @@ public class ReservationService {
         }
 
         // 티켓 날짜와 슬롯 날짜 검증
-        AttractionSlot attractionSlot = attractionSlotService.findAttractionSlotById(request.slotId());
+        AttractionSlot attractionSlot = attractionSlotService.findSlot(request.slotId());
+        Attraction attraction = attractionSlotService.findAttractionByIdForUpdate(
+                attractionSlot.getAttraction().getId()
+        );
+
 
         /* 슬롯 시작, 종료 시간 */
         LocalDateTime slotStartsAt = attractionSlot.getStartsAt();
@@ -94,7 +99,7 @@ public class ReservationService {
         }
 
         // 어트랙션이 운영 중인지 확인
-        if (!attractionSlot.getAttraction().isOperating()) {
+        if (!attraction.isOperating()) {
             throw new BusinessException(ErrorCode.ATTRACTION_NOT_OPERATING);
         }
 

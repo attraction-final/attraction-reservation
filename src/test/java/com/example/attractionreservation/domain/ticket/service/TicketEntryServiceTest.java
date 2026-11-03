@@ -40,7 +40,7 @@ class TicketEntryServiceTest {
         Ticket ticket = mock(Ticket.class);
         Instant enteredAt = Instant.parse("2026-10-22T01:00:00Z");
 
-        when(ticketRepository.findByCode(code))
+        when(ticketRepository.findByCodeWithLock(code))
                 .thenReturn(Optional.of(ticket));
         when(ticket.getId()).thenReturn(1L);
         when(ticket.getCode()).thenReturn(code);
@@ -64,11 +64,12 @@ class TicketEntryServiceTest {
         assertThat(response.ticketCode()).isEqualTo(code);
         assertThat(response.status()).isEqualTo(TicketStatus.IN_USE);
         assertThat(response.enteredAt()).isEqualTo(enteredAt);
+        verify(ticketRepository).findByCodeWithLock(code);
     }
 
     @Test
     void 존재하지_않는_티켓이면_예외가_발생한다() {
-        when(ticketRepository.findByCode("unknown"))
+        when(ticketRepository.findByCodeWithLock("unknown"))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> ticketService.createTicketEntry(
@@ -84,7 +85,7 @@ class TicketEntryServiceTest {
     @Test
     void 엔티티의_입장거절_예외를_그대로_전달한다() {
         Ticket ticket = mock(Ticket.class);
-        when(ticketRepository.findByCode("TKT-test"))
+        when(ticketRepository.findByCodeWithLock("TKT-test"))
                 .thenReturn(Optional.of(ticket));
 
         doThrow(new BusinessException(

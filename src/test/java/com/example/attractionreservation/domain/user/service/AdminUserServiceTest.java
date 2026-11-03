@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.user.service;
 
+import com.example.attractionreservation.domain.user.event.UserStatusChangedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.example.attractionreservation.domain.auth.repository.RefreshTokenRepository;
 import com.example.attractionreservation.domain.user.dto.UpdateUserStatusRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserStatusResponse;
@@ -52,6 +54,9 @@ class AdminUserServiceTest {
 
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private UserService userService;
@@ -250,6 +255,7 @@ class AdminUserServiceTest {
 
         // when
         UpdateUserStatusResponse response = userService.updateUserStatus(
+                1L,
                 10L,
                 new UpdateUserStatusRequest(UserStatus.SUSPENDED)
         );
@@ -268,6 +274,14 @@ class AdminUserServiceTest {
         inOrder.verify(refreshTokenRepository).delete(10L);
 
         verifyNoInteractions(passwordEncoder);
+        verify(eventPublisher).publishEvent(
+                new UserStatusChangedEvent(
+                        1L,
+                        10L,
+                        UserStatus.ACTIVE,
+                        UserStatus.SUSPENDED
+                )
+        );
     }
 
     @ParameterizedTest
@@ -296,6 +310,7 @@ class AdminUserServiceTest {
 
         // when
         UpdateUserStatusResponse response = userService.updateUserStatus(
+                1L,
                 10L,
                 new UpdateUserStatusRequest(newStatus)
         );
@@ -306,6 +321,14 @@ class AdminUserServiceTest {
 
         verify(userRepository).flush();
         verifyNoInteractions(refreshTokenRepository, passwordEncoder);
+        verify(eventPublisher).publishEvent(
+                new UserStatusChangedEvent(
+                        1L,
+                        10L,
+                        currentStatus,
+                        newStatus
+                )
+        );
     }
 
     @Test
@@ -317,6 +340,7 @@ class AdminUserServiceTest {
 
         // when & then
         assertThatThrownBy(() -> userService.updateUserStatus(
+                1L,
                 10L,
                 new UpdateUserStatusRequest(UserStatus.SUSPENDED)
         )).isInstanceOfSatisfying(
@@ -328,6 +352,7 @@ class AdminUserServiceTest {
         verify(userRepository).findByIdForUpdate(10L);
         verifyNoMoreInteractions(userRepository);
         verifyNoInteractions(refreshTokenRepository);
+        verifyNoInteractions(eventPublisher);
     }
 
     @ParameterizedTest
@@ -356,6 +381,7 @@ class AdminUserServiceTest {
 
         // when & then
         assertThatThrownBy(() -> userService.updateUserStatus(
+                1L,
                 10L,
                 new UpdateUserStatusRequest(newStatus)
         )).isInstanceOfSatisfying(
@@ -368,6 +394,7 @@ class AdminUserServiceTest {
         verify(userRepository).findByIdForUpdate(10L);
         verifyNoMoreInteractions(userRepository);
         verifyNoInteractions(refreshTokenRepository);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -390,11 +417,13 @@ class AdminUserServiceTest {
 
         // when & then
         assertThatThrownBy(() -> userService.updateUserStatus(
+                1L,
                 10L,
                 new UpdateUserStatusRequest(UserStatus.SUSPENDED)
         )).isSameAs(failure);
 
         verifyNoInteractions(refreshTokenRepository);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -417,11 +446,13 @@ class AdminUserServiceTest {
 
         // when & then
         assertThatThrownBy(() -> userService.updateUserStatus(
+                1L,
                 10L,
                 new UpdateUserStatusRequest(UserStatus.SUSPENDED)
         )).isSameAs(failure);
 
         verify(userRepository).flush();
         verify(refreshTokenRepository).delete(10L);
+        verifyNoInteractions(eventPublisher);
     }
 }

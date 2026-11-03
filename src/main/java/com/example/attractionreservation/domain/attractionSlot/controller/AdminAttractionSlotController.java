@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -23,10 +24,11 @@ public class AdminAttractionSlotController {
     // 슬롯 등록
     @PostMapping("/attractions/{attractionId}/slots")
     public ResponseEntity<ApiResponse<CreateAttractionSlotResponse>> createAttractionSlot(
+            @AuthenticationPrincipal Long adminId,
             @PathVariable @Min(1) Long attractionId,
             @Valid @RequestBody CreateAttractionSlotRequest request) {
 
-        CreateAttractionSlotResponse response = attractionSlotService.createAttractionSlot(attractionId, request);
+        CreateAttractionSlotResponse response = attractionSlotService.createAttractionSlot(adminId, attractionId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok("슬롯 등록에 성공했습니다.", response));
     }
@@ -46,39 +48,43 @@ public class AdminAttractionSlotController {
     // 슬롯 시간 수정
     @PatchMapping("/slots/{slotId}/time")
     public ResponseEntity<ApiResponse<UpdateAttractionSlotTimeResponse>> updateAttractionSlotTime(
+            @AuthenticationPrincipal Long adminId,
             @PathVariable @Min(1) Long slotId,
             @Valid @RequestBody UpdateAttractionSlotTimeRequest request) {
 
-        UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(slotId, request);
+        UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(adminId, slotId, request);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 시간 수정에 성공했습니다.", response));
     }
 
     // 슬롯 정원 수정
     @PatchMapping("/slots/{slotId}/capacity")
     public ResponseEntity<ApiResponse<UpdateAttractionSlotCapacityResponse>> updateAttractionSlotCapacity(
+            @AuthenticationPrincipal Long adminId,
             @PathVariable @Min(1) Long slotId,
             @Valid @RequestBody UpdateAttractionSlotCapacityRequest request) {
 
         UpdateAttractionSlotCapacityResponse response =
-                attractionSlotService.updateAttractionSlotCapacity(slotId, request);
+                attractionSlotService.updateAttractionSlotCapacity(adminId, slotId, request);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 정원 수정에 성공했습니다.", response));
     }
 
     // 슬롯 상태 변경
     @PatchMapping("/slots/{slotId}/status")
     public ResponseEntity<ApiResponse<UpdateAttractionSlotStatusResponse>> updateAttractionSlotStatus(
+            @AuthenticationPrincipal Long adminId,
             @PathVariable @Min(1) Long slotId,
             @Valid @RequestBody UpdateAttractionSlotStatusRequest request) {
 
         UpdateAttractionSlotStatusResponse response =
-                attractionSlotService.updateAttractionSlotStatus(slotId, request);
+                attractionSlotService.updateAttractionSlotStatus(adminId, slotId, request);
         return ResponseEntity.ok(ApiResponse.ok("슬롯 상태 변경에 성공했습니다.", response));
     }
 
     // 슬롯 삭제(취소)
     @DeleteMapping("/slots/{slotId}")
-    public ResponseEntity<ApiResponse<Void>> deleteAttractionSlot(@PathVariable @Min(1) Long slotId) {
-        attractionSlotService.deleteAttractionSlot(slotId);
+    public ResponseEntity<ApiResponse<Void>> deleteAttractionSlot(@AuthenticationPrincipal Long adminId,
+                                                                  @PathVariable @Min(1) Long slotId) {
+        attractionSlotService.deleteAttractionSlot(adminId, slotId);
         return ResponseEntity.ok(ApiResponse.<Void>ok("슬롯 삭제에 성공했습니다.", null));
     }
 }

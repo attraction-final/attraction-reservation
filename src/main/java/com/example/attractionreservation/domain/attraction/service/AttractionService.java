@@ -1,15 +1,20 @@
 package com.example.attractionreservation.domain.attraction.service;
 
+import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
+import com.example.attractionreservation.global.config.CacheConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -23,6 +28,7 @@ import java.util.stream.Collectors;
 import java.util.Comparator;
 import java.util.function.BinaryOperator;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AttractionService {
@@ -30,10 +36,11 @@ public class AttractionService {
     private final AttractionRepository attractionRepository;
     private final UpcomingReservationReader upcomingReservationReader;
     private final AttractionSlotRepository attractionSlotRepository; // nextSlot 조회용
+    private final AttractionDetailCacheEvictor attractionDetailCacheEvictor; // ★ 추가: 상세 캐시 삭제용
 
     // 어트랙션 등록
     @Transactional
-    public CreateAttractionResponse createAttraction(CreateAttractionRequest request) {
+    public CreateAttractionResponse createAttraction(Long adminId, CreateAttractionRequest request) {
         validateNameNotDuplicated(request.name()); // 등록하려는 어트랙션 이름이 이미 존재하는지 검사
 
         // 요청 DTO의 데이터를 이용해 Attraction 엔티티를 생성, Attraction.create()는 프로젝트에서 별도로 정의한 생성 메서드
@@ -45,6 +52,10 @@ public class AttractionService {
                 request.entranceMoveMinutes() // 추가
         );
         Attraction savedAttraction = attractionRepository.save(attraction); // 생성한 엔티티를 Repository를 통해 저장, 저장 결과를 savedAttraction 변수에 담음
+
+        // 추가
+        log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
+                savedAttraction.getId(), adminId, savedAttraction.getDurationMinutes());
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
     }
@@ -107,6 +118,9 @@ public class AttractionService {
     }
 
     // 어트랙션 상세 조회
+    // ★ 처음엔 DB에서 읽고 Redis에 "attractionDetail::{id}" 로 저장, 다음부터는 Redis에서 꺼낸다
+    //   (없는 어트랙션이면 예외가 나므로 저장되지 않는다)
+    @Cacheable(cacheNames = CacheConfig.ATTRACTION_DETAIL, key = "#attractionId")
     @Transactional(readOnly = true)
     public SearchAttractionResponse findAttractionById(Long attractionId) {
         Attraction attraction = findActiveAttraction(attractionId);
@@ -120,8 +134,11 @@ public class AttractionService {
 
     // 어트랙션 수정
     @Transactional
-    public SearchAttractionResponse updateAttraction(Long attractionId, UpdateAttractionRequest request) {
+    public SearchAttractionResponse updateAttraction(Long adminId, Long attractionId, UpdateAttractionRequest request) {
         Attraction attraction = findActiveAttraction(attractionId);
+
+        // 추가: 바꾸기 전 소요 시간 보관
+        Integer previousDurationMinutes = attraction.getDurationMinutes();
 
         boolean isNameChanged = request.name() != null && !request.name().equals(attraction.getName());
         if (isNameChanged
@@ -139,15 +156,25 @@ public class AttractionService {
         // updatedAt 은 DB에 반영(flush)될 때 채워지므로, 응답 전에 먼저 반영한다.
         attractionRepository.flush();
 
+        // 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
+        attractionDetailCacheEvictor.evictAfterCommit(attractionId);
+
+        // 추가
+        log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
+                attractionId, adminId, previousDurationMinutes, attraction.getDurationMinutes());
+
         return SearchAttractionResponse.from(attraction);
     }
 
     // 어트랙션 운영 상태 변경
     @Transactional
-    public UpdateAttractionStatusResponse updateAttractionStatus(Long attractionId,
-                                                                 UpdateAttractionStatusRequest request) {
+    public UpdateAttractionStatusResponse updateAttractionStatus(
+            Long adminId,
+            Long attractionId,
+            UpdateAttractionStatusRequest request
+    ) {
         OperationStatus newStatus = OperationStatus.from(request.operationStatus());
-        Attraction attraction = findActiveAttraction(attractionId);
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
         OperationStatus previousStatus = attraction.getOperationStatus();
 
         if (previousStatus == newStatus) {
@@ -160,6 +187,13 @@ public class AttractionService {
 
         attraction.changeOperationStatus(newStatus);
         attractionRepository.flush();
+
+        // 커밋이 끝난 뒤 상세 캐시 삭제
+        attractionDetailCacheEvictor.evictAfterCommit(attractionId);
+
+        // 추가
+        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
+                attractionId, adminId, previousStatus, newStatus);
 
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
     }
@@ -177,9 +211,21 @@ public class AttractionService {
 
     // 어트랙션 삭제
     @Transactional
-    public void deleteAttraction(Long attractionId) {
-        Attraction attraction = findActiveAttraction(attractionId);
-        validateNoUpcomingReservations(attractionId, "삭제"); // BR-ATR-06
+    public void deleteAttraction(Long adminId, Long attractionId) {
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
+        validateNoUpcomingReservations(attractionId, "삭제");
         attraction.deleted();
+
+        attractionDetailCacheEvictor.evictAfterCommit(attractionId);
+
+        // 추가
+        log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId);
+    }
+
+    // 예약 - 잠금 전용 조회 메서드
+    private Attraction findActiveAttractionForUpdate(Long attractionId) {
+        return attractionRepository.findActiveByIdForUpdate(attractionId).orElseThrow(
+                () -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND)
+        );
     }
 }

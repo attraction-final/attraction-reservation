@@ -33,8 +33,10 @@ public class PortOneWebhookController {
         PortOneWebhookEvent event = portOneWebhookVerifier.verify(body, webhookId, signature, timestamp);
 
         boolean registered = webhookEventCommandService.register(webhookId, event.eventType(), event.pgId(), body);
-        if (!registered) {
-            log.info("[Webhook] 중복 수신: webhookId={}", webhookId);
+        if (registered) {
+            log.info("event=WEBHOOK_RECEIVED webhookId={} eventType={} pgId={}", webhookId, event.eventType(), event.pgId());
+        } else {
+            log.info("event=WEBHOOK_DUPLICATED webhookId={}", webhookId);
         }
 
         return ResponseEntity.ok(ApiResponse.ok());

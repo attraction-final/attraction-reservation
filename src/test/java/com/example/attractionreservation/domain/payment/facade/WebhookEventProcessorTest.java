@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -141,8 +142,56 @@ class WebhookEventProcessorTest {
         webhookEventProcessor.process(EVENT_ID);
 
         //then
-        assertThat(output).contains("최대 시도 초과, 수동 확인 필요").doesNotContain("재시도 예정");
-        assertThat(output.getAll().lines().filter(line -> line.contains("최대 시도 초과, 수동 확인 필요")))
+        assertThat(output).contains("event=WEBHOOK_RETRY_EXHAUSTED").doesNotContain("event=WEBHOOK_PROCESS_FAILED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_RETRY_EXHAUSTED")))
+                .singleElement().asString().contains("ERROR");
+    }
+
+    @Test
+    @DisplayName("PG 조회 실패 같은 예상된 실패는 스택 트레이스 없이 errorCode만 WARN으로 남긴다.")
+    void process_businessFailure_LogErrorCodeWithoutStackTrace(CapturedOutput output) {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+        given(webhookEventCommandService.recordFailure(eq(EVENT_ID), any(), any())).willReturn(WebhookStatus.FAILED);
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_PROCESS_FAILED")))
+                .singleElement().asString().contains("WARN").contains("errorCode=PAYMENT_GATEWAY_ERROR");
+        assertThat(output).doesNotContain("BusinessException");
+    }
+
+    @Test
+    @DisplayName("예상하지 못한 예외로 처리에 실패하면 원인을 알 수 있도록 스택 트레이스를 남긴다.")
+    void process_unexpectedFailure_LogStackTrace(CapturedOutput output) {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willThrow(new IllegalStateException("unexpected"));
+        given(webhookEventCommandService.recordFailure(eq(EVENT_ID), any(), any())).willReturn(WebhookStatus.FAILED);
+
+        //when
+        webhookEventProcessor.process(EVENT_ID);
+
+        //then
+        assertThat(output).contains("event=WEBHOOK_PROCESS_FAILED").contains("java.lang.IllegalStateException: unexpected");
+    }
+
+    @Test
+    @DisplayName("처리 실패를 기록하지 못하면 원래 실패 원인을 error 로그로 남기고 기록 실패 예외를 전파한다.")
+    void process_recordFailureFailed_LogOriginalCauseAndRethrow(CapturedOutput output) {
+        //given
+        given(webhookEventCommandService.claim(eq(EVENT_ID), any())).willReturn(Optional.of(PG_ID));
+        given(paymentFacade.syncPayment(PG_ID)).willThrow(new IllegalStateException("원래 처리 실패"));
+        CannotAcquireLockException recordError = new CannotAcquireLockException("실패 기록 락 충돌");
+        given(webhookEventCommandService.recordFailure(eq(EVENT_ID), any(), any())).willThrow(recordError);
+
+        //when & then
+        assertThatThrownBy(() -> webhookEventProcessor.process(EVENT_ID)).isSameAs(recordError);
+        assertThat(output).contains("event=WEBHOOK_FAILURE_RECORD_FAILED").contains("원래 처리 실패");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_FAILURE_RECORD_FAILED")))
                 .singleElement().asString().contains("ERROR");
     }
 

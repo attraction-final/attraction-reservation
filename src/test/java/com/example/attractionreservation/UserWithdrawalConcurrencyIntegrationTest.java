@@ -193,6 +193,7 @@ class UserWithdrawalConcurrencyIntegrationTest {
                     )
             );
             case "관리자정지" -> userService.updateUserStatus(
+                    1L,
                     userId,
                     new UpdateUserStatusRequest(UserStatus.SUSPENDED)
             );

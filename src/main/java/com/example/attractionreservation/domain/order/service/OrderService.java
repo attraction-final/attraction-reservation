@@ -200,6 +200,7 @@ public class OrderService {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int updateExpiredOrdersByCancel() {
+        long startedAt = System.nanoTime();
         Instant now = clock.instant();
         Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
 
@@ -210,6 +211,13 @@ public class OrderService {
         );
 
         int cancelledCount = 0;
+        int failedCount = 0;
+        int skippedCount = 0;
+        Set<String> failureCodes = new java.util.TreeSet<>();
+
+        BusinessException firstServerFailure = null;
+        Long firstFailedOrderId = null;
+        Long firstFailedUserId = null;
 
         for (Order order : expiredOrders) {
             Long orderId = order.getId();
@@ -222,15 +230,56 @@ public class OrderService {
                         now
                 )) {
                     cancelledCount++;
+                } else {
+                    skippedCount++;
                 }
             } catch (BusinessException exception) {
-                // 실패한 주문은 해당 트랜잭션에서 롤백하고 다음 주문을 처리한다.
-                log.warn(
-                        "만료 주문 자동 취소 실패: orderId={}, errorCode={}",
+                // 기존과 동일하게 이 주문의 실패가 다음 주문 처리를 막지 않는다.
+                failedCount++;
+                ErrorCode errorCode = exception.getErrorCode();
+                failureCodes.add(errorCode.name());
+
+                log.debug(
+                        "event=ORDER_AUTO_CANCEL_REJECTED "
+                                + "userId={} orderId={} errorCode={}",
+                        userId,
                         orderId,
-                        exception.getErrorCode()
+                        errorCode.name()
                 );
+
+                // 서버 오류는 첫 예외를 보관하고 반복문 밖에서 기록한다.
+                if (errorCode.getStatus().is5xxServerError()
+                        && firstServerFailure == null) {
+                    firstServerFailure = exception;
+                    firstFailedOrderId = orderId;
+                    firstFailedUserId = userId;
+                }
             }
+        }
+
+        long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        log.info(
+                "event=ORDER_AUTO_CANCEL_PROCESSED "
+                        + "count={} failedCount={} skippedCount={} "
+                        + "durationMs={} result={} failureCodes=\"{}\"",
+                cancelledCount,
+                failedCount,
+                skippedCount,
+                durationMs,
+                failedCount == 0 ? "SUCCESS" : "FAILURE",
+                String.join(",", failureCodes)
+        );
+
+        if (firstServerFailure != null) {
+            log.error(
+                    "event=ORDER_AUTO_CANCEL_FAILED "
+                            + "userId={} orderId={} errorCode={}",
+                    firstFailedUserId,
+                    firstFailedOrderId,
+                    firstServerFailure.getErrorCode().name(),
+                    firstServerFailure
+            );
         }
 
         return cancelledCount;

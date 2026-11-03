@@ -28,6 +28,25 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+# 로그 한 줄을 logfmt로 출력한다. 규칙은 docs/logging/logging.md 참고
+logging:
+  pattern:
+    console: "ts=%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} level=%level logger=%logger{36} thread=%thread traceId=%X{traceId:-} %msg%n"
+
+# Prometheus 수집과 로드밸런서 헬스 체크에 필요한 엔드포인트만 노출한다.
+management:
+  server:
+    # actuator는 서비스 포트(8080)가 아닌 이 포트에서만 응답한다.
+    # 보안 그룹에서 Prometheus 서버와 로드밸런서에만 연다.
+    port: ${MANAGEMENT_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
 jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: 600000

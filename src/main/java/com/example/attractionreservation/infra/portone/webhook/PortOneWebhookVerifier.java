@@ -2,6 +2,7 @@ package com.example.attractionreservation.infra.portone.webhook;
 
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.LogValues;
 import com.example.attractionreservation.infra.portone.config.PortOneProperties;
 import com.example.attractionreservation.infra.portone.webhook.dto.PortOneWebhookEvent;
 import io.portone.sdk.server.errors.WebhookVerificationException;
@@ -29,7 +30,9 @@ public class PortOneWebhookVerifier {
     public PortOneWebhookEvent verify(String body, String webhookId, String signature, String timestamp) {
         // SDK는 null 인자에 검증 예외가 아닌 NPE를 던지므로 먼저 막는다.
         if (body == null || webhookId == null || signature == null || timestamp == null) {
-            log.warn("PortOne 웹훅 검증 실패: 필수 헤더 누락, webhookId={}", webhookId);
+            // 검증 전 헤더 값과 SDK 메시지는 외부에서 온 값이라 logfmt 키를 끼워 넣지 못하도록 바꿔 남긴다.
+            log.info("event=WEBHOOK_VERIFICATION_FAILED webhookId=\"{}\" reason=\"필수 헤더 누락\" errorCode={}",
+                    LogValues.quoted(webhookId), ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.name());
 
             throw new BusinessException(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE);
         }
@@ -38,7 +41,9 @@ public class PortOneWebhookVerifier {
         try {
             webhook = webhookVerifier.verify(body, webhookId, signature, timestamp);
         } catch (WebhookVerificationException e) {
-            log.warn("PortOne 웹훅 검증 실패: webhookId={}, reason={}", webhookId, e.getMessage());
+            // 클라이언트 원인의 예상한 실패라 스택 트레이스 없이 SDK가 알려준 원인만 남긴다.
+            log.info("event=WEBHOOK_VERIFICATION_FAILED webhookId=\"{}\" reason=\"{}\" errorCode={}",
+                    LogValues.quoted(webhookId), LogValues.quoted(e.getMessage()), ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.name());
 
             throw new BusinessException(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE);
         }

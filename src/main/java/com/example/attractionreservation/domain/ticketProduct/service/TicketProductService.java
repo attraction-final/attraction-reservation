@@ -41,7 +41,13 @@ public class TicketProductService {
     // 티켓 상품 수정
     @Transactional
     public UpdateTicketProductResponse updateTicketProduct(Long ticketProductId, UpdateTicketProductRequest request) {
-        TicketProduct ticketProduct = getTicketProductById(ticketProductId);
+        TicketProduct ticketProduct = ticketProductRepository.findByIdWithLock(ticketProductId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
+
+        // version 비교
+        if (!ticketProduct.getVersion().equals(request.version())) {
+            throw new BusinessException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
+        }
 
         ticketProduct.updateTicketProduct(
                 request.name(),
@@ -51,13 +57,16 @@ public class TicketProductService {
                 request.saleStatus()
         );
 
+        ticketProductRepository.flush();
+
         return UpdateTicketProductResponse.from(ticketProduct);
     }
 
     // 티켓 상품 삭제
     @Transactional
     public void deleteTicketProduct(Long ticketProductId) {
-        TicketProduct ticketProduct = getTicketProductById(ticketProductId);
+        TicketProduct ticketProduct = ticketProductRepository.findByIdWithLock(ticketProductId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND));
         ticketProduct.delete();
     }
 

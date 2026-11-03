@@ -50,6 +50,7 @@ class ReservationServiceTest {
     private static final Long USER_ID = 1L;
     private static final Long TICKET_ID = 10L;
     private static final Long SLOT_ID = 20L;
+    private static final Long ATTRACTION_ID = 30L;
 
     private static final LocalDate VISIT_DATE =
             LocalDate.of(2026, 10, 23);
@@ -113,13 +114,16 @@ class ReservationServiceTest {
         lenient().when(ticket.getValidDate()).thenReturn(VISIT_DATE);
         lenient().when(ticket.getType()).thenReturn(TicketType.ALL_DAY);
 
-        lenient().when(attractionSlotService.findAttractionSlotById(SLOT_ID))
+        lenient().when(attractionSlotService.findSlot(SLOT_ID))
                 .thenReturn(slot);
         lenient().when(slot.getId()).thenReturn(SLOT_ID);
         lenient().when(slot.getStartsAt()).thenReturn(STARTS_AT);
         lenient().when(slot.getEndsAt()).thenReturn(ENDS_AT);
         lenient().when(slot.getStatus()).thenReturn(SlotStatus.OPEN);
         lenient().when(slot.getAttraction()).thenReturn(attraction);
+        lenient().when(attraction.getId()).thenReturn(ATTRACTION_ID);
+        lenient().when(attractionSlotService.findAttractionByIdForUpdate(ATTRACTION_ID))
+                .thenReturn(attraction);
         lenient().when(attraction.isOperating()).thenReturn(true);
         lenient().when(attraction.getName()).thenReturn("롤러코스터");
     }

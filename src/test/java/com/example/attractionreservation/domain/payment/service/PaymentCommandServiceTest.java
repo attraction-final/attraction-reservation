@@ -22,6 +22,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -30,6 +32,7 @@ import java.time.LocalDate;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -43,7 +46,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PaymentCommandServiceTest {
 
     private static final Long USER_ID = 1L;
@@ -102,6 +105,35 @@ class PaymentCommandServiceTest {
         assertEquals(APPROVED_AT, response.paidAt());
         // 이미 발급했으므로 티켓을 다시 발급하지 않는다.
         verifyNoInteractions(ticketService);
+    }
+
+    @Test
+    @DisplayName("결제 대기 상태의 결제를 승인하면 결제 승인 로그를 남긴다.")
+    void approvePayment_pending_LogApproved(CapturedOutput output) {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.approvePayment(PG_ID, APPROVED_AT, PG_AMOUNT);
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_APPROVED")))
+                .singleElement().asString().contains("INFO").contains("pgId=" + PG_ID).contains("userId=" + USER_ID);
+    }
+
+    @Test
+    @DisplayName("이미 결제 완료된 결제를 다시 승인하면 결제 승인 로그를 남기지 않는다.")
+    void approvePayment_alreadyPaid_NotLogApproved(CapturedOutput output) {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PAID);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.approvePayment(PG_ID, APPROVED_AT, PG_AMOUNT);
+
+        //then
+        assertThat(output).doesNotContain("event=PAYMENT_APPROVED");
     }
 
     @Test
@@ -212,6 +244,26 @@ class PaymentCommandServiceTest {
         assertEquals(OrderStatus.CANCELLED, payment.getOrder().getStatus());
     }
 
+    @Test
+    @DisplayName("결제 대기 상태의 결제를 실패 처리하면 서버 오류와 구분되는 실패 처리 이벤트를 INFO로 남긴다.")
+    void failPayment_pending_LogMarkedFailed(CapturedOutput output) {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.failPayment(PG_ID);
+
+        //then
+        assertThat(output).doesNotContain("event=PAYMENT_FAILED");
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_MARKED_FAILED")))
+                .singleElement().asString()
+                .contains("INFO")
+                .contains("pgId=" + payment.getPgId())
+                .contains("userId=" + USER_ID)
+                .contains("reason=\"PG 결제 실패\"");
+    }
+
     @ParameterizedTest
     @EnumSource(value = PaymentStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "PENDING")
     @DisplayName("결제 대기 상태가 아닌 결제는 실패 처리하지 않고 false를 반환한다.")
@@ -259,6 +311,38 @@ class PaymentCommandServiceTest {
         assertEquals(PaymentStatus.FAILED, payment.getStatus());
         assertEquals(OrderStatus.CANCELLED, payment.getOrder().getStatus());
         verify(paymentCompensationService).saveCompensatingEvent(PG_ID, 9999L, "결제 금액 불일치");
+    }
+
+    @Test
+    @DisplayName("보상 요청을 저장하면 결제 ID·사용자·보상 금액·사유를 INFO 로그로 남긴다.")
+    void failPaymentWithCompensation_pending_LogCompensationRequested(CapturedOutput output) {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.PENDING);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+
+        //when
+        paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_REQUESTED")))
+                .singleElement().asString().contains("INFO")
+                .contains("pgId=" + payment.getPgId())
+                .contains("userId=" + USER_ID + " amount=9999 reason=\"결제 금액 불일치\"");
+    }
+
+    @Test
+    @DisplayName("보상 요청이 이미 있어 저장하지 않으면 보상 요청 로그를 남기지 않는다.")
+    void failPaymentWithCompensation_cancelledAlreadyRequested_NotLogCompensationRequested(CapturedOutput output) {
+        //given
+        Payment payment = createPaymentWithStatus(PaymentStatus.CANCELLED);
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(payment));
+        given(paymentCompensationService.findIdByPgId(payment.getPgId())).willReturn(Optional.of(1L));
+
+        //when
+        paymentCommandService.failPaymentWithCompensation(PG_ID, 9999L, "결제 금액 불일치");
+
+        //then
+        assertThat(output).doesNotContain("event=PAYMENT_COMPENSATION_REQUESTED");
     }
 
     @ParameterizedTest

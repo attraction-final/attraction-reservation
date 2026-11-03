@@ -198,7 +198,9 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
 - 취소
   - 오류 응답을 `PortOneErrorResponse`로 파싱해 `type`이 `PAYMENT_ALREADY_CANCELLED`면 성공 처리한다 (보상 목적이 이미 달성됨).
   - 통신 실패(`ResourceAccessException`)는 같은 멱등 키로 최대 3회 재시도한다. 모두 실패하면 `PAYMENT_CANCELLATION_FAILED`(502).
-  - 멱등 키는 `cancelPayment` 호출마다 새로 만든다(`UUID.randomUUID()`). 한 호출 안의 재시도에서만 같은 키를 쓴다. 헤더 값은 RFC 8941 문자열로 쌍따옴표로 감싸 보낸다(`Idempotency-Key: "<uuid>"`).
+  - 409 `IDEMPOTENCY_OUTSTANDING_REQUEST`(같은 키의 앞선 요청 처리 중)는 1초(`portone.cancel-outstanding-retry-delay`)를 기다려 같은 키로 재시도한다. 처리 중 응답이 연속되면 대기를 2배(2초)로 늘린다(시도 번호가 아니라 처리 중 응답을 받은 횟수 기준). 설정은 0~10초만 허용해 시작 시점에 검증한다(상한은 멈춘 행 재점유 기준 5분보다 짧게 유지). 횟수는 통신 재시도와 함께 최대 3회로 센다.
+    - 처리 중 응답은 통신 실패 뒤 같은 키로 재시도할 때만 오므로, 실제 흐름은 `타임아웃 → 처리 중 → 1초 대기 → 마지막 시도`로 처리 중 응답 뒤 재시도는 사실상 1번이다. 2초 대기는 처리 중 응답이 연속될 때만 생긴다. 한 번이라도 처리 중 응답을 받았는데 결과를 확인하지 못하고 재시도를 다 쓰면(마지막이 처리 중이든 통신 실패든) 앞선 요청이 PG에 도달한 것이므로 실패로 알리지 않고 `UNKNOWN`을 반환한다(호출처는 `PG_PENDING`으로 조회로만 확정). 처리 중 응답 없이 통신 실패만 반복되면 기존대로 `PAYMENT_CANCELLATION_FAILED`다(KAN-90).
+  - 멱등 키는 `cancelPayment` 호출마다 새로 만든다(`UUID.randomUUID()`). 한 호출 안의 재시도(통신 실패, 앞선 요청 처리 중)에서만 같은 키를 쓴다. 헤더 값은 RFC 8941 문자열로 쌍따옴표로 감싸 보낸다(`Idempotency-Key: "<uuid>"`).
     - PortOne은 같은 키의 응답(실패 포함)을 3시간 동안 저장해 돌려준다. 호출 간에 키를 고정하면 실패한 취소를 다시 시도해도 저장된 실패 응답만 받으므로 고정하지 않는다.
     - 호출이 겹쳐 같은 결제를 두 번 전체 취소해도 두 번째는 `PAYMENT_ALREADY_CANCELLED`로 성공 처리된다.
 - 타임아웃: 연결 5초, 읽기 10초. 조회와 취소가 같은 `RestClient`를 쓰므로 취소에도 10초가 적용된다. 취소가 읽기 타임아웃되면 같은 멱등 키로 재시도하므로 중복 취소되지 않는다.
@@ -280,7 +282,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 CANCELLED 응답 + 보상 요청 1건 |
 | `PaymentControllerTest` | `@WebMvcTest` | 200(응답 데이터) / 404 / 502 / userId 누락 400 / orderId 누락 400, `ApiResponse` 형식 |
 | `PaymentRepositoryTest` | `@DataJpaTest` + H2 | `findByPgIdAndUserId` 쿼리 동작 (본인·다른 사용자·없는 pgId) |
-| `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 이미 취소됨 처리(전체 취소는 성공, 부분 취소는 예외), 취소 가능 금액 전송·불일치 예외, 통신 실패 재시도 |
+| `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 앞선 요청 처리 중 응답의 대기 후 같은 키 재시도·처리 중 응답 뒤 결과 미확인(마지막이 처리 중·통신 실패)이면 UNKNOWN·인터럽트 시 UNKNOWN, 이미 취소됨 처리(전체 취소는 성공, 부분 취소는 예외), 취소 가능 금액 전송·불일치 예외, 통신 실패 재시도 |
 | `OrderTest`, `PaymentTest` | 단위 | 상태 전이, `paidAt` null 검증 |
 
 웹훅 관련 테스트는 [payment-webhook-plan.md 6장](payment-webhook-plan.md#6-테스트), 보상 관련 테스트는 [payment-compensation.md 7장](payment-compensation.md#7-테스트)에 있다.
@@ -313,12 +315,12 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 - `Idempotency-Key` 헤더 값 형식(따옴표로 감싸는지)
 - 결제 상태 목록(`VIRTUAL_ACCOUNT_ISSUED` 등)과 각 상태에서의 승인 처리 방침
-- 같은 멱등 키로 동시에 요청했을 때의 응답(409 "처리 중" 여부)
 - 웹훅 재전송 횟수·기간
 
 ### PortOne 문서로 확인한 것
 
 - `Idempotency-Key`: 멱등성을 보장하고 같은 키의 응답을 3시간 동안 저장한다 → 호출마다 새 키를 쓴다(4.9).
+- 처리 중인 요청을 같은 멱등 키로 재시도하면 409 `{"type":"IDEMPOTENCY_OUTSTANDING_REQUEST"}`로 응답하고, 잠시 뒤 다시 재시도하라고 안내한다 → 같은 키로 대기 후 재시도한다(4.9, KAN-90). 출처: PortOne REST API V2 문서 멱등성 항목.
 - 결제 취소 오류의 `type` 값 (server-sdk 0.24.0 직렬화 이름으로 확인): 이미 취소됨 `PAYMENT_ALREADY_CANCELLED`, 취소 가능 금액 불일치 `CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN`.
 - 부분 취소의 `currentCancellableAmount`로 중복 취소를 막는 방식은 KAN-51(환불)에서 구현했다. 상세는 [refund-requirements.md 5-2](../requirements/refund-requirements.md).
 

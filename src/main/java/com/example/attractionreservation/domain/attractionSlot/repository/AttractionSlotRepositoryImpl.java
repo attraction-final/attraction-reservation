@@ -35,6 +35,11 @@ public class AttractionSlotRepositoryImpl implements AttractionSlotRepositoryCus
     // 겹침 조건: 기존 시작 < 새 종료  AND  기존 종료 > 새 시작
     private long countOverlapping(Long attractionId, Long excludeSlotId,
                                   LocalDateTime startsAt, LocalDateTime endsAt) {
+        // 슬롯은 하루(10:00~22:00) 안에서만 존재한다 (BR-SLT-03).
+        // 그래서 새 슬롯과 겹칠 수 있는 슬롯은 반드시 "같은 날 00:00 이후"에 시작한다.
+        // 이 하한이 있어야 인덱스가 1년치가 아니라 "그날 하루치"만 읽는다.
+        LocalDateTime dayStart = startsAt.toLocalDate().atStartOfDay();
+
         Long count = queryFactory
                 .select(attractionSlot.count())
                 .from(attractionSlot)
@@ -42,6 +47,7 @@ public class AttractionSlotRepositoryImpl implements AttractionSlotRepositoryCus
                         attractionSlot.attraction.id.eq(attractionId),
                         slotIdNotEquals(excludeSlotId),                 // null 이면 조건 무시
                         attractionSlot.status.ne(SlotStatus.CANCELLED), // 취소된 슬롯은 겹침 검사에서 제외
+                        attractionSlot.startsAt.goe(dayStart),
                         attractionSlot.startsAt.lt(endsAt),
                         attractionSlot.endsAt.gt(startsAt)
                 )

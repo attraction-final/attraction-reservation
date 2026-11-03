@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.user.controller;
 
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import com.example.attractionreservation.domain.user.dto.UpdateUserStatusRequest;
 import com.example.attractionreservation.domain.user.dto.UpdateUserStatusResponse;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -49,11 +50,12 @@ public class AdminUserController {
     }
     @PatchMapping("/{userId}/status")
     public ResponseEntity<ApiResponse<UpdateUserStatusResponse>> updateUserStatus(
+            @AuthenticationPrincipal Long adminId,
             @PathVariable Long userId,
             @Valid @RequestBody UpdateUserStatusRequest request
     ) {
         UpdateUserStatusResponse response =
-                userService.updateUserStatus(userId, request);
+                userService.updateUserStatus(adminId, userId, request);
 
         return ResponseEntity.ok(
                 ApiResponse.ok("회원 상태 변경에 성공했습니다.", response)

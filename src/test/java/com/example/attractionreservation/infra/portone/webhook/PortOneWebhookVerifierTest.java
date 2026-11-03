@@ -7,6 +7,9 @@ import com.example.attractionreservation.infra.portone.webhook.dto.PortOneWebhoo
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -17,6 +20,7 @@ import java.util.Base64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class PortOneWebhookVerifierTest {
 
     private static final byte[] SECRET_KEY = "test-webhook-secret".getBytes(StandardCharsets.UTF_8);
@@ -117,6 +121,50 @@ class PortOneWebhookVerifierTest {
         assertThatThrownBy(() -> verifier.verify(PAID_BODY, WEBHOOK_ID, null, timestamp))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.PAYMENT_WEBHOOK_INVALID_SIGNATURE.getMessage());
+    }
+
+    @Test
+    @DisplayName("검증 전 웹훅 ID에 따옴표·역슬래시가 있어도 logfmt 키를 끼워 넣지 못하도록 바꿔 남긴다.")
+    void verify_webhookIdWithQuote_LogEscaped(CapturedOutput output) {
+        //given
+        String timestamp = now();
+        String webhookId = "msg\\\" event=FAKE";
+
+        //when & then
+        assertThatThrownBy(() -> verifier.verify(PAID_BODY, webhookId, "v1,invalid", timestamp))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_VERIFICATION_FAILED")))
+                .singleElement().asString()
+                .contains("webhookId=\"msg/' event=FAKE\"");
+    }
+
+    @Test
+    @DisplayName("서명 검증에 실패하면 던지는 예외의 errorCode를 실패 로그에 함께 남긴다.")
+    void verify_invalidSignature_LogErrorCode(CapturedOutput output) {
+        //given
+        String timestamp = now();
+
+        //when & then
+        assertThatThrownBy(() -> verifier.verify(PAID_BODY, "msg-1", "v1,invalid", timestamp))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_VERIFICATION_FAILED")))
+                .singleElement().asString()
+                .contains("INFO")
+                .contains("errorCode=PAYMENT_WEBHOOK_INVALID_SIGNATURE");
+    }
+
+    @Test
+    @DisplayName("웹훅 ID 헤더가 없으면 webhookId를 null 문자열 대신 빈 값으로 남긴다.")
+    void verify_missingWebhookId_LogEmpty(CapturedOutput output) {
+        //given
+        String timestamp = now();
+
+        //when & then
+        assertThatThrownBy(() -> verifier.verify(PAID_BODY, null, "v1,invalid", timestamp))
+                .isInstanceOf(BusinessException.class);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=WEBHOOK_VERIFICATION_FAILED")))
+                .singleElement().asString()
+                .contains("webhookId=\"\" reason=\"필수 헤더 누락\"");
     }
 
     private String now() {

@@ -115,7 +115,8 @@ class TicketProductSearchControllerTest {
                         TicketType.ALL_DAY,
                         50000,
                         "테스트 상품 설명",
-                        TicketProductStatus.ON_SALE
+                        TicketProductStatus.ON_SALE,
+                        3L
                 );
 
         when(ticketProductService.findTicketProductAll(
@@ -153,6 +154,7 @@ class TicketProductSearchControllerTest {
                         .value("테스트 상품 설명"))
                 .andExpect(jsonPath("$.data.content[0].status")
                         .value("ON_SALE"))
+                .andExpect(jsonPath("$.data.content[0].version").value(3))
                 .andExpect(jsonPath("$.data.number").value(1))
                 .andExpect(jsonPath("$.data.size").value(2))
                 .andExpect(jsonPath("$.data.totalElements").value(3))

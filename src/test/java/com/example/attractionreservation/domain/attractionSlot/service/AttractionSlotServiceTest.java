@@ -38,6 +38,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AttractionSlotServiceTest {
+    private static final Long ADMIN_ID = 1L; // 로그용 관리자 ID
 
     @Mock
     private AttractionSlotRepository attractionSlotRepository;
@@ -264,7 +265,7 @@ class AttractionSlotServiceTest {
             given(attractionSlotRepository.save(any(AttractionSlot.class)))
                     .willAnswer(invocation -> invocation.getArgument(0));
 
-            CreateAttractionSlotResponse response = attractionSlotService.createAttractionSlot(
+            CreateAttractionSlotResponse response = attractionSlotService.createAttractionSlot(ADMIN_ID, 
                     1L, new CreateAttractionSlotRequest(TOMORROW.atTime(14, 0), 20));
 
             assertThat(response.endsAt()).isEqualTo(TOMORROW.atTime(14, 10));
@@ -278,7 +279,7 @@ class AttractionSlotServiceTest {
         void attractionNotFound() {
             given(attractionRepository.findActiveByIdForUpdate(99L)).willReturn(Optional.empty());
 
-            assertErrorCode(() -> attractionSlotService.createAttractionSlot(
+            assertErrorCode(() -> attractionSlotService.createAttractionSlot(ADMIN_ID, 
                     99L, new CreateAttractionSlotRequest(TOMORROW.atTime(14, 0), 20)), ErrorCode.ATTRACTION_NOT_FOUND);
         }
 
@@ -289,7 +290,7 @@ class AttractionSlotServiceTest {
                     .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
 
             LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
-            assertErrorCode(() -> attractionSlotService.createAttractionSlot(
+            assertErrorCode(() -> attractionSlotService.createAttractionSlot(ADMIN_ID, 
                     1L, new CreateAttractionSlotRequest(yesterday, 20)), ErrorCode.SLOT_START_IN_PAST);
         }
 
@@ -299,7 +300,7 @@ class AttractionSlotServiceTest {
             given(attractionRepository.findActiveByIdForUpdate(1L))
                     .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
 
-            assertErrorCode(() -> attractionSlotService.createAttractionSlot(
+            assertErrorCode(() -> attractionSlotService.createAttractionSlot(ADMIN_ID, 
                             1L, new CreateAttractionSlotRequest(TOMORROW.atTime(21, 55), 20)),
                     ErrorCode.SLOT_OUT_OF_OPERATING_HOURS);
         }
@@ -311,7 +312,7 @@ class AttractionSlotServiceTest {
                     .willReturn(Optional.of(createAttraction(OperationStatus.OPERATING)));
             given(attractionSlotRepository.countOverlappingSlots(eq(1L), any(), any())).willReturn(1L);
 
-            assertErrorCode(() -> attractionSlotService.createAttractionSlot(
+            assertErrorCode(() -> attractionSlotService.createAttractionSlot(ADMIN_ID, 
                     1L, new CreateAttractionSlotRequest(TOMORROW.atTime(14, 0), 20)), ErrorCode.SLOT_TIME_OVERLAP);
             verify(attractionSlotRepository, never()).save(any());
         }
@@ -456,7 +457,7 @@ class AttractionSlotServiceTest {
             given(attractionSlotRepository.countOverlappingSlotsExcludingSlotId(eq(1L), eq(31L), any(), any()))
                     .willReturn(0L);
 
-            UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(
+            UpdateAttractionSlotTimeResponse response = attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                     31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30)));
 
             assertThat(response.startsAt()).isEqualTo(TOMORROW.atTime(14, 30));
@@ -468,7 +469,7 @@ class AttractionSlotServiceTest {
         void notFound() {
             given(attractionSlotRepository.findByIdForUpdate(99L)).willReturn(Optional.empty());
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                     99L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_NOT_FOUND);
         }
 
@@ -477,7 +478,7 @@ class AttractionSlotServiceTest {
         void hasReservations() {
             givenSlotForUpdate(createTomorrowSlot(1, SlotStatus.OPEN));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
                     ErrorCode.SLOT_HAS_RESERVATIONS);
         }
@@ -488,7 +489,7 @@ class AttractionSlotServiceTest {
             LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
             givenSlotForUpdate(createSlot(31L, yesterday, 20, 0, SlotStatus.OPEN));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
                     ErrorCode.SLOT_ALREADY_ENDED);
         }
@@ -502,7 +503,7 @@ class AttractionSlotServiceTest {
             given(attractionSlotRepository.countOverlappingSlotsExcludingSlotId(eq(1L), eq(31L), any(), any()))
                     .willReturn(1L);
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                     31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))), ErrorCode.SLOT_TIME_OVERLAP);
             assertThat(slot.getStartsAt()).isEqualTo(TOMORROW.atTime(14, 0)); // 바뀌지 않음
         }
@@ -523,7 +524,7 @@ class AttractionSlotServiceTest {
             AttractionSlot slot = givenModifiableSlotWithAttraction();
             LocalDateTime yesterday = KstTime.now().toLocalDate().minusDays(1).atTime(14, 0);
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                     31L, new UpdateAttractionSlotTimeRequest(yesterday)), ErrorCode.SLOT_START_IN_PAST);
 
             verify(attractionSlotRepository, never())
@@ -537,7 +538,7 @@ class AttractionSlotServiceTest {
         void outOfOperatingHours() {
             AttractionSlot slot = givenModifiableSlotWithAttraction();
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(21, 55))),
                     ErrorCode.SLOT_OUT_OF_OPERATING_HOURS);
 
@@ -553,7 +554,7 @@ class AttractionSlotServiceTest {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.CANCELLED);
             givenSlotForUpdate(slot);
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotTime(ADMIN_ID, 
                             31L, new UpdateAttractionSlotTimeRequest(TOMORROW.atTime(14, 30))),
                     ErrorCode.SLOT_ALREADY_CANCELLED);
 
@@ -575,7 +576,7 @@ class AttractionSlotServiceTest {
             givenSlotForUpdate(createTomorrowSlot(12, SlotStatus.OPEN));
 
             UpdateAttractionSlotCapacityResponse response =
-                    attractionSlotService.updateAttractionSlotCapacity(31L, new UpdateAttractionSlotCapacityRequest(25));
+                    attractionSlotService.updateAttractionSlotCapacity(ADMIN_ID, 31L, new UpdateAttractionSlotCapacityRequest(25));
 
             assertThat(response.capacity()).isEqualTo(25);
             assertThat(response.remainingCount()).isEqualTo(13);
@@ -587,7 +588,7 @@ class AttractionSlotServiceTest {
         void belowReserved() {
             givenSlotForUpdate(createTomorrowSlot(12, SlotStatus.OPEN));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(ADMIN_ID, 
                     31L, new UpdateAttractionSlotCapacityRequest(11)), ErrorCode.SLOT_CAPACITY_BELOW_RESERVED);
         }
 
@@ -596,7 +597,7 @@ class AttractionSlotServiceTest {
         void cancelled() {
             givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.CANCELLED));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotCapacity(ADMIN_ID, 
                     31L, new UpdateAttractionSlotCapacityRequest(30)), ErrorCode.SLOT_ALREADY_CANCELLED);
         }
 
@@ -608,11 +609,11 @@ class AttractionSlotServiceTest {
             givenSlotForUpdate(slot);
 
             // 1. 관리자가 상태 변경 API로 직접 마감
-            attractionSlotService.updateAttractionSlotStatus(31L, new UpdateAttractionSlotStatusRequest("CLOSED"));
+            attractionSlotService.updateAttractionSlotStatus(ADMIN_ID, 31L, new UpdateAttractionSlotStatusRequest("CLOSED"));
 
             // 2. 같은 슬롯의 정원을 늘림
             UpdateAttractionSlotCapacityResponse response =
-                    attractionSlotService.updateAttractionSlotCapacity(31L, new UpdateAttractionSlotCapacityRequest(25));
+                    attractionSlotService.updateAttractionSlotCapacity(ADMIN_ID, 31L, new UpdateAttractionSlotCapacityRequest(25));
 
             assertThat(response.status()).isEqualTo(SlotStatus.CLOSED);
             assertThat(response.remainingCount()).isEqualTo(13);
@@ -629,7 +630,7 @@ class AttractionSlotServiceTest {
         void success() {
             givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.OPEN));
 
-            UpdateAttractionSlotStatusResponse response = attractionSlotService.updateAttractionSlotStatus(
+            UpdateAttractionSlotStatusResponse response = attractionSlotService.updateAttractionSlotStatus(ADMIN_ID, 
                     31L, new UpdateAttractionSlotStatusRequest("SUSPENDED"));
 
             assertThat(response.previousStatus()).isEqualTo(SlotStatus.OPEN);
@@ -639,7 +640,7 @@ class AttractionSlotServiceTest {
         @Test
         @DisplayName("실패: 허용되지 않은 값(CANCELLED)")
         void invalidStatus() {
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(ADMIN_ID, 
                     31L, new UpdateAttractionSlotStatusRequest("CANCELLED")), ErrorCode.INVALID_SLOT_STATUS);
         }
 
@@ -648,7 +649,7 @@ class AttractionSlotServiceTest {
         void same() {
             givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.OPEN));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(ADMIN_ID, 
                     31L, new UpdateAttractionSlotStatusRequest("OPEN")), ErrorCode.SLOT_STATUS_SAME);
         }
 
@@ -657,7 +658,7 @@ class AttractionSlotServiceTest {
         void openWhenFull() {
             givenSlotForUpdate(createTomorrowSlot(20, SlotStatus.CLOSED));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(ADMIN_ID, 
                     31L, new UpdateAttractionSlotStatusRequest("OPEN")), ErrorCode.SLOT_FULL);
         }
 
@@ -666,7 +667,7 @@ class AttractionSlotServiceTest {
         void suspendWithReservations() {
             givenSlotForUpdate(createTomorrowSlot(3, SlotStatus.OPEN));
 
-            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(
+            assertErrorCode(() -> attractionSlotService.updateAttractionSlotStatus(ADMIN_ID, 
                     31L, new UpdateAttractionSlotStatusRequest("SUSPENDED")), ErrorCode.SLOT_HAS_RESERVATIONS);
         }
     }
@@ -682,7 +683,7 @@ class AttractionSlotServiceTest {
             AttractionSlot slot = createTomorrowSlot(0, SlotStatus.OPEN);
             givenSlotForUpdate(slot);
 
-            attractionSlotService.deleteAttractionSlot(31L);
+            attractionSlotService.deleteAttractionSlot(ADMIN_ID, 31L);
 
             assertThat(slot.getStatus()).isEqualTo(SlotStatus.CANCELLED);
         }
@@ -692,7 +693,7 @@ class AttractionSlotServiceTest {
         void alreadyCancelled() {
             givenSlotForUpdate(createTomorrowSlot(0, SlotStatus.CANCELLED));
 
-            assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(31L), ErrorCode.SLOT_ALREADY_CANCELLED);
+            assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(ADMIN_ID, 31L), ErrorCode.SLOT_ALREADY_CANCELLED);
         }
 
         @Test
@@ -700,7 +701,7 @@ class AttractionSlotServiceTest {
         void hasReservations() {
             givenSlotForUpdate(createTomorrowSlot(1, SlotStatus.OPEN));
 
-            assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(31L), ErrorCode.SLOT_HAS_RESERVATIONS);
+            assertErrorCode(() -> attractionSlotService.deleteAttractionSlot(ADMIN_ID, 31L), ErrorCode.SLOT_HAS_RESERVATIONS);
         }
     }
 }

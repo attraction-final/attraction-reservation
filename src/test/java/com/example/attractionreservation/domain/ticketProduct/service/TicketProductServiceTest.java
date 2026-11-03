@@ -54,6 +54,8 @@ class TicketProductServiceTest {
                 100,
                 originalStatus
         );
+        // 단위 테스트에서는 JPA가 version을 초기화하지 않으므로 조회된 엔티티 상태를 직접 준비한다.
+        ReflectionTestUtils.setField(ticketProduct, "version", 0L);
     }
 
     @Test
@@ -67,10 +69,11 @@ class TicketProductServiceTest {
                 60000,
                 "변경된 상품 설명",
                 TicketProductStatus.STOPPED,
-                80
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when
@@ -91,7 +94,7 @@ class TicketProductServiceTest {
         assertThat(ticketProduct.getStock()).isEqualTo(80);
         assertThat(ticketProduct.getType()).isEqualTo(originalType);
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).save(any());
     }
 
@@ -106,11 +109,11 @@ class TicketProductServiceTest {
                 60000,
                 "변경된 상품 설명",
                 originalStatus,
-                80
-
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.empty());
 
         // when & then
@@ -126,7 +129,7 @@ class TicketProductServiceTest {
                             .isEqualTo(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
                 });
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).save(any());
     }
 
@@ -141,11 +144,11 @@ class TicketProductServiceTest {
                 60000,
                 "변경된 상품 설명",
                 originalStatus,
-                80
-
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when & then
@@ -177,10 +180,11 @@ class TicketProductServiceTest {
                 60000,
                 "   ",
                 originalStatus,
-                80
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when & then
@@ -213,10 +217,11 @@ class TicketProductServiceTest {
                 60000,
                 null,
                 originalStatus,
-                80
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when & then
@@ -248,10 +253,11 @@ class TicketProductServiceTest {
                 60000,
                 "변경된 상품 설명",
                 null,
-                80
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when & then
@@ -284,11 +290,11 @@ class TicketProductServiceTest {
                 -1000,
                 "변경된 상품 설명",
                 originalStatus,
-                80
-
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when & then
@@ -319,11 +325,11 @@ class TicketProductServiceTest {
                 60000,
                 "변경된 상품 설명",
                 originalStatus,
-                -1
-
+                -1,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when & then
@@ -355,10 +361,11 @@ class TicketProductServiceTest {
                 0,
                 "무료 이용권 설명",
                 originalStatus,
-                80
+                80,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when
@@ -372,7 +379,7 @@ class TicketProductServiceTest {
         assertThat(response.name()).isEqualTo("무료 자유이용권");
         assertThat(ticketProduct.getName()).isEqualTo("무료 자유이용권");
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).save(any());
     }
 
@@ -387,10 +394,11 @@ class TicketProductServiceTest {
                 60000,
                 "변경된 상품 설명",
                 originalStatus,
-                0
+                0,
+                0L
         );
 
-        when(ticketProductRepository.findById(ticketProductId))
+        when(ticketProductRepository.findByIdWithLock(ticketProductId))
                 .thenReturn(Optional.of(ticketProduct));
 
         // when
@@ -404,7 +412,7 @@ class TicketProductServiceTest {
         assertThat(response.price()).isEqualTo(60000);
         assertThat(ticketProduct.getPrice()).isEqualTo(60000);
 
-        verify(ticketProductRepository).findById(ticketProductId);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
         verify(ticketProductRepository, never()).save(any());
     }
 
@@ -461,6 +469,31 @@ class TicketProductServiceTest {
                                 .isEqualTo(ErrorCode.TICKET_PRODUCT_NOT_FOUND)
                 );
         assertThat(first.getStock()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("요청 version이 오래되면 충돌 예외를 던지고 상품 정보와 재고를 변경하지 않는다")
+    void updateTicketProduct_StaleVersion_RejectsWithoutChangingProduct() {
+        // given
+        Long ticketProductId = 1L;
+        ReflectionTestUtils.setField(ticketProduct, "version", 1L);
+        UpdateTicketProductRequest request = new UpdateTicketProductRequest(
+                "변경 요청 상품", 60000, "변경 요청 설명", TicketProductStatus.STOPPED, 80, 0L
+        );
+        when(ticketProductRepository.findByIdWithLock(ticketProductId)).thenReturn(Optional.of(ticketProduct));
+
+        // when & then
+        assertThatThrownBy(() -> ticketProductService.updateTicketProduct(ticketProductId, request))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.CONCURRENT_UPDATE_CONFLICT));
+        assertThat(ticketProduct.getName()).isEqualTo("기존 자유이용권");
+        assertThat(ticketProduct.getPrice()).isEqualTo(50000);
+        assertThat(ticketProduct.getDescription()).isEqualTo("기존 상품 설명");
+        assertThat(ticketProduct.getStock()).isEqualTo(100);
+        assertThat(ticketProduct.getStatus()).isEqualTo(originalStatus);
+        assertThat(ticketProduct.getVersion()).isEqualTo(1L);
+        verify(ticketProductRepository).findByIdWithLock(ticketProductId);
+        verifyNoMoreInteractions(ticketProductRepository);
     }
 
     private TicketProduct createStockProduct(Long id, int stock, TicketProductStatus status) {

@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -46,6 +48,7 @@ import static org.mockito.Mockito.mockStatic;
         AttractionService.class
 })
 class ReservationUpcomingReservationReaderIntegrationTest {
+    private static final Long ADMIN_ID = 1L; // 로그용 관리자 ID
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 28, 14, 0);
 
@@ -57,6 +60,10 @@ class ReservationUpcomingReservationReaderIntegrationTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    // 추가: @DataJpaTest 에는 Redis 빈이 없으므로, 캐시 삭제 도우미는 가짜로 넣어 준다
+    @MockitoBean
+    private AttractionDetailCacheEvictor attractionDetailCacheEvictor;
 
     private User user;
     private Ticket ticket;
@@ -122,7 +129,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
             clock.when(KstTime::now).thenReturn(NOW);
 
             // when & then
-            assertThatThrownBy(() -> attractionService.updateAttractionStatus(attractionId, request))
+            assertThatThrownBy(() -> attractionService.updateAttractionStatus(ADMIN_ID, attractionId, request))
                     .isInstanceOfSatisfying(BusinessException.class, exception -> {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
@@ -148,7 +155,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
             clock.when(KstTime::now).thenReturn(NOW);
 
             // when & then
-            assertThatThrownBy(() -> attractionService.deleteAttraction(attractionId))
+            assertThatThrownBy(() -> attractionService.deleteAttraction(ADMIN_ID, attractionId))
                     .isInstanceOfSatisfying(BusinessException.class, exception -> {
                         assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.ATTRACTION_HAS_UPCOMING_RESERVATIONS);
@@ -177,7 +184,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
         // when
         try (MockedStatic<KstTime> clock = mockStatic(KstTime.class)) {
             clock.when(KstTime::now).thenReturn(NOW);
-            attractionService.updateAttractionStatus(attractionId, request);
+            attractionService.updateAttractionStatus(ADMIN_ID, attractionId, request);
         }
         flushAndClear();
 
@@ -197,7 +204,7 @@ class ReservationUpcomingReservationReaderIntegrationTest {
         // when
         try (MockedStatic<KstTime> clock = mockStatic(KstTime.class)) {
             clock.when(KstTime::now).thenReturn(NOW);
-            attractionService.deleteAttraction(attractionId);
+            attractionService.deleteAttraction(ADMIN_ID, attractionId);
         }
         flushAndClear();
 

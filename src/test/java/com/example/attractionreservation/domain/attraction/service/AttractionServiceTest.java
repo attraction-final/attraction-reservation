@@ -212,7 +212,7 @@ class AttractionServiceTest {
     void updateAttraction_PartialRequest_UpdatesOnlyGivenFields() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         given(attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull("슈퍼 롤러코스터", 1L)).willReturn(false);
 
         // 이름과 소요 시간만 보냄 (설명, 위치, 정문 이동 시간은 null = "안 바꿀래요")
@@ -227,6 +227,8 @@ class AttractionServiceTest {
         assertThat(response.description()).isEqualTo("빠른 속도의 코스터");
         assertThat(response.location()).isEqualTo("A구역");
         assertThat(response.entranceMoveMinutes()).isEqualTo(8);
+        verify(attractionRepository).findActiveByIdForUpdate(1L);
+        verify(attractionRepository, never()).findByIdAndDeletedAtIsNull(anyLong());
         verify(attractionRepository).flush();  // DB 반영을 호출했는지
     }
 
@@ -235,7 +237,7 @@ class AttractionServiceTest {
     void updateAttraction_DuplicatedName_ThrowsException() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
         given(attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull("회전목마", 1L)).willReturn(true);
 
         UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null, null); // 수정: null 추가
@@ -255,7 +257,7 @@ class AttractionServiceTest {
     void updateAttraction_SameName_SkipsDuplicateCheck() {
         // given
         Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
-        given(attractionRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(attraction));
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
 
         // 이름은 지금과 똑같이, 설명만 바꿈
         UpdateAttractionRequest request = new UpdateAttractionRequest("롤러코스터", "더 빨라진 코스터", null, null, null); // 수정: null 추가
@@ -273,7 +275,7 @@ class AttractionServiceTest {
     @DisplayName("존재하지 않는 어트랙션을 수정하면 ATTRACTION_NOT_FOUND 예외가 발생한다")
     void updateAttraction_NotExists_ThrowsException() {
         // given
-        given(attractionRepository.findByIdAndDeletedAtIsNull(99L)).willReturn(Optional.empty());
+        given(attractionRepository.findActiveByIdForUpdate(99L)).willReturn(Optional.empty());
         UpdateAttractionRequest request = new UpdateAttractionRequest("슈퍼 롤러코스터", null, null, null, null); // 수정: null 추가
 
         // when & then

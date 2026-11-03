@@ -135,7 +135,7 @@ public class AttractionService {
     // 어트랙션 수정
     @Transactional
     public SearchAttractionResponse updateAttraction(Long adminId, Long attractionId, UpdateAttractionRequest request) {
-        Attraction attraction = findActiveAttraction(attractionId);
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
 
         // 추가: 바꾸기 전 소요 시간 보관
         Integer previousDurationMinutes = attraction.getDurationMinutes();

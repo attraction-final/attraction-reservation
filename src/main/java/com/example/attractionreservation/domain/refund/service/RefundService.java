@@ -109,19 +109,31 @@ public class RefundService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.REFUND_NOT_FOUND));
     }
 
+    // 관리자 전체 환불
+    @Transactional
+    public Long createAdminFullRefund(String pgId, String reason, Instant requestedAt) {
+        Payment payment = getPaymentWithLock(pgId);
+        validateRefundablePaymentStatus(payment);
+
+        List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
+        if (tickets.isEmpty()) {
+            throw new BusinessException(ErrorCode.REFUND_INVALID_QUANTITY);
+        }
+
+        return saveRefund(payment, tickets, reason, requestedAt);
+    }
+
     // 결제를 잠그고 본인 결제인지, 환불할 수 있는 상태인지, 환불 기한 안인지 확인한다.
     private Payment getRefundablePayment(Long userId, String pgId, Instant requestedAt) {
-        Payment payment = paymentRepository.findWithLockByPgId(pgId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+        Payment payment = getPaymentWithLock(pgId);
 
         // 다른 사용자의 결제는 존재 여부를 숨기기 위해 없는 결제와 같이 응답한다.
         if (!payment.getOrder().getUser().getId().equals(userId)) {
             throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
         }
 
-        if (payment.getStatus() != PaymentStatus.PAID && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
-            throw new BusinessException(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
-        }
+        // 환불 가능한 결제 상태를 검사한다.
+        validateRefundablePaymentStatus(payment);
 
         // 한 주문의 티켓은 모두 주문의 입장일로 발급되므로 주문 입장일로 판단한다. 입장일 전날(KST)까지만 환불할 수 있다.
         LocalDate requestedDate = LocalDate.ofInstant(requestedAt, KstTime.ZONE);
@@ -173,5 +185,16 @@ public class RefundService {
 
     private int refundableQuantity(OrderItem orderItem, Map<Long, Long> refundedQuantities) {
         return orderItem.getQuantity() - refundedQuantities.getOrDefault(orderItem.getId(), 0L).intValue();
+    }
+
+    private Payment getPaymentWithLock(String pgId) {
+        return paymentRepository.findWithLockByPgId(pgId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+    }
+
+    private void validateRefundablePaymentStatus(Payment payment) {
+        if (payment.getStatus() != PaymentStatus.PAID && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
+            throw new BusinessException(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
+        }
     }
 }

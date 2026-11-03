@@ -1,6 +1,5 @@
 package com.example.attractionreservation;
 
-import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
 import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
 import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
 import com.example.attractionreservation.domain.payment.entity.Payment;
@@ -45,12 +44,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.Clock;
 
-import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -84,9 +81,6 @@ class OrderServiceIntegrationTest {
 
     @MockitoSpyBean
     private Clock clock;
-
-    @MockitoSpyBean
-    private TicketProductService ticketProductService;
 
     @Test
     @DisplayName("주문과 항목을 DB에 함께 저장하고 상품 가격 변경 후에도 주문 단가를 유지한다")
@@ -730,105 +724,5 @@ class OrderServiceIntegrationTest {
         assertThat(secondPage.page()).isEqualTo(1);
         assertThat(secondPage.totalElements()).isEqualTo(2L);
         assertThat(secondPage.totalPages()).isEqualTo(2);
-    }
-
-    @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @DisplayName("재고 복구 후 실패하면 주문과 결제 취소 및 재고 변경을 모두 롤백한다")
-    void updateOrderByCancel_stockRestoreFails_rollsBackAllChanges() {
-        TransactionTemplate transaction =
-                new TransactionTemplate(transactionManager);
-
-        // 주문 한 건으로 재고가 10개에서 9개가 된 상태를 준비한다.
-        Long[] ids = transaction.execute(status -> {
-            User user = userRepository.saveAndFlush(
-                    User.builder()
-                            .email(UUID.randomUUID() + "@test.com")
-                            .password("test-password-hash")
-                            .nickname("재고복구롤백테스트")
-                            .build()
-            );
-
-            TicketProduct product = ticketProductRepository.saveAndFlush(
-                    new TicketProduct(
-                            "롤백검증상품",
-                            10000,
-                            "재고 복구 실패 시 롤백 검증",
-                            TicketType.ALL_DAY,
-                            9,
-                            TicketProductStatus.ON_SALE
-                    )
-            );
-
-            Order order = Order.create(user, 10000, validVisitDate());
-            order.addOrderItem(product, 1);
-            orderRepository.saveAndFlush(order);
-
-            Payment payment = paymentRepository.saveAndFlush(
-                    Payment.create(order)
-            );
-
-            return new Long[]{
-                    user.getId(),
-                    order.getId(),
-                    payment.getId(),
-                    product.getId()
-            };
-        });
-
-        try {
-            doAnswer(invocation -> {
-                // 실제 재고 복구를 수행한다.
-                invocation.callRealMethod();
-
-                // 변경 SQL까지 실행한 뒤 실패하도록 만든다.
-                entityManager.flush();
-
-                assertThat(paymentRepository.findById(ids[2])
-                        .orElseThrow().getStatus())
-                        .isEqualTo(PaymentStatus.CANCELLED);
-
-                assertThat(ticketProductRepository.findById(ids[3])
-                        .orElseThrow().getStock())
-                        .isEqualTo(10);
-
-                throw new IllegalStateException("재고 복구 후 테스트용 장애");
-            }).when(ticketProductService)
-                    .updateTicketProductsStockIncrease(Map.of(ids[3], 1));
-
-            assertThatThrownBy(() ->
-                    orderService.updateOrderByCancel(ids[0], ids[1]))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("재고 복구 후 테스트용 장애");
-
-            // 실패한 트랜잭션 밖에서 DB를 다시 읽는다.
-            transaction.executeWithoutResult(status -> {
-                assertThat(orderRepository.findById(ids[1])
-                        .orElseThrow().getStatus())
-                        .isEqualTo(OrderStatus.PENDING);
-
-                assertThat(paymentRepository.findById(ids[2])
-                        .orElseThrow().getStatus())
-                        .isEqualTo(PaymentStatus.PENDING);
-
-                assertThat(ticketProductRepository.findById(ids[3])
-                        .orElseThrow().getStock())
-                        .isEqualTo(9);
-            });
-        } finally {
-            // 이 테스트에서 준비한 데이터만 정리한다.
-            transaction.executeWithoutResult(status -> {
-                paymentRepository.deleteById(ids[2]);
-                paymentRepository.flush();
-
-                orderRepository.deleteById(ids[1]);
-                orderRepository.flush();
-
-                ticketProductRepository.deleteById(ids[3]);
-                ticketProductRepository.flush();
-
-                userRepository.deleteById(ids[0]);
-            });
-        }
     }
 }

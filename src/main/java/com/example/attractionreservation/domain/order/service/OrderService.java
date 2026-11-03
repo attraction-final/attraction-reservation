@@ -185,11 +185,11 @@ public class OrderService {
         // 주문 티켓 상품 id 및 수량 map 생성
         Map<Long, Integer> quantitiesByTicketProductId = order.getQuantityByTicketProductId();
 
-        // 상품 잠금을 획득하기 전에 결제 취소를 처리한다.
-        paymentService.cancelledByUser(userId, orderId);
-
-        // 재고 복구가 실패하면 같은 트랜잭션의 주문·결제 취소도 롤백된다.
+        // 재고 복구
         ticketProductService.updateTicketProductsStockIncrease(quantitiesByTicketProductId);
+
+        // 결제 취소가 실패하면 같은 트랜잭션의 주문 취소도 롤백한다.
+        paymentService.cancelledByUser(userId, orderId);
 
         // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
         return UpdateOrderResponse.of(

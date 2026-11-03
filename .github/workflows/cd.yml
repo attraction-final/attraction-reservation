@@ -20,6 +20,9 @@ name: CD
 #   vars.SSM_PREFIX            예: /attraction-reservation/prod
 
 on:
+  # 임시: cd 브랜치에서 이미지 빌드·ECR push·S3 업로드까지만 시험한다. main 병합 전에 제거한다.
+  push:
+    branches: [ cd ]
   workflow_run:
     workflows: [ CI ]
     types: [ completed ]
@@ -46,7 +49,9 @@ jobs:
     # CI는 PR에서도 실행되므로 main push에서 성공한 실행만 배포한다.
     # fork의 코드를 checkout하지 않도록 같은 저장소에서 실행된 CI만 허용한다.
     # 수동 실행은 main에서만 허용한다.
+    # 임시: cd 브랜치 push는 배포 단계 없이 빌드·업로드만 실행한다.
     if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/cd') ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
@@ -166,6 +171,7 @@ jobs:
       # 3) 버전 교체: 롤백에 쓸 이전 버전을 먼저 기록한다.
       - name: Update APP_VERSION
         id: param
+        if: github.event_name != 'push'
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
@@ -180,6 +186,7 @@ jobs:
       #    가용 용량이 100% 아래로 내려가지 않는다.
       - name: Start instance refresh
         id: refresh
+        if: github.event_name != 'push'
         run: |
           REFRESH_ID=$(aws autoscaling start-instance-refresh \
             --auto-scaling-group-name "$ASG_NAME" \
@@ -189,6 +196,7 @@ jobs:
           echo "InstanceRefreshId: ${REFRESH_ID}"
 
       - name: Wait for instance refresh
+        if: github.event_name != 'push'
         env:
           REFRESH_ID: ${{ steps.refresh.outputs.id }}
         run: |

@@ -1,0 +1,27 @@
+# 운영 전용 설정. deploy/compose.yml에서 SPRING_PROFILES_ACTIVE=prod로 켠다.
+# 공통 설정은 application.yaml에 두고, 여기에는 운영에서만 다른 값만 둔다.
+
+spring:
+  datasource:
+    # 운영에서는 기본값 없이 환경변수로만 주입한다. 값이 빠지면 localhost로 붙지 않고 기동에 실패한다.
+    url: ${DB_URL}
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+
+# 운영에서는 Alloy가 컨테이너 stdout을 수집하므로 파일로 쓰지 않는다. (deploy/alloy/config.alloy)
+# 출력 패턴은 모든 프로필에서 같아야 하므로 application.yaml에 둔다.
+
+management:
+  server:
+    # actuator는 서비스 포트(8080)가 아닌 이 포트에서만 응답한다.
+    # 보안 그룹에서 Prometheus 서버와 로드밸런서에만 연다.
+    port: ${MANAGEMENT_PORT:8081}
+  endpoint:
+    health:
+      # 쿠버네티스가 아니면 꺼져 있으므로 직접 켠다.
+      # 로드밸런서는 DB·Redis 상태와 무관한 /actuator/health/readiness를 본다.
+      probes:
+        enabled: true

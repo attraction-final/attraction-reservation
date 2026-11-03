@@ -1,0 +1,39 @@
+// 애플리케이션 컨테이너의 stdout을 Loki로 보낸다. 로그 형식은 docs/logging/logging.md 참고
+//
+// 레이블은 값 종류가 적은 app, env만 붙인다. 나머지 값은 조회할 때 | logfmt로 꺼낸다.
+
+// compose의 app 서비스 컨테이너만 수집한다. (Alloy 자신의 로그는 제외)
+discovery.docker "app" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.service=app"]
+  }
+}
+
+loki.source.docker "app" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.app.targets
+  labels     = {
+    app = "attraction-reservation",
+    env = sys.env("APP_ENV"),
+  }
+  forward_to = [loki.process.multiline.receiver]
+}
+
+// 스택 트레이스가 한 로그로 묶이도록 ts=로 시작하는 줄을 새 로그의 시작으로 본다.
+loki.process "multiline" {
+  stage.multiline {
+    firstline     = "^ts="
+    max_wait_time = "3s"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_URL")
+  }
+}

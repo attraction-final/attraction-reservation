@@ -1,0 +1,264 @@
+name: CD
+
+# main에 push된 커밋의 CI가 성공하면 운영 ASG에 배포한다.
+# 롤백은 workflow_dispatch로 이전 커밋 SHA를 넣어 실행한다.
+#
+# 배포 흐름
+#   1. 이미지를 빌드해 ECR에 <커밋 SHA> 태그로 올리고, 실행 구성(deploy/)을 S3의 <커밋 SHA>/ 아래에 올린다.
+#      (이미 있으면 건너뛴다)
+#   2. Parameter Store의 APP_VERSION을 이번 SHA로 바꾼다.
+#   3. ASG Instance Refresh를 시작한다. 새 인스턴스는 기동 시 APP_VERSION의 실행 구성을 받아
+#      docker compose로 애플리케이션과 Alloy를 실행한다.
+#   4. 교체가 실패하거나 시간 안에 끝나지 않으면 APP_VERSION을 이전 값으로 되돌리고 다시 교체한다.
+#
+# GitHub Environment(production)에 필요한 설정
+#   vars.AWS_REGION            예: ap-northeast-2
+#   vars.AWS_DEPLOY_ROLE_ARN   GitHub OIDC로 맡을 배포 역할
+#   vars.ECR_REPOSITORY        이미지를 올릴 ECR 저장소 이름
+#   vars.ARTIFACT_BUCKET       실행 구성(compose, Alloy 설정)을 올릴 S3 버킷
+#   vars.ASG_NAME              Spring 애플리케이션 Auto Scaling Group 이름
+#   vars.SSM_PREFIX            예: /attraction-reservation/prod
+
+on:
+  workflow_run:
+    workflows: [ CI ]
+    types: [ completed ]
+    branches: [ main, cd ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '배포할 커밋 SHA(40자). 비우면 main의 최신 커밋을 배포한다.'
+        required: false
+        type: string
+
+# 배포는 한 번에 하나만 실행하고, 진행 중인 배포를 취소하지 않는다.
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # AWS OIDC 인증
+
+jobs:
+  deploy:
+    name: Deploy to production
+    # CI는 PR에서도 실행되므로 main push에서 성공한 실행만 배포한다.
+    # 수동 실행은 main에서만 허용한다.
+    if: >
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+      ASG_NAME: ${{ vars.ASG_NAME }}
+      VERSION_PARAMETER: ${{ vars.SSM_PREFIX }}/APP_VERSION
+      ARTIFACT_PREFIX: attraction-reservation
+      INSTANCE_WARMUP_SECONDS: 120     # 기동 후 ALB readiness 통과까지 걸리는 시간보다 길게 둔다
+      REFRESH_TIMEOUT_SECONDS: 1800    # 이 시간 안에 교체가 끝나지 않으면 롤백한다
+      REFRESH_POLL_SECONDS: 30
+
+    steps:
+      # 1) 배포할 버전 결정
+      #    입력값은 스크립트에 직접 넣지 않고 환경변수로 넘긴다.
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          VERSION="${INPUT_VERSION:-${RUN_HEAD_SHA:-$CURRENT_SHA}}"
+          if ! [[ "$VERSION" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::버전은 40자 커밋 SHA여야 합니다: ${VERSION}"
+            exit 1
+          fi
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "bundle_prefix=${ARTIFACT_PREFIX}/${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # 2) 같은 버전의 이미지·실행 구성이 이미 있으면(롤백·재배포) 다시 만들지 않는다.
+      #    compose.yml은 마지막에 올리므로 있으면 실행 구성 전체가 올라간 것으로 본다.
+      - name: Check artifact
+        id: artifact
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          BUNDLE_PREFIX: ${{ steps.version.outputs.bundle_prefix }}
+        run: |
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$VERSION" > /dev/null 2>&1; then
+            echo "image_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if aws s3api head-object --bucket "$ARTIFACT_BUCKET" \
+            --key "${BUNDLE_PREFIX}/compose.yml" > /dev/null 2>&1; then
+            echo "bundle_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.artifact.outputs.image_exists == 'false' || steps.artifact.outputs.bundle_exists == 'false'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.value }}
+
+      - name: Set up JDK 17
+        if: steps.artifact.outputs.image_exists == 'false'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle (with cache)
+        if: steps.artifact.outputs.image_exists == 'false'
+        uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1
+
+      # 테스트는 CI에서 통과한 커밋이므로 실행 가능한 jar만 만든다.
+      - name: Build jar
+        if: steps.artifact.outputs.image_exists == 'false'
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar --no-daemon
+
+      - name: Log in to ECR
+        id: ecr
+        if: steps.artifact.outputs.image_exists == 'false'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        if: steps.artifact.outputs.image_exists == 'false'
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ steps.version.outputs.value }}
+        run: |
+          JAR=$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)
+          if [ -z "$JAR" ]; then
+            echo "::error::build/libs에서 실행 가능한 jar를 찾지 못했습니다."
+            exit 1
+          fi
+          docker build -f Dockerfile --build-arg JAR_FILE="$(basename "$JAR")" -t "$IMAGE" build/libs
+          docker push "$IMAGE"
+
+      # compose.yml을 마지막에 올려 Check artifact가 일부만 올라간 상태를 완료로 보지 않게 한다.
+      - name: Upload deploy bundle to S3
+        if: steps.artifact.outputs.bundle_exists == 'false'
+        env:
+          BUNDLE_PREFIX: ${{ steps.version.outputs.bundle_prefix }}
+        run: |
+          aws s3 cp --recursive deploy "s3://${ARTIFACT_BUCKET}/${BUNDLE_PREFIX}/" --exclude compose.yml
+          aws s3 cp deploy/compose.yml "s3://${ARTIFACT_BUCKET}/${BUNDLE_PREFIX}/compose.yml"
+
+      # 3) 버전 교체: 롤백에 쓸 이전 버전을 먼저 기록한다.
+      - name: Update APP_VERSION
+        id: param
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          PREVIOUS=$(aws ssm get-parameter --name "$VERSION_PARAMETER" \
+            --query 'Parameter.Value' --output text 2>/dev/null || true)
+          echo "previous=${PREVIOUS}" >> "$GITHUB_OUTPUT"
+          aws ssm put-parameter --name "$VERSION_PARAMETER" --value "$VERSION" \
+            --type String --overwrite > /dev/null
+          echo "APP_VERSION: ${PREVIOUS:-없음} -> ${VERSION}"
+
+      # 4) 새 인스턴스를 먼저 띄우고(최대 200%) 정상이 되면 기존 인스턴스를 내린다.
+      #    가용 용량이 100% 아래로 내려가지 않는다.
+      - name: Start instance refresh
+        id: refresh
+        run: |
+          REFRESH_ID=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences "{\"MinHealthyPercentage\":100,\"MaxHealthyPercentage\":200,\"InstanceWarmup\":${INSTANCE_WARMUP_SECONDS}}" \
+            --query 'InstanceRefreshId' --output text)
+          echo "id=${REFRESH_ID}" >> "$GITHUB_OUTPUT"
+          echo "InstanceRefreshId: ${REFRESH_ID}"
+
+      - name: Wait for instance refresh
+        env:
+          REFRESH_ID: ${{ steps.refresh.outputs.id }}
+        run: |
+          DEADLINE=$(( $(date +%s) + REFRESH_TIMEOUT_SECONDS ))
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            read -r STATUS PERCENT < <(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].[Status,PercentageComplete]' --output text)
+            echo "status=${STATUS} percentage=${PERCENT}"
+            case "$STATUS" in
+              Successful) exit 0 ;;
+              Failed|Cancelled|Cancelling|RollbackInProgress|RollbackFailed|RollbackSuccessful)
+                echo "::error::Instance refresh가 ${STATUS} 상태로 끝났습니다."
+                exit 1 ;;
+            esac
+            sleep "$REFRESH_POLL_SECONDS"
+          done
+          echo "::error::Instance refresh가 ${REFRESH_TIMEOUT_SECONDS}초 안에 끝나지 않았습니다."
+          exit 1
+
+      # 5) 실패하면 APP_VERSION을 이전 값으로 되돌리고 이전 버전으로 다시 교체한다.
+      #    롤백 교체의 완료 여부는 ASG 콘솔에서 확인한다. 이 job은 실패로 끝난다.
+      - name: Roll back
+        if: failure() && steps.param.outcome == 'success'
+        env:
+          PREVIOUS: ${{ steps.param.outputs.previous }}
+          REFRESH_ID: ${{ steps.refresh.outputs.id }}
+        run: |
+          if [ -z "$PREVIOUS" ] || [ "$PREVIOUS" = "None" ]; then
+            echo "::error::이전 APP_VERSION이 없어 자동 롤백하지 않습니다."
+            exit 1
+          fi
+
+          if [ -n "$REFRESH_ID" ]; then
+            aws autoscaling cancel-instance-refresh --auto-scaling-group-name "$ASG_NAME" > /dev/null 2>&1 || true
+            # 취소가 끝나야 새 교체를 시작할 수 있다.
+            for _ in $(seq 1 60); do
+              STATUS=$(aws autoscaling describe-instance-refreshes \
+                --auto-scaling-group-name "$ASG_NAME" --instance-refresh-ids "$REFRESH_ID" \
+                --query 'InstanceRefreshes[0].Status' --output text)
+              case "$STATUS" in
+                Pending|InProgress|Cancelling|Baking|RollbackInProgress) sleep 10 ;;
+                *) break ;;
+              esac
+            done
+          fi
+
+          aws ssm put-parameter --name "$VERSION_PARAMETER" --value "$PREVIOUS" \
+            --type String --overwrite > /dev/null
+          ROLLBACK_ID=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences "{\"MinHealthyPercentage\":100,\"MaxHealthyPercentage\":200,\"InstanceWarmup\":${INSTANCE_WARMUP_SECONDS}}" \
+            --query 'InstanceRefreshId' --output text)
+          echo "::warning::APP_VERSION을 ${PREVIOUS}로 되돌리고 롤백 교체를 시작했습니다. InstanceRefreshId=${ROLLBACK_ID}"
+
+      - name: Deployment summary
+        if: always()
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          PREVIOUS: ${{ steps.param.outputs.previous }}
+          REFRESH_ID: ${{ steps.refresh.outputs.id }}
+          BUILT: ${{ steps.artifact.outputs.image_exists == 'false' }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## 🚀 배포 결과: ${JOB_STATUS}"
+            echo ""
+            echo "| 항목 | 값 |"
+            echo "|---|---|"
+            echo "| 배포 버전 | \`${VERSION:--}\` |"
+            echo "| 이전 버전 | \`${PREVIOUS:--}\` |"
+            echo "| 이미지 새로 빌드 | ${BUILT} |"
+            echo "| Auto Scaling Group | \`${ASG_NAME}\` |"
+            echo "| InstanceRefreshId | \`${REFRESH_ID:--}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

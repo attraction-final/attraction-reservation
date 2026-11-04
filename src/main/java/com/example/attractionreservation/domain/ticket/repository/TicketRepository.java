@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.ticket.repository;
 
+import com.example.attractionreservation.domain.ticket.dto.TicketOrderPayment;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import jakarta.persistence.LockModeType;
@@ -43,5 +44,20 @@ public interface TicketRepository extends JpaRepository<Ticket, Long>, TicketCus
     List<Ticket> findAllByOrderItemIdInAndStatusForUpdate(
             @Param("orderItemIds") Collection<Long> orderItemIds,
             @Param("status") TicketStatus status
+    );
+
+    // 내 티켓 목록에 붙일 주문번호와 결제번호를 티켓 ID 묶음으로 한 번에 조회한다. (티켓마다 따로 조회하는 N+1 방지)
+    // Payment가 Order를 가리키고 Order는 Payment를 모르므로, Payment를 ON 조건으로 조인한다.
+    // 결제가 없는 주문도 주문번호는 보여야 하므로 LEFT JOIN 한다.
+    @Query("""
+        SELECT new com.example.attractionreservation.domain.ticket.dto.TicketOrderPayment(t.id, o.id, p.pgId)
+        FROM Ticket t
+        JOIN t.orderItem oi
+        JOIN oi.order o
+        LEFT JOIN Payment p ON p.order = o
+        WHERE t.id IN :ticketIds
+        """)
+    List<TicketOrderPayment> findOrderPaymentsByTicketIdIn(
+            @Param("ticketIds") Collection<Long> ticketIds
     );
 }

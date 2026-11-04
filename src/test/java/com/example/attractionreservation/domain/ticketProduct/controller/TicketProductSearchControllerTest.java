@@ -116,6 +116,7 @@ class TicketProductSearchControllerTest {
                         50000,
                         "테스트 상품 설명",
                         TicketProductStatus.ON_SALE,
+                        100,
                         3L
                 );
 

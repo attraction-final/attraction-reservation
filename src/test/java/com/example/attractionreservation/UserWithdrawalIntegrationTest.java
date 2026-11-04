@@ -164,7 +164,7 @@ class UserWithdrawalIntegrationTest {
                     entityManager.persist(ticket);
 
                     Attraction attraction = Attraction.create(
-                            "관람차", "테스트 시설", "A구역", 10, 5
+                            "관람차-" + UUID.randomUUID(), "테스트 시설", "A구역", 10, 5
                     );
                     entityManager.persist(attraction);
 

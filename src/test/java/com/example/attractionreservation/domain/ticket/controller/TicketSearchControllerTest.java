@@ -119,7 +119,9 @@ class TicketSearchControllerTest {
                 "종일이용권",
                 TicketType.ALL_DAY,
                 LocalDate.of(2026, 10, 25),
-                TicketStatus.UNUSED
+                TicketStatus.UNUSED,
+                100L,
+                "pg-test-id"
         );
 
         when(ticketService.findTicketAll(

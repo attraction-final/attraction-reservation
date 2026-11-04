@@ -144,6 +144,7 @@ class TicketProductDetailControllerTest {
                 50000,
                 "하루 동안 이용 가능한 입장권",
                 status,
+                100,
                 3L
         );
     }

@@ -179,7 +179,7 @@ class AttractionLogAfterCommitIntegrationTest {
             softly.assertThat(logsBeforeCompletion.get()).as("commit 전 수정 완료 로그").isEmpty();
             softly.assertThat(logsAfterCommit).as("commit 후 수정 완료 로그").singleElement().asString()
                     .contains("event=ATTRACTION_UPDATED attractionId=" + attractionId)
-                    .contains("adminId=" + ADMIN_ID)
+                    .contains("userId=" + ADMIN_ID)
                     .contains("previousDurationMinutes=10 currentDurationMinutes=12");
         });
     }
@@ -214,7 +214,7 @@ class AttractionLogAfterCommitIntegrationTest {
         assertThat(savedName).as("commit 여부에 따른 신규 행 저장 결과")
                 .isEqualTo(commit ? request.name() : null);
         assertCompletionLogs(output, "ATTRACTION_CREATED", createdAttractionId, beforeCompletion.get(), commit,
-                "adminId=" + ADMIN_ID, "durationMinutes=15");
+                "userId=" + ADMIN_ID, "durationMinutes=15");
     }
 
     @ParameterizedTest
@@ -239,7 +239,7 @@ class AttractionLogAfterCommitIntegrationTest {
         assertThat(saved.status()).isEqualTo(commit ? OperationStatus.MAINTENANCE : OperationStatus.OPERATING);
         assertThat(saved.deletedAt()).isNull();
         assertCompletionLogs(output, "ATTRACTION_STATUS_CHANGED", attractionId, beforeCompletion.get(), commit,
-                "adminId=" + ADMIN_ID, "previousStatus=OPERATING currentStatus=MAINTENANCE");
+                "userId=" + ADMIN_ID, "previousStatus=OPERATING currentStatus=MAINTENANCE");
     }
 
     @ParameterizedTest
@@ -267,7 +267,7 @@ class AttractionLogAfterCommitIntegrationTest {
             assertThat(saved.deletedAt()).isNull();
         }
         assertCompletionLogs(output, "ATTRACTION_DELETED", attractionId, beforeCompletion.get(), commit,
-                "adminId=" + ADMIN_ID);
+                "userId=" + ADMIN_ID);
     }
 
     private AttractionState readState() {

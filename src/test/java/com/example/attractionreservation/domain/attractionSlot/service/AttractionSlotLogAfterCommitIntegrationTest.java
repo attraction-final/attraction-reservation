@@ -132,7 +132,7 @@ class AttractionSlotLogAfterCommitIntegrationTest {
         // then
         assertThat(saved).isEqualTo(commit ? expectedSlot(CHANGED_START, 20, SlotStatus.OPEN) : null);
         assertCompletionLogs(result, commit, event, output,
-                "attractionId=" + attractionId, "adminId=" + ADMIN_ID,
+                "attractionId=" + attractionId, "userId=" + ADMIN_ID,
                 "startsAt=" + CHANGED_START, "capacity=20");
     }
 
@@ -154,7 +154,7 @@ class AttractionSlotLogAfterCommitIntegrationTest {
         // then
         assertThat(readSlot(slotId)).isEqualTo(commit ? expectedSlot(CHANGED_START, 10, SlotStatus.OPEN) : before);
         assertCompletionLogs(result, commit, event, output,
-                "attractionId=" + attractionId, "adminId=" + ADMIN_ID,
+                "attractionId=" + attractionId, "userId=" + ADMIN_ID,
                 "previousStartsAt=" + ORIGINAL_START, "currentStartsAt=" + CHANGED_START);
     }
 
@@ -175,7 +175,7 @@ class AttractionSlotLogAfterCommitIntegrationTest {
 
         // then
         assertThat(readSlot(slotId)).isEqualTo(commit ? expectedSlot(ORIGINAL_START, 20, SlotStatus.OPEN) : before);
-        assertCompletionLogs(result, commit, event, output, "adminId=" + ADMIN_ID,
+        assertCompletionLogs(result, commit, event, output, "userId=" + ADMIN_ID,
                 "previousCapacity=10 currentCapacity=20 reservedCount=0 currentStatus=OPEN");
     }
 
@@ -196,7 +196,7 @@ class AttractionSlotLogAfterCommitIntegrationTest {
 
         // then
         assertThat(readSlot(slotId)).isEqualTo(commit ? expectedSlot(ORIGINAL_START, 10, SlotStatus.SUSPENDED) : before);
-        assertCompletionLogs(result, commit, event, output, "adminId=" + ADMIN_ID,
+        assertCompletionLogs(result, commit, event, output, "userId=" + ADMIN_ID,
                 "previousStatus=OPEN currentStatus=SUSPENDED");
     }
 
@@ -217,7 +217,7 @@ class AttractionSlotLogAfterCommitIntegrationTest {
         // then
         assertThat(readSlot(slotId)).isEqualTo(commit ? expectedSlot(ORIGINAL_START, 10, SlotStatus.CANCELLED) : before);
         assertCompletionLogs(result, commit, event, output, "attractionId=" + attractionId,
-                "adminId=" + ADMIN_ID, "startsAt=" + ORIGINAL_START);
+                "userId=" + ADMIN_ID, "startsAt=" + ORIGINAL_START);
     }
 
     private TransactionResult executeOperation(boolean commit, String event, CapturedOutput output,

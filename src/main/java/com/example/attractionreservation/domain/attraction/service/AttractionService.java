@@ -71,7 +71,7 @@ public class AttractionService {
         Integer durationMinutes = savedAttraction.getDurationMinutes();
         // 등록 트랜잭션이 commit된 경우에만 완료 로그를 남긴다.
         AfterCommit.run(() ->
-                log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
+                log.info("event=ATTRACTION_CREATED attractionId={} userId={} durationMinutes={}",
                         attractionId, adminId, durationMinutes)
         );
 
@@ -213,7 +213,7 @@ public class AttractionService {
         Integer currentDurationMinutes = attraction.getDurationMinutes();
         // 람다를 commit 후 실행할 작업으로 등록한다. rollback되면 수정 완료 로그는 남기지 않는다.
         AfterCommit.run(() ->
-                log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
+                log.info("event=ATTRACTION_UPDATED attractionId={} userId={} previousDurationMinutes={} currentDurationMinutes={}",
                         attractionId, adminId, previousDurationMinutes, currentDurationMinutes)
         );
 
@@ -248,7 +248,7 @@ public class AttractionService {
 
         // 미리 보관한 변경 전·후 상태로 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다.
         AfterCommit.run(() ->
-        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
+        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} userId={} previousStatus={} currentStatus={}",
                 attractionId, adminId, previousStatus, newStatus)
         );
 
@@ -277,7 +277,7 @@ public class AttractionService {
 
         // 삭제 트랜잭션이 commit된 경우에만 완료 로그를 남기고, rollback되면 기록하지 않는다.
         AfterCommit.run(() ->
-            log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId)
+            log.info("event=ATTRACTION_DELETED attractionId={} userId={}", attractionId, adminId)
         );
     }
 

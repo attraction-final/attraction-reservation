@@ -186,7 +186,7 @@ public class RefundService {
         String pgId = payment.getPgId();
         Long userId = payment.getOrder().getUser().getId();
         int amount = refund.getRefundAmount();
-        AfterCommit.run(() -> log.info("event=REFUND_REQUESTED refundId={} pgId={} userId={} amount={}",
+        AfterCommit.run(() -> log.info("event=REFUND_REQUESTED refundId={} pgId={} targetUserId={} amount={}",
                 refundId, pgId, userId, amount));
         return refundId;
     }

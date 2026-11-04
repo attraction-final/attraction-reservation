@@ -60,7 +60,7 @@ public class AttractionSlotService {
         LocalDateTime startsAtLog = savedSlot.getStartsAt();
         Integer capacityLog = savedSlot.getCapacity();
         AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} adminId={} startsAt={} capacity={}",
+            log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} userId={} startsAt={} capacity={}",
                     slotId, attractionId, adminId, startsAtLog, capacityLog)
         );
 
@@ -142,7 +142,7 @@ public class AttractionSlotService {
         // 추가
         // 변경 전·후 시작 시각을 사용해 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다
         AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} adminId={} previousStartsAt={} currentStartsAt={}",
+            log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} userId={} previousStartsAt={} currentStartsAt={}",
                     slotId, attractionId, adminId, previousStartsAt, newStartsAt)
         );
 
@@ -191,7 +191,7 @@ public class AttractionSlotService {
         Integer reservedCount = slot.getReservedCount();
         SlotStatus currentStatus = slot.getStatus();
         AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} adminId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
+            log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} userId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
                     slotId, adminId, previousCapacity, currentCapacity, reservedCount, currentStatus)
         );
 
@@ -222,7 +222,7 @@ public class AttractionSlotService {
         // 추가
         // 변경 전·후 상태를 사용해 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다.
         AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} adminId={} previousStatus={} currentStatus={}",
+            log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} userId={} previousStatus={} currentStatus={}",
                     slotId, adminId, previousStatus, newStatus)
         );
 
@@ -244,7 +244,7 @@ public class AttractionSlotService {
         Long attractionId = slot.getAttraction().getId();
         LocalDateTime currentStartsAt = slot.getStartsAt();
         AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} adminId={} startsAt={}",
+            log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} userId={} startsAt={}",
                     slotId, attractionId, adminId, currentStartsAt)
         );
 

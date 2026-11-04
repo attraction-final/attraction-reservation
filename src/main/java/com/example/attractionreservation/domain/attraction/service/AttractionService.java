@@ -10,6 +10,7 @@ import com.example.attractionreservation.domain.attractionSlot.repository.Reserv
 import com.example.attractionreservation.global.config.CacheConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -203,9 +204,14 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
-                attractionId, adminId, previousDurationMinutes, attraction.getDurationMinutes());
+        // 변경 시점의 값을 미리 보관하여 callback에서 엔티티를 다시 읽지 않도록 한다.
+        Integer currentDurationMinutes = attraction.getDurationMinutes();
+        // 람다를 commit 후 실행할 작업으로 등록한다. rollback되면 수정 완료 로그는 남기지 않는다.
+        AfterCommit.run(() ->
+                log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
+                        attractionId, adminId, previousDurationMinutes, currentDurationMinutes)
+        );
+
 
         return SearchAttractionResponse.from(attraction);
     }

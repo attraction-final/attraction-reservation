@@ -4,7 +4,8 @@ name: CD
 # 롤백은 workflow_dispatch로 이전 커밋 SHA를 넣어 실행한다.
 #
 # 배포 흐름
-#   1. 이미지를 빌드해 ECR에 <커밋 SHA> 태그로 올리고, 실행 구성(deploy/)을 S3의 <커밋 SHA>/ 아래에 올린다.
+#   1. 이미지를 linux/arm64로 빌드해 ECR에 <커밋 SHA> 태그로 올리고, 실행 구성(deploy/)을 S3의 <커밋 SHA>/ 아래에 올린다.
+#      운영 인스턴스가 Graviton(t4g)이므로 ARM 러너에서 빌드한다.
 #      (이미 있으면 건너뛴다)
 #   2. Parameter Store의 APP_VERSION을 이번 SHA로 바꾼다.
 #   3. ASG Instance Refresh를 시작한다. 새 인스턴스는 기동 시 APP_VERSION의 실행 구성을 받아
@@ -20,7 +21,7 @@ name: CD
 #   vars.SSM_PREFIX            예: /attraction-reservation/prod
 
 on:
-  # 임시: cd 브랜치에서 이미지 빌드·ECR push·S3 업로드까지만 시험한다. main 병합 전에 제거한다.
+  # 임시: cd 브랜치 push로 전체 배포를 시험한다. main 병합 전에 제거한다.
   push:
     branches: [ cd ]
   workflow_run:
@@ -49,7 +50,7 @@ jobs:
     # CI는 PR에서도 실행되므로 main push에서 성공한 실행만 배포한다.
     # fork의 코드를 checkout하지 않도록 같은 저장소에서 실행된 CI만 허용한다.
     # 수동 실행은 main에서만 허용한다.
-    # 임시: cd 브랜치 push는 배포 단계 없이 빌드·업로드만 실행한다.
+    # 임시: cd 브랜치 push로 전체 배포를 시험한다.
     if: >
       (github.event_name == 'push' && github.ref == 'refs/heads/cd') ||
       (github.event_name == 'workflow_run' &&
@@ -57,7 +58,7 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm   # 운영 인스턴스(t4g)와 같은 arm64에서 이미지를 빌드한다
     environment: production
     timeout-minutes: 60
 
@@ -156,7 +157,7 @@ jobs:
             echo "::error::build/libs에서 실행 가능한 jar를 찾지 못했습니다."
             exit 1
           fi
-          docker build -f Dockerfile --build-arg JAR_FILE="$(basename "$JAR")" -t "$IMAGE" build/libs
+          docker build --platform linux/arm64 -f Dockerfile --build-arg JAR_FILE="$(basename "$JAR")" -t "$IMAGE" build/libs
           docker push "$IMAGE"
 
       # compose.yml을 마지막에 올려 Check artifact가 일부만 올라간 상태를 완료로 보지 않게 한다.
@@ -171,7 +172,6 @@ jobs:
       # 3) 버전 교체: 롤백에 쓸 이전 버전을 먼저 기록한다.
       - name: Update APP_VERSION
         id: param
-        if: github.event_name != 'push'
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
@@ -186,7 +186,6 @@ jobs:
       #    가용 용량이 100% 아래로 내려가지 않는다.
       - name: Start instance refresh
         id: refresh
-        if: github.event_name != 'push'
         run: |
           REFRESH_ID=$(aws autoscaling start-instance-refresh \
             --auto-scaling-group-name "$ASG_NAME" \
@@ -196,7 +195,6 @@ jobs:
           echo "InstanceRefreshId: ${REFRESH_ID}"
 
       - name: Wait for instance refresh
-        if: github.event_name != 'push'
         env:
           REFRESH_ID: ${{ steps.refresh.outputs.id }}
         run: |

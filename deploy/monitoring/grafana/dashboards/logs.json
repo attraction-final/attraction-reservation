@@ -272,7 +272,7 @@
     {
       "type": "stat",
       "title": "비즈니스 이벤트",
-      "description": "event 키가 있는 로그 중 4xx 응답 로그를 뺀 건수.",
+      "description": "event 키가 있는 로그 중 HTTP 4xx 응답 로그를 뺀 건수.",
       "datasource": {
         "type": "loki",
         "uid": "loki"

@@ -9,14 +9,17 @@ import com.example.attractionreservation.domain.attractionSlot.repository.Attrac
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -28,6 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -87,6 +92,15 @@ class AttractionServiceTest {
                 .willReturn(count);
     }
 
+    // 실제 예외처럼 Hibernate 제약 예외를 원인 체인 안에 감싸서 판별 동작을 검증한다.
+    private DataIntegrityViolationException createConstraintViolation(String constraintName) {
+        ConstraintViolationException violation = mock(ConstraintViolationException.class);
+        given(violation.getConstraintName()).willReturn(constraintName);
+        return new DataIntegrityViolationException(
+                "DB 제약 위반", new IllegalStateException("감싸진 원인 예외", violation)
+        );
+    }
+
     // 등록
     @Test
     @DisplayName("이름이 중복되지 않으면 운영중 상태로 등록된다")
@@ -94,7 +108,7 @@ class AttractionServiceTest {
         // given
         CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "빠른 속도의 코스터", "A구역", 10, 8); // 수정: 8 추가
         given(attractionRepository.existsByNameAndDeletedAtIsNull("롤러코스터")).willReturn(false);
-        given(attractionRepository.save(any(Attraction.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(attractionRepository.saveAndFlush(any(Attraction.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         // when
         CreateAttractionResponse response = attractionService.createAttraction(ADMIN_ID, request);
@@ -116,7 +130,51 @@ class AttractionServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
-        verify(attractionRepository, never()).save(any());
+        verify(attractionRepository, never()).saveAndFlush(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"uk_attraction_name_active", "attractions.uk_attraction_name_active"})
+    @DisplayName("등록 중 이름 중복 제약을 위반하면 테이블 접두사 유무와 관계없이 업무 예외로 변환한다")
+    void createAttraction_NameConstraintViolation_ThrowsBusinessException(String constraintName) {
+        // given
+        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "설명", "A구역", 10, 8);
+        DataIntegrityViolationException exception = createConstraintViolation(constraintName);
+        given(attractionRepository.saveAndFlush(any(Attraction.class))).willThrow(exception);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.createAttraction(ADMIN_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"uk_other_constraint", "other_uk_attraction_name_active"})
+    @DisplayName("등록 중 다른 제약 위반이거나 제약 이름이 없으면 원래 예외를 그대로 전달한다")
+    void createAttraction_OtherConstraintViolation_RethrowsOriginalException(String constraintName) {
+        // given
+        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "설명", "A구역", 10, 8);
+        DataIntegrityViolationException exception = createConstraintViolation(constraintName);
+        given(attractionRepository.saveAndFlush(any(Attraction.class))).willThrow(exception);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.createAttraction(ADMIN_ID, request))
+                .isSameAs(exception);
+    }
+
+    @Test
+    @DisplayName("등록 중 Hibernate 제약 예외가 원인에 없으면 원래 예외를 그대로 전달한다")
+    void createAttraction_NoHibernateConstraintCause_RethrowsOriginalException() {
+        // given
+        CreateAttractionRequest request = new CreateAttractionRequest("롤러코스터", "설명", "A구역", 10, 8);
+        DataIntegrityViolationException exception = new DataIntegrityViolationException("다른 DB 오류");
+        given(attractionRepository.saveAndFlush(any(Attraction.class))).willThrow(exception);
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.createAttraction(ADMIN_ID, request))
+                .isSameAs(exception);
     }
 
     // 목록 조회
@@ -286,6 +344,59 @@ class AttractionServiceTest {
 
         verify(attractionRepository, never()).existsByNameAndIdNotAndDeletedAtIsNull(any(), any());
         verify(attractionRepository, never()).flush();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"uk_attraction_name_active", "attractions.uk_attraction_name_active"})
+    @DisplayName("수정 flush 중 이름 중복 제약을 위반하면 테이블 접두사 유무와 관계없이 업무 예외로 변환한다")
+    void updateAttraction_NameConstraintViolation_ThrowsBusinessException(String constraintName) {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
+        UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null, null);
+        DataIntegrityViolationException exception = createConstraintViolation(constraintName);
+        doThrow(exception).when(attractionRepository).flush();
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttraction(ADMIN_ID, 1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+        verify(attractionDetailCacheEvictor, never()).evictAfterCommit(anyLong());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"uk_other_constraint", "other_uk_attraction_name_active"})
+    @DisplayName("수정 중 다른 제약 위반이거나 제약 이름이 없으면 원래 예외를 그대로 전달한다")
+    void updateAttraction_OtherConstraintViolation_RethrowsOriginalException(String constraintName) {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
+        UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null, null);
+        DataIntegrityViolationException exception = createConstraintViolation(constraintName);
+        doThrow(exception).when(attractionRepository).flush();
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttraction(ADMIN_ID, 1L, request))
+                .isSameAs(exception);
+        verify(attractionDetailCacheEvictor, never()).evictAfterCommit(anyLong());
+    }
+
+    @Test
+    @DisplayName("수정 중 Hibernate 제약 예외가 원인에 없으면 원래 예외를 그대로 전달한다")
+    void updateAttraction_NoHibernateConstraintCause_RethrowsOriginalException() {
+        // given
+        Attraction attraction = createAttractionWithId(1L, OperationStatus.OPERATING);
+        given(attractionRepository.findActiveByIdForUpdate(1L)).willReturn(Optional.of(attraction));
+        UpdateAttractionRequest request = new UpdateAttractionRequest("회전목마", null, null, null, null);
+        DataIntegrityViolationException exception = new DataIntegrityViolationException("다른 DB 오류");
+        doThrow(exception).when(attractionRepository).flush();
+
+        // when & then
+        assertThatThrownBy(() -> attractionService.updateAttraction(ADMIN_ID, 1L, request))
+                .isSameAs(exception);
+        verify(attractionDetailCacheEvictor, never()).evictAfterCommit(anyLong());
     }
 
     // 상태 변경 - 성공

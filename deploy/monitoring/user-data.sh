@@ -4,20 +4,24 @@
 #
 # 기동 흐름
 #   1. Docker와 compose 플러그인을 설치한다.
-#   2. Parameter Store의 APP_VERSION에 해당하는 실행 구성 중 monitoring/ 을 S3에서 받는다.
+#   2. Parameter Store의 MONITORING_VERSION에 해당하는 실행 구성을 S3의 monitoring/<SHA>/ 에서 받는다.
 #   3. 데이터 디렉터리(/data)를 만들고 컨테이너 사용자에 맞춰 소유자를 바꾼다.
 #   4. Grafana 관리자 비밀번호로 .env를 만들고 docker compose로 실행한다.
 #
-# 전제
-#   - AMI: Amazon Linux 2023 (aws cli v2 기본 포함)
-#   - 인스턴스 역할: S3 GetObject(ARTIFACT_BUCKET/ARTIFACT_PREFIX/*),
-#     SSM GetParameter(SSM_PREFIX/*), SecureString 복호화
-#   - Parameter Store
-#       ${SSM_PREFIX}/APP_VERSION                       실행 구성을 받을 커밋 SHA
-#       ${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD  Grafana admin 비밀번호
-#   - /data 는 루트 볼륨에 둔다. 인스턴스를 지워도 볼륨이 남도록 DeleteOnTermination=false로 띄운다.
+# 인스턴스를 띄울 때 지정할 값
+#   - AMI: Amazon Linux 2023 arm64 (aws cli v2 기본 포함), 타입 t4g.medium
+#   - 사설 IP 10.0.130.10 고정 (앱의 LOKI_URL, PROMETHEUS_URL이 이 주소를 가리킨다)
+#   - 태그 Name=attraction-reservation-monitoring (CD가 이 태그로 인스턴스를 찾는다)
+#   - 인스턴스 프로파일 monitoring-ec2-role: S3 배포 번들 읽기·목록, SSM 파라미터(MONITORING_VERSION,
+#     monitoring/*) 읽기, CloudWatch 지표 읽기, SSM 접속
+#   - IMDSv2 필수, hop limit 2: Grafana 컨테이너가 인스턴스 역할로 CloudWatch를 읽는다.
+#   - 루트 볼륨에 /data 를 둔다. 인스턴스를 지워도 볼륨이 남도록 DeleteOnTermination=false로 띄운다.
 #
-# 설정을 바꾼 뒤에는 인스턴스에서 2단계(S3 받기)와 docker compose up -d 만 다시 실행한다.
+# 필요한 Parameter Store 값
+#   ${SSM_PREFIX}/MONITORING_VERSION                 실행 구성을 받을 커밋 SHA. CD가 갱신한다.
+#   ${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD  Grafana admin 비밀번호
+#
+# 이후 설정 변경은 CD(deploy-monitoring)가 SSM Run Command로 반영한다.
 #
 # 비밀값이 출력되지 않도록 set -x를 쓰지 않는다.
 
@@ -49,15 +53,15 @@ echo "$(cut -d' ' -f1 /tmp/docker-compose.sha256)  ${COMPOSE_DIR}/docker-compose
 chmod +x "${COMPOSE_DIR}/docker-compose"
 
 # 2) 실행 구성
-APP_VERSION=$(aws ssm get-parameter --name "${SSM_PREFIX}/APP_VERSION" \
+MONITORING_VERSION=$(aws ssm get-parameter --name "${SSM_PREFIX}/MONITORING_VERSION" \
   --query 'Parameter.Value' --output text)
-if ! [[ "$APP_VERSION" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "APP_VERSION이 40자 커밋 SHA가 아닙니다: ${APP_VERSION}" >&2
+if ! [[ "$MONITORING_VERSION" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "MONITORING_VERSION이 40자 커밋 SHA가 아닙니다: ${MONITORING_VERSION}" >&2
   exit 1
 fi
 
 mkdir -p "$DEPLOY_DIR"
-aws s3 cp --recursive "s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/${APP_VERSION}/monitoring/" "$DEPLOY_DIR/"
+aws s3 cp --recursive "s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/monitoring/${MONITORING_VERSION}/" "$DEPLOY_DIR/"
 cd "$DEPLOY_DIR"
 
 # 3) 데이터 디렉터리. 각 이미지의 기본 실행 사용자(UID)에 맞춘다.
@@ -75,4 +79,4 @@ umask 022
 
 docker compose up -d
 
-echo "monitoring ${APP_VERSION} 기동 완료"
+echo "monitoring ${MONITORING_VERSION} 기동 완료"

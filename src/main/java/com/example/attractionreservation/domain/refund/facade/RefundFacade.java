@@ -31,6 +31,20 @@ public class RefundFacade {
         return processAndFind(refundId);
     }
 
+    // 관리자 전체 환불
+    public RefundResponse createAdminFullRefund(String pgId, CreateRefundRequest request) {
+        Long refundId = refundService.createAdminFullRefund(pgId, request.reason(), Instant.now());
+        return processAndFind(refundId);
+    }
+
+    // 관리자 부분 환불
+    public RefundResponse createAdminPartialRefund(String pgId, CreatePartialRefundRequest request) {
+        Long refundId = refundService.createAdminPartialRefund(pgId, request.ticketIds(), request.reason(), Instant.now());
+        return processAndFind(refundId);
+    }
+
+
+
     private RefundResponse processAndFind(Long refundId) {
         refundProcessor.processById(refundId);
         return refundService.findRefundById(refundId);

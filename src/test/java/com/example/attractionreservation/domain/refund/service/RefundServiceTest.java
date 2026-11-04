@@ -25,6 +25,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -536,6 +537,223 @@ class RefundServiceTest {
         assertThatThrownBy(() -> refundService.findRefundById(1L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_NOT_FOUND.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, 86400})
+    @DisplayName("관리자 전체 환불은 회원 소유 결제의 방문일 당일·이후에도 미사용 티켓을 환불 요청한다")
+    void createAdminFullRefund_AfterDeadline_SavesUnusedTickets(long secondsAfterVisitStart) {
+        // given
+        ReflectionTestUtils.setField(payment.getOrder().getUser(), "id", OTHER_USER_ID);
+        givenPayment(payment);
+        List<Ticket> unused = tickets(adultItem(payment), 1L, 2, TicketStatus.UNUSED);
+        given(ticketService.findUnusedTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID))).willReturn(unused);
+        givenRefundedQuantities(List.of());
+        givenSaveReturnsWithId();
+        Instant requestedAt = VISIT_DAY_START.plusSeconds(secondsAfterVisitStart);
+
+        // when
+        Long refundId = refundService.createAdminFullRefund(PG_ID, "관리자 환불", requestedAt);
+
+        // then
+        assertThat(refundId).isEqualTo(1L);
+        Refund saved = captureSavedRefund();
+        assertThat(saved.getPayment()).isSameAs(payment);
+        assertThat(saved.getRequestedAt()).isEqualTo(requestedAt);
+        assertThat(saved.getStatus()).isEqualTo(RefundStatus.REQUESTED);
+        assertThat(saved.getRefundAmount()).isEqualTo(20000);
+        assertThat(unused).extracting(Ticket::getStatus).containsOnly(TicketStatus.REFUNDED);
+        var calls = org.mockito.Mockito.inOrder(paymentRepository, ticketService, refundRepository);
+        calls.verify(paymentRepository).findWithLockByPgId(PG_ID);
+        calls.verify(ticketService).findUnusedTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID));
+        calls.verify(refundRepository).save(any(Refund.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, 86400})
+    @DisplayName("관리자 부분 환불은 회원 소유 결제의 방문일 당일·이후에도 지정한 미사용 티켓만 환불 요청한다")
+    void createAdminPartialRefund_AfterDeadline_SavesSelectedTickets(long secondsAfterVisitStart) {
+        // given
+        ReflectionTestUtils.setField(payment.getOrder().getUser(), "id", OTHER_USER_ID);
+        givenPayment(payment);
+        List<Ticket> selected = tickets(childItem(payment), 11L, 1, TicketStatus.UNUSED);
+        givenRefundTickets(selected);
+        givenRefundedQuantities(List.of());
+        givenSaveReturnsWithId();
+        Instant requestedAt = VISIT_DAY_START.plusSeconds(secondsAfterVisitStart);
+
+        // when
+        Long refundId = refundService.createAdminPartialRefund(PG_ID, List.of(11L), "관리자 환불", requestedAt);
+
+        // then
+        assertThat(refundId).isEqualTo(1L);
+        Refund saved = captureSavedRefund();
+        assertThat(saved.getRequestedAt()).isEqualTo(requestedAt);
+        assertThat(saved.getRefundAmount()).isEqualTo(5000);
+        assertThat(saved.getRefundItems()).singleElement().satisfies(item -> {
+            assertThat(item.getOrderItem().getId()).isEqualTo(CHILD_ITEM_ID);
+            assertThat(item.getQuantity()).isEqualTo(1);
+        });
+        assertThat(selected.get(0).getStatus()).isEqualTo(TicketStatus.REFUNDED);
+        var calls = org.mockito.Mockito.inOrder(paymentRepository, ticketService, refundRepository);
+        calls.verify(paymentRepository).findWithLockByPgId(PG_ID);
+        calls.verify(ticketService).findRefundTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID), Set.of(11L));
+        calls.verify(refundRepository).save(any(Refund.class));
+    }
+
+    @Test
+    @DisplayName("관리자 환불도 부분 환불된 결제의 남은 수량을 초과하여 요청할 수 없다")
+    void createAdminPartialRefund_ExceedsRemainingQuantity_RejectsRequest() {
+        // given
+        payment = createPayment(PaymentStatus.PARTIALLY_REFUNDED);
+        givenPayment(payment);
+        List<Ticket> selected = tickets(adultItem(payment), 1L, 2, TicketStatus.UNUSED);
+        givenRefundTickets(selected);
+        givenRefundedQuantities(List.of(new RefundedQuantity(ADULT_ITEM_ID, 2L)));
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(
+                PG_ID, ticketIds(selected), "관리자 환불", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFUND_INVALID_QUANTITY);
+        verify(refundRepository, never()).save(any());
+        assertThat(selected).extracting(Ticket::getStatus).containsOnly(TicketStatus.UNUSED);
+    }
+
+    @Test
+    @DisplayName("관리자 전체 환불도 부분 환불된 결제의 남은 미사용 티켓을 환불할 수 있다")
+    void createAdminFullRefund_PartiallyRefundedPayment_SavesRemainingTickets() {
+        // given
+        payment = createPayment(PaymentStatus.PARTIALLY_REFUNDED);
+        givenPayment(payment);
+        List<Ticket> unused = tickets(adultItem(payment), 1L, 1, TicketStatus.UNUSED);
+        given(ticketService.findUnusedTicketsForUpdate(anySet())).willReturn(unused);
+        givenRefundedQuantities(List.of(new RefundedQuantity(ADULT_ITEM_ID, 2L)));
+        givenSaveReturnsWithId();
+
+        // when
+        refundService.createAdminFullRefund(PG_ID, "관리자 환불", VISIT_DAY_START);
+
+        // then
+        assertThat(captureSavedRefund().getRefundAmount()).isEqualTo(10000);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, names = {"PENDING", "FAILED", "CANCELLED", "REFUNDED"})
+    @DisplayName("관리자 전체 환불도 환불 불가 결제 상태를 거부한다")
+    void createAdminFullRefund_InvalidPaymentStatus_RejectsRequest(PaymentStatus status) {
+        // given
+        givenPayment(createPayment(status));
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminFullRefund(PG_ID, "관리자 환불", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
+        verifyNoInteractions(ticketService, refundRepository);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentStatus.class, names = {"PENDING", "FAILED", "CANCELLED", "REFUNDED"})
+    @DisplayName("관리자 부분 환불도 환불 불가 결제 상태를 거부한다")
+    void createAdminPartialRefund_InvalidPaymentStatus_RejectsRequest(PaymentStatus status) {
+        // given
+        givenPayment(createPayment(status));
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(PG_ID, List.of(1L), "관리자 환불", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
+        verifyNoInteractions(ticketService, refundRepository);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TicketStatus.class, names = {"IN_USE", "USED", "EXPIRED", "REFUNDED"})
+    @DisplayName("관리자 부분 환불도 사용 중·사용 완료·만료·환불된 티켓을 거부한다")
+    void createAdminPartialRefund_NotUnusedTicket_RejectsRequest(TicketStatus status) {
+        // given
+        givenPayment(payment);
+        List<Ticket> selected = tickets(adultItem(payment), 1L, 1, status);
+        givenRefundTickets(selected);
+        givenRefundedQuantities(List.of());
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(PG_ID, List.of(1L), "관리자 환불", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.TICKET_NOT_REFUNDABLE);
+        verify(refundRepository, never()).save(any());
+        assertThat(selected.get(0).getStatus()).isEqualTo(status);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @DisplayName("관리자 부분 환불은 티켓 목록이 없으면 결제 조회 전에 거부한다")
+    void createAdminPartialRefund_EmptyTicketIds_RejectsRequest(List<Long> ids) {
+        // given
+        String reason = "관리자 환불";
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(PG_ID, ids, reason, NOW))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_INPUT_VALUE);
+        verifyNoInteractions(paymentRepository, ticketService, refundRepository);
+    }
+
+    @Test
+    @DisplayName("관리자 부분 환불은 중복 티켓 ID를 결제 조회 전에 거부한다")
+    void createAdminPartialRefund_DuplicateTicketIds_RejectsRequest() {
+        // given
+        List<Long> ids = List.of(1L, 1L);
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(PG_ID, ids, "관리자 환불", NOW))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFUND_DUPLICATE_TICKET);
+        verifyNoInteractions(paymentRepository, ticketService, refundRepository);
+    }
+
+    @Test
+    @DisplayName("관리자 부분 환불도 대상 주문에 속하지 않는 티켓을 거부한다")
+    void createAdminPartialRefund_TicketOutsideOrder_RejectsRequest() {
+        // given
+        givenPayment(payment);
+        given(ticketService.findRefundTicketsForUpdate(anySet(), anySet()))
+                .willThrow(new BusinessException(ErrorCode.REFUND_INVALID_TICKET));
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(PG_ID, List.of(99L), "관리자 환불", NOW))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFUND_INVALID_TICKET);
+        verify(refundRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("관리자 전체 환불은 미사용 티켓이 없으면 거부한다")
+    void createAdminFullRefund_NoUnusedTickets_RejectsRequest() {
+        // given
+        givenPayment(payment);
+        given(ticketService.findUnusedTicketsForUpdate(anySet())).willReturn(List.of());
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminFullRefund(PG_ID, "관리자 환불", VISIT_DAY_START))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFUND_INVALID_QUANTITY);
+        verify(refundRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("관리자 전체·부분 환불 모두 존재하지 않는 결제를 거부한다")
+    void createAdminRefunds_PaymentNotFound_RejectsRequests() {
+        // given
+        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> refundService.createAdminFullRefund(PG_ID, "관리자 환불", NOW))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
+        assertThatThrownBy(() -> refundService.createAdminPartialRefund(PG_ID, List.of(1L), "관리자 환불", NOW))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
+        verifyNoInteractions(ticketService, refundRepository);
     }
 
     private void givenPayment(Payment found) {

@@ -1,9 +1,13 @@
 package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
+import com.example.attractionreservation.domain.attraction.dto.CreateAttractionRequest;
+import com.example.attractionreservation.domain.attraction.dto.CreateAttractionResponse;
 import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
+import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.reservation.service.ReservationUpcomingReservationReader;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
@@ -13,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -31,6 +37,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -39,7 +46,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
-// 실제 Service가 외부 트랜잭션에 참여한 뒤 rollback되면 완료 로그도 남지 않아야 한다.
+// 실제 Service와 외부 트랜잭션을 사용해 commit 이후에만 완료 로그가 남는지 검증한다.
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -66,6 +73,7 @@ class AttractionLogAfterCommitIntegrationTest {
 
     private TransactionTemplate transactionTemplate;
     private Long attractionId;
+    private Long createdAttractionId;
 
     @TestConfiguration(proxyBeanMethods = false)
     static class MySqlConfig {
@@ -94,6 +102,13 @@ class AttractionLogAfterCommitIntegrationTest {
             return;
         }
         transactionTemplate.executeWithoutResult(status -> {
+            // 등록 테스트에서 commit된 추가 fixture도 이번 테스트의 ID로만 정리한다.
+            if (createdAttractionId != null) {
+                Attraction created = entityManager.find(Attraction.class, createdAttractionId);
+                if (created != null) {
+                    entityManager.remove(created);
+                }
+            }
             Attraction attraction = entityManager.find(Attraction.class, attractionId);
             if (attraction != null) {
                 entityManager.remove(attraction);
@@ -169,14 +184,126 @@ class AttractionLogAfterCommitIntegrationTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("어트랙션 등록은 commit 전 로그가 없고 commit 시에만 저장 결과와 완료 로그가 남는다")
+    void createAttraction_TransactionCompletes_LogsOnlyWhenCommitted(boolean commit, CapturedOutput output) {
+        // given
+        CreateAttractionRequest request = new CreateAttractionRequest(
+                "등록로그-" + UUID.randomUUID(), "등록 설명", "A구역", 15, 5
+        );
+        AtomicReference<List<String>> beforeCompletion = new AtomicReference<>();
+
+        // when
+        CreateAttractionResponse response = transactionTemplate.execute(status -> {
+            CreateAttractionResponse created = attractionService.createAttraction(ADMIN_ID, request);
+            createdAttractionId = created.attractionId();
+            beforeCompletion.set(eventLogs(output, "ATTRACTION_CREATED", createdAttractionId));
+            if (!commit) {
+                status.setRollbackOnly();
+            }
+            return created;
+        });
+        String savedName = transactionTemplate.execute(status -> {
+            Attraction saved = entityManager.find(Attraction.class, createdAttractionId);
+            return saved == null ? null : saved.getName();
+        });
+
+        // then
+        assertThat(response).isNotNull();
+        assertThat(savedName).as("commit 여부에 따른 신규 행 저장 결과")
+                .isEqualTo(commit ? request.name() : null);
+        assertCompletionLogs(output, "ATTRACTION_CREATED", createdAttractionId, beforeCompletion.get(), commit,
+                "adminId=" + ADMIN_ID, "durationMinutes=15");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("어트랙션 상태 변경은 commit 시에만 반영되고 변경 전·후 상태 로그가 한 번 남는다")
+    void updateAttractionStatus_TransactionCompletes_LogsOnlyWhenCommitted(boolean commit, CapturedOutput output) {
+        // given
+        UpdateAttractionStatusRequest request = new UpdateAttractionStatusRequest(OperationStatus.MAINTENANCE.name());
+        AtomicReference<List<String>> beforeCompletion = new AtomicReference<>();
+
+        // when
+        transactionTemplate.executeWithoutResult(status -> {
+            attractionService.updateAttractionStatus(ADMIN_ID, attractionId, request);
+            beforeCompletion.set(eventLogs(output, "ATTRACTION_STATUS_CHANGED", attractionId));
+            if (!commit) {
+                status.setRollbackOnly();
+            }
+        });
+        AttractionState saved = readState();
+
+        // then
+        assertThat(saved.status()).isEqualTo(commit ? OperationStatus.MAINTENANCE : OperationStatus.OPERATING);
+        assertThat(saved.deletedAt()).isNull();
+        assertCompletionLogs(output, "ATTRACTION_STATUS_CHANGED", attractionId, beforeCompletion.get(), commit,
+                "adminId=" + ADMIN_ID, "previousStatus=OPERATING currentStatus=MAINTENANCE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("어트랙션 삭제는 commit 시에만 삭제 상태·시각과 완료 로그가 남는다")
+    void deleteAttraction_TransactionCompletes_LogsOnlyWhenCommitted(boolean commit, CapturedOutput output) {
+        // given
+        AtomicReference<List<String>> beforeCompletion = new AtomicReference<>();
+
+        // when
+        transactionTemplate.executeWithoutResult(status -> {
+            attractionService.deleteAttraction(ADMIN_ID, attractionId);
+            beforeCompletion.set(eventLogs(output, "ATTRACTION_DELETED", attractionId));
+            if (!commit) {
+                status.setRollbackOnly();
+            }
+        });
+        AttractionState saved = readState();
+
+        // then
+        assertThat(saved.status()).isEqualTo(commit ? OperationStatus.DELETED : OperationStatus.OPERATING);
+        if (commit) {
+            assertThat(saved.deletedAt()).isNotNull();
+        } else {
+            assertThat(saved.deletedAt()).isNull();
+        }
+        assertCompletionLogs(output, "ATTRACTION_DELETED", attractionId, beforeCompletion.get(), commit,
+                "adminId=" + ADMIN_ID);
+    }
+
+    private AttractionState readState() {
+        // 이전 영속성 컨텍스트의 값이 아닌 트랜잭션 종료 후 DB 값을 확인한다.
+        return Objects.requireNonNull(transactionTemplate.execute(status -> {
+            Attraction saved = entityManager.find(Attraction.class, attractionId);
+            return new AttractionState(saved.getOperationStatus(), saved.getDeletedAt());
+        }));
+    }
+
+    private void assertCompletionLogs(CapturedOutput output, String event, Long id,
+                                      List<String> beforeCompletion, boolean commit, String... fields) {
+        assertThat(beforeCompletion).as("트랜잭션 종료 전 완료 로그").isEmpty();
+        List<String> completedLogs = eventLogs(output, event, id);
+        if (commit) {
+            assertThat(completedLogs).as("commit 후 완료 로그").singleElement().asString().contains(fields);
+        } else {
+            assertThat(completedLogs).as("rollback 후 완료 로그").isEmpty();
+        }
+    }
+
     private List<String> updateLogs(CapturedOutput output) {
+        return eventLogs(output, "ATTRACTION_UPDATED", attractionId);
+    }
+
+    private List<String> eventLogs(CapturedOutput output, String event, Long id) {
         // 다른 테스트나 framework 로그를 제외하고 이번 fixture의 비즈니스 이벤트만 확인한다.
         return output.getAll().lines()
-                .filter(line -> line.contains("event=ATTRACTION_UPDATED "))
-                .filter(line -> line.contains("attractionId=" + attractionId + " "))
+                .filter(line -> line.contains("event=" + event + " "))
+                .filter(line -> line.contains("attractionId=" + id + " "))
                 .toList();
     }
 
     private record AttractionSnapshot(String description, Integer durationMinutes) {
+    }
+
+    private record AttractionState(OperationStatus status, Instant deletedAt) {
     }
 }

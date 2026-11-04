@@ -275,7 +275,7 @@ public class AttractionService {
 
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
+        // 삭제 트랜잭션이 commit된 경우에만 완료 로그를 남기고, rollback되면 기록하지 않는다.
         AfterCommit.run(() ->
             log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId)
         );

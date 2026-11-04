@@ -2,7 +2,7 @@
 # CD가 이 디렉터리를 S3의 <커밋 SHA>/ 아래에 올리고, 인스턴스는 기동 시 받아서 실행한다.
 #
 # 인스턴스가 준비할 값 (user-data)
-#   .env       APP_IMAGE, APP_VERSION, APP_ENV, LOKI_URL   compose 변수 치환용
+#   .env       APP_IMAGE, APP_VERSION, APP_ENV, LOKI_URL, PROMETHEUS_URL, INSTANCE_ID   compose 변수 치환용
 #   app.env    DB_URL, JWT_SECRET 등 애플리케이션 환경변수  Parameter Store에서 읽어 만든다. 이미지에 넣지 않는다.
 #
 #   docker compose up -d
@@ -44,6 +44,8 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?}
       LOKI_URL: ${LOKI_URL:?}
+      PROMETHEUS_URL: ${PROMETHEUS_URL:?}
+      INSTANCE_ID: ${INSTANCE_ID:?}   # 메트릭의 instance 레이블
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

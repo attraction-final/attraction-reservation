@@ -15,6 +15,7 @@
 #   - Parameter Store
 #       ${SSM_PREFIX}/APP_VERSION   배포할 커밋 SHA. CD가 갱신한다.
 #       ${SSM_PREFIX}/LOKI_URL      Alloy가 로그를 보낼 Loki push 주소
+#       ${SSM_PREFIX}/PROMETHEUS_URL  Alloy가 메트릭을 보낼 Prometheus remote_write 주소
 #       ${SSM_PREFIX}/env/*         애플리케이션 환경변수 (DB, JWT, PortOne 등)
 #
 # 비밀값이 출력되지 않도록 set -x를 쓰지 않는다.
@@ -29,13 +30,14 @@ APP_ENV=prod
 COMPOSE_VERSION=v2.29.7
 DEPLOY_DIR=/opt/attraction-reservation
 
-# IMDSv2로 리전과 계정을 읽는다.
+# IMDSv2로 리전, 계정, 인스턴스 ID를 읽는다.
 IMDS_TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token \
   -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
 IDENTITY=$(curl -sf -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" \
   http://169.254.169.254/latest/dynamic/instance-identity/document)
 AWS_REGION=$(echo "$IDENTITY" | sed -n 's/.*"region" *: *"\([^"]*\)".*/\1/p')
 ACCOUNT_ID=$(echo "$IDENTITY" | sed -n 's/.*"accountId" *: *"\([^"]*\)".*/\1/p')
+INSTANCE_ID=$(echo "$IDENTITY" | sed -n 's/.*"instanceId" *: *"\([^"]*\)".*/\1/p')
 export AWS_REGION AWS_DEFAULT_REGION="$AWS_REGION"
 REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
@@ -60,6 +62,8 @@ if ! [[ "$APP_VERSION" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 LOKI_URL=$(aws ssm get-parameter --name "${SSM_PREFIX}/LOKI_URL" \
   --query 'Parameter.Value' --output text)
+PROMETHEUS_URL=$(aws ssm get-parameter --name "${SSM_PREFIX}/PROMETHEUS_URL" \
+  --query 'Parameter.Value' --output text)
 
 mkdir -p "$DEPLOY_DIR"
 aws s3 cp --recursive "s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/${APP_VERSION}/" "$DEPLOY_DIR/"
@@ -71,6 +75,8 @@ APP_IMAGE=${REGISTRY}/${ECR_REPOSITORY}
 APP_VERSION=${APP_VERSION}
 APP_ENV=${APP_ENV}
 LOKI_URL=${LOKI_URL}
+PROMETHEUS_URL=${PROMETHEUS_URL}
+INSTANCE_ID=${INSTANCE_ID}
 EOF
 
 # 3) 애플리케이션 환경변수. 파라미터 이름의 마지막 부분이 변수 이름이 된다.

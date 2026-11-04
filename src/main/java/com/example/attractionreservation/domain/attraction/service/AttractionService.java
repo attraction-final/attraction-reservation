@@ -277,7 +277,7 @@ public class AttractionService {
 
         // 추가
         AfterCommit.run(() ->
-        log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId)
+            log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId)
         );
     }
 

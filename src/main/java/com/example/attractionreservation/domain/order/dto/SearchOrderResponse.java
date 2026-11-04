@@ -4,28 +4,31 @@ import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.time.ZoneId;
+import java.util.List;
 
 public record SearchOrderResponse(
         Long orderId,
         Integer totalAmount,
         String status,
         LocalDateTime createdAt,
-        List<Item> items
+        List<Item> items,
+        String pgId
 ) {
 
-    public static SearchOrderResponse from(Order order) {
+    public static SearchOrderResponse from(Order order, String pgId) {
         return new SearchOrderResponse(
                 order.getId(),
                 order.getTotalAmount(),
                 order.getStatus().name(),
-
-                // DB의 생성 시각을 서비스 기준 시간대인 KST로 변환한다.
-                LocalDateTime.ofInstant(order.getCreatedAt(), ZoneId.of("Asia/Seoul")),
+                LocalDateTime.ofInstant(
+                        order.getCreatedAt(),
+                        ZoneId.of("Asia/Seoul")
+                ),
                 order.getOrderItems().stream()
                         .map(Item::from)
-                        .toList()
+                        .toList(),
+                pgId
         );
     }
 
@@ -40,7 +43,7 @@ public record SearchOrderResponse(
             return new Item(
                     orderItem.getId(),
                     orderItem.getTicketProduct().getId(),
-                    // 상품의 현재 가격이 아닌 주문 당시 단가를 반환한다.
+                    // 현재 상품 가격이 아닌 주문 당시 단가를 반환한다.
                     orderItem.getPrice(),
                     orderItem.getQuantity()
             );

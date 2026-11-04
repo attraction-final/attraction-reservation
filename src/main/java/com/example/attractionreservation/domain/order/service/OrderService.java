@@ -146,7 +146,12 @@ public class OrderService {
             throw new BusinessException(ErrorCode.ORDER_ACCESS_DENIED);
         }
 
-        return SearchOrderResponse.from(order);
+        // 소유자 검사를 통과한 주문의 결제번호만 반환한다.
+        // 결제 데이터가 없는 기존 주문도 상세 조회는 가능하도록 한다.
+        String pgId = orderRepository.findPaymentPgIdByOrderId(orderId)
+                .orElse(null);
+
+        return SearchOrderResponse.from(order, pgId);
     }
 
     @Transactional

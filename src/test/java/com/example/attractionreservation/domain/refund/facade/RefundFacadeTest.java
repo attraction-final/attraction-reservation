@@ -10,6 +10,8 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -111,6 +113,80 @@ class RefundFacadeTest {
         assertThatThrownBy(() -> refundFacade.createPartialRefund(USER_ID, PG_ID, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage(ErrorCode.REFUND_INVALID_QUANTITY.getMessage());
+        verifyNoInteractions(refundProcessor);
+        verify(refundService, never()).findRefundById(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"COMPLETED", "FAILED", "REQUESTED", "PG_PENDING"})
+    @DisplayName("관리자 전체 환불은 저장·PG 처리·결과 조회 순서로 실행하고 실제 처리 상태를 반환한다")
+    void createAdminFullRefund_Saved_ProcessesThenReturnsActualStatus(RefundStatus status) {
+        // given
+        CreateRefundRequest request = new CreateRefundRequest("관리자 환불");
+        RefundResponse result = new RefundResponse(10L, 40000, status);
+        given(refundService.createAdminFullRefund(eq(PG_ID), eq(request.reason()), any())).willReturn(10L);
+        given(refundService.findRefundById(10L)).willReturn(result);
+
+        // when
+        RefundResponse response = refundFacade.createAdminFullRefund(PG_ID, request);
+
+        // then
+        assertThat(response).isEqualTo(result);
+        InOrder calls = inOrder(refundService, refundProcessor);
+        calls.verify(refundService).createAdminFullRefund(eq(PG_ID), eq(request.reason()), any());
+        calls.verify(refundProcessor).processById(10L);
+        calls.verify(refundService).findRefundById(10L);
+        calls.verifyNoMoreInteractions();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefundStatus.class, names = {"COMPLETED", "FAILED", "REQUESTED", "PG_PENDING"})
+    @DisplayName("관리자 부분 환불은 선택 티켓으로 저장·PG 처리·결과 조회 후 실제 상태를 반환한다")
+    void createAdminPartialRefund_Saved_ProcessesThenReturnsActualStatus(RefundStatus status) {
+        // given
+        CreatePartialRefundRequest request = new CreatePartialRefundRequest(List.of(1L, 2L), "관리자 환불");
+        RefundResponse result = new RefundResponse(10L, 20000, status);
+        given(refundService.createAdminPartialRefund(eq(PG_ID), eq(request.ticketIds()), eq(request.reason()), any()))
+                .willReturn(10L);
+        given(refundService.findRefundById(10L)).willReturn(result);
+
+        // when
+        RefundResponse response = refundFacade.createAdminPartialRefund(PG_ID, request);
+
+        // then
+        assertThat(response).isEqualTo(result);
+        InOrder calls = inOrder(refundService, refundProcessor);
+        calls.verify(refundService).createAdminPartialRefund(eq(PG_ID), eq(request.ticketIds()), eq(request.reason()), any());
+        calls.verify(refundProcessor).processById(10L);
+        calls.verify(refundService).findRefundById(10L);
+        calls.verifyNoMoreInteractions();
+    }
+
+    @Test
+    @DisplayName("관리자 전체 환불 저장이 거부되면 PG 처리를 실행하지 않는다")
+    void createAdminFullRefund_SaveRejected_DoesNotProcess() {
+        // given
+        CreateRefundRequest request = new CreateRefundRequest("관리자 환불");
+        BusinessException failure = new BusinessException(ErrorCode.REFUND_INVALID_QUANTITY);
+        given(refundService.createAdminFullRefund(eq(PG_ID), eq(request.reason()), any())).willThrow(failure);
+
+        // when & then
+        assertThatThrownBy(() -> refundFacade.createAdminFullRefund(PG_ID, request)).isSameAs(failure);
+        verifyNoInteractions(refundProcessor);
+        verify(refundService, never()).findRefundById(any());
+    }
+
+    @Test
+    @DisplayName("관리자 부분 환불 저장이 거부되면 PG 처리를 실행하지 않는다")
+    void createAdminPartialRefund_SaveRejected_DoesNotProcess() {
+        // given
+        CreatePartialRefundRequest request = new CreatePartialRefundRequest(List.of(1L), "관리자 환불");
+        BusinessException failure = new BusinessException(ErrorCode.TICKET_NOT_REFUNDABLE);
+        given(refundService.createAdminPartialRefund(eq(PG_ID), eq(request.ticketIds()), eq(request.reason()), any()))
+                .willThrow(failure);
+
+        // when & then
+        assertThatThrownBy(() -> refundFacade.createAdminPartialRefund(PG_ID, request)).isSameAs(failure);
         verifyNoInteractions(refundProcessor);
         verify(refundService, never()).findRefundById(any());
     }

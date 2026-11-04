@@ -22,7 +22,8 @@ name: CD
 # 모니터링 배포 흐름 (deploy-monitoring)
 #   1. deploy/monitoring/ 을 S3의 monitoring/<커밋 SHA>/ 아래에 올린다.
 #   2. Parameter Store의 MONITORING_VERSION을 이번 SHA로 바꾼다.
-#   3. SSM Run Command로 모니터링 인스턴스가 새 구성을 받아 docker compose up -d 하고 Grafana를 재시작한다.
+#   3. SSM Run Command로 모니터링 인스턴스가 새 구성을 받아 docker compose up -d 하고
+#      설정 파일을 다시 읽도록 Prometheus, Loki, Grafana를 재시작한다.
 #   4. 실패하면 MONITORING_VERSION을 이전 값으로 되돌린다. (다음 배포에서 같은 변경을 다시 반영한다)
 #
 # GitHub Environment(production)에 필요한 설정
@@ -400,7 +401,9 @@ jobs:
           echo "MONITORING_VERSION: ${PREVIOUS:-없음} -> ${VERSION}"
 
       # 3) 인스턴스가 새 구성을 받아 컨테이너를 갱신한다. .env(Grafana 비밀번호)와 /data는 그대로 둔다.
-      #    datasource provisioning은 기동할 때만 읽으므로 Grafana를 재시작한다.
+      #    compose.yml이 그대로면 up -d는 컨테이너를 다시 만들지 않으므로, 마운트한 설정 파일
+      #    (prometheus.yml, loki-config.yml, Grafana provisioning)을 읽도록 세 서비스를 재시작한다.
+      #    재시작하는 동안 앱 인스턴스의 Alloy가 전송을 재시도하므로 로그·메트릭은 빠지지 않는다.
       - name: Apply on monitoring instance
         id: apply
         run: |
@@ -419,7 +422,7 @@ jobs:
           cd /opt/monitoring
           aws s3 sync --delete --exclude .env "s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/monitoring/${VERSION}/" .
           docker compose up -d
-          docker compose restart grafana
+          docker compose restart prometheus loki grafana
           echo "monitoring updated to ${VERSION}"
           EOF
           )

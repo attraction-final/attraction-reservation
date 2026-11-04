@@ -16,9 +16,8 @@ services:
     env_file: app.env
     environment:
       SPRING_PROFILES_ACTIVE: prod   # application-prod.yml 적용
-      JAVA_TOOL_OPTIONS: >-
-        -XX:MaxRAMPercentage=75
-        -XX:+ExitOnOutOfMemoryError
+    # JVM 옵션은 Dockerfile의 ENTRYPOINT에 둔다.
+    # JAVA_TOOL_OPTIONS는 logfmt가 아닌 "Picked up ..." 줄을 컨테이너 로그에 남기므로 쓰지 않는다.
     mem_limit: 1200m
     ports:
       - "8080:8080"   # 서비스

@@ -22,5 +22,6 @@ USER app
 EXPOSE 8080 8081
 
 # JAVA_TOOL_OPTIONS는 "Picked up ..." 줄을 logfmt가 아닌 형식으로 찍으므로 옵션을 직접 넘긴다.
+# OOM이 나면 JVM을 끝내 컨테이너가 재시작되게 한다. (restart: unless-stopped)
 # exec 형식이라 java가 PID 1이 되어 docker stop의 SIGTERM으로 graceful shutdown 된다.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "org.springframework.boot.loader.launch.JarLauncher"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "org.springframework.boot.loader.launch.JarLauncher"]

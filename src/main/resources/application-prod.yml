@@ -2,6 +2,10 @@
 # 공통 설정은 application.yaml에 두고, 여기에는 운영에서만 다른 값만 둔다.
 
 spring:
+  main:
+    # 배너는 logfmt가 아닌 여러 줄로 찍혀 Loki에 섞이므로 운영에서는 끈다.
+    banner-mode: "off"   # 따옴표가 없으면 YAML이 false로 읽는다
+
   datasource:
     # 운영에서는 기본값 없이 환경변수로만 주입한다. 값이 빠지면 localhost로 붙지 않고 기동에 실패한다.
     url: ${DB_URL}

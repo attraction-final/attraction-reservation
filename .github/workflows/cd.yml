@@ -35,13 +35,10 @@ name: CD
 #   vars.SSM_PREFIX            예: /attraction-reservation/prod
 
 on:
-  # 임시: cd 브랜치 push로 전체 배포를 시험한다. main 병합 전에 제거한다.
-  push:
-    branches: [ cd ]
   workflow_run:
     workflows: [ CI ]
     types: [ completed ]
-    branches: [ main, cd ]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       version:
@@ -67,9 +64,7 @@ jobs:
     # CI는 PR에서도 실행되므로 main push에서 성공한 실행만 배포한다.
     # fork의 코드를 checkout하지 않도록 같은 저장소에서 실행된 CI만 허용한다.
     # 수동 실행은 main에서만 허용한다.
-    # 임시: cd 브랜치 push로 전체 배포를 시험한다.
     if: >
-      (github.event_name == 'push' && github.ref == 'refs/heads/cd') ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
@@ -164,7 +159,11 @@ jobs:
   deploy-app:
     name: Deploy app
     needs: changes
-    if: needs.changes.outputs.app == 'true'
+    # changes가 이미 같은 저장소의 CI만 통과시키지만, checkout하는 job에서도 fork의 코드를 받지 않도록 다시 확인한다.
+    if: >
+      needs.changes.outputs.app == 'true' &&
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04-arm   # 운영 인스턴스(t4g)와 같은 arm64에서 이미지를 빌드한다
     environment: production
     timeout-minutes: 60
@@ -359,7 +358,11 @@ jobs:
   deploy-monitoring:
     name: Deploy monitoring
     needs: changes
-    if: needs.changes.outputs.monitoring == 'true'
+    # changes가 이미 같은 저장소의 CI만 통과시키지만, checkout하는 job에서도 fork의 코드를 받지 않도록 다시 확인한다.
+    if: >
+      needs.changes.outputs.monitoring == 'true' &&
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20

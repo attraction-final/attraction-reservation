@@ -27,7 +27,7 @@ ARTIFACT_BUCKET=attraction-reservation-793168138824-ap-northeast-2-an
 ARTIFACT_PREFIX=attraction-reservation
 ECR_REPOSITORY=attraction-reservation
 APP_ENV=prod
-COMPOSE_VERSION=v2.29.7
+COMPOSE_VERSION=v2.40.3   # compose.yml의 env_file format: raw 에 2.30 이상이 필요하다
 DEPLOY_DIR=/opt/attraction-reservation
 
 # IMDSv2로 리전, 계정, 인스턴스 ID를 읽는다.
@@ -81,6 +81,7 @@ EOF
 
 # 3) 애플리케이션 환경변수. 파라미터 이름의 마지막 부분이 변수 이름이 된다.
 #    값에 탭·개행이 들어가는 파라미터는 지원하지 않는다.
+#    compose.yml이 format: raw로 읽으므로 값은 따옴표·이스케이프 없이 그대로 쓴다.
 umask 077
 aws ssm get-parameters-by-path --path "${SSM_PREFIX}/env/" --with-decryption \
   --query 'Parameters[].[Name,Value]' --output text \

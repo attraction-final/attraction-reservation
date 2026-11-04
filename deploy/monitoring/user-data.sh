@@ -30,7 +30,7 @@ set -euo pipefail
 SSM_PREFIX=/attraction-reservation/prod
 ARTIFACT_BUCKET=attraction-reservation-793168138824-ap-northeast-2-an
 ARTIFACT_PREFIX=attraction-reservation
-COMPOSE_VERSION=v2.29.7
+COMPOSE_VERSION=v2.40.3
 DEPLOY_DIR=/opt/monitoring
 
 # IMDSv2로 리전을 읽는다.
@@ -74,7 +74,14 @@ chown -R 472:0 /data/grafana            # grafana/grafana
 umask 077
 GRAFANA_ADMIN_PASSWORD=$(aws ssm get-parameter --name "${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD" \
   --with-decryption --query 'Parameter.Value' --output text)
-printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "$GRAFANA_ADMIN_PASSWORD" > .env
+# 작은따옴표로 감싸야 Compose가 $, # 를 해석하지 않는다. 감쌀 수 없는 작은따옴표는 거부한다.
+case "$GRAFANA_ADMIN_PASSWORD" in
+  *\'*)
+    echo "GRAFANA_ADMIN_PASSWORD에 작은따옴표가 있어 .env에 쓸 수 없습니다." >&2
+    exit 1
+    ;;
+esac
+printf "GRAFANA_ADMIN_PASSWORD='%s'\n" "$GRAFANA_ADMIN_PASSWORD" > .env
 umask 022
 
 docker compose up -d

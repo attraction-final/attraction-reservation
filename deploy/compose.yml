@@ -13,7 +13,9 @@ services:
   app:
     image: ${APP_IMAGE:?}:${APP_VERSION:?}
     restart: unless-stopped
-    env_file: app.env
+    env_file:
+      - path: app.env
+        format: raw   # SSM 값의 $, # 를 Compose가 해석하지 않는다 (Compose 2.30+)
     environment:
       SPRING_PROFILES_ACTIVE: prod   # application-prod.yml 적용
     # JVM 옵션은 Dockerfile의 ENTRYPOINT에 둔다.

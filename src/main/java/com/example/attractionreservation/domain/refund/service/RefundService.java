@@ -123,6 +123,26 @@ public class RefundService {
         return saveRefund(payment, tickets, reason, requestedAt);
     }
 
+    // 관리자 부분 환불
+    @Transactional
+    public Long createAdminPartialRefund(String pgId, List<Long> ticketIds, String reason, Instant requestedAt) {
+        if (ticketIds == null || ticketIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+
+        Set<Long> uniqueTicketIds = new HashSet<>(ticketIds);
+        if (uniqueTicketIds.size() != ticketIds.size()) {
+            throw new BusinessException(ErrorCode.REFUND_DUPLICATE_TICKET);
+        }
+
+        Payment payment = getPaymentWithLock(pgId);
+        validateRefundablePaymentStatus(payment);
+
+        List<Ticket> tickets = ticketService.findRefundTicketsForUpdate(orderItemIds(payment), uniqueTicketIds);
+
+        return saveRefund(payment, tickets, reason, requestedAt);
+    }
+
     // 결제를 잠그고 본인 결제인지, 환불할 수 있는 상태인지, 환불 기한 안인지 확인한다.
     private Payment getRefundablePayment(Long userId, String pgId, Instant requestedAt) {
         Payment payment = getPaymentWithLock(pgId);

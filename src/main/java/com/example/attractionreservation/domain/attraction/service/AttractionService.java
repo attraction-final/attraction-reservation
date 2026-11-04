@@ -66,9 +66,14 @@ public class AttractionService {
             throw e;
         }
 
-        // 추가
-        log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
-                savedAttraction.getId(), adminId, savedAttraction.getDurationMinutes());
+        // 등록 시점의 ID와 소요 시간을 미리 보관하여 callback에서 엔티티를 다시 읽지 않도록 한다.
+        Long attractionId = savedAttraction.getId();
+        Integer durationMinutes = savedAttraction.getDurationMinutes();
+        // 등록 트랜잭션이 commit된 경우에만 완료 로그를 남긴다.
+        AfterCommit.run(() ->
+                log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
+                        attractionId, adminId, durationMinutes)
+        );
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
     }
@@ -241,9 +246,11 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
+        // 미리 보관한 변경 전·후 상태로 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다.
+        AfterCommit.run(() ->
         log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
-                attractionId, adminId, previousStatus, newStatus);
+                attractionId, adminId, previousStatus, newStatus)
+        );
 
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
     }
@@ -269,7 +276,9 @@ public class AttractionService {
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
         // 추가
-        log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId);
+        AfterCommit.run(() ->
+        log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId)
+        );
     }
 
     // 예약 - 잠금 전용 조회 메서드

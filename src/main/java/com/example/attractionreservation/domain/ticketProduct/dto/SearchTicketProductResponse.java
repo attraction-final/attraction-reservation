@@ -11,6 +11,7 @@ public record SearchTicketProductResponse(
         int price,
         String description,
         TicketProductStatus status,
+        int stock,      // 남은 재고 (관리자 화면에서 수정할 때 현재 값을 보여 주려고 추가)
         Long version
 ) {
     public static SearchTicketProductResponse from(TicketProduct ticketProduct) {
@@ -21,6 +22,7 @@ public record SearchTicketProductResponse(
                 ticketProduct.getPrice(),
                 ticketProduct.getDescription(),
                 ticketProduct.getStatus(),
+                ticketProduct.getStock(),
                 ticketProduct.getVersion()
         );
     }

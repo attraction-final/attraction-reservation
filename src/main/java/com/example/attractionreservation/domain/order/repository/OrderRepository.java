@@ -56,4 +56,28 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             @Param("cutoff") Instant cutoff,
             Pageable pageable
     );
+
+    // 주문 상세 응답에 필요한 결제번호만 조회한다.
+    @Query("""
+        SELECT p.pgId
+        FROM Payment p
+        WHERE p.order.id = :orderId
+        """)
+    Optional<String> findPaymentPgIdByOrderId(
+            @Param("orderId") Long orderId
+    );
+
+    // 목록에 필요한 주문자 정보를 함께 조회한다.
+    @EntityGraph(attributePaths = {"user"})
+    @Query("""
+        SELECT o
+        FROM Order o
+        WHERE (:userId IS NULL OR o.user.id = :userId)
+          AND (:status IS NULL OR o.status = :status)
+        """)
+    Page<Order> findAllForAdmin(
+            @Param("userId") Long userId,
+            @Param("status") OrderStatus status,
+            Pageable pageable
+    );
 }

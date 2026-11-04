@@ -285,7 +285,8 @@ class OrderControllerTest {
                 LocalDateTime.of(2026, 10, 14, 10, 0),
                 List.of(
                         new SearchOrderResponse.Item(201L, 1L, 60000, 2)
-                )
+                ),
+                "test-order-payment-101"
         );
 
         when(orderService.findOrderById(1L, 101L))
@@ -308,7 +309,9 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.items[0].id").value(201))
                 .andExpect(jsonPath("$.data.items[0].ticketProductId").value(1))
                 .andExpect(jsonPath("$.data.items[0].price").value(60000))
-                .andExpect(jsonPath("$.data.items[0].quantity").value(2));
+                .andExpect(jsonPath("$.data.items[0].quantity").value(2))
+                .andExpect(jsonPath("$.data.pgId")
+                .value("test-order-payment-101"));
 
         verify(orderService).findOrderById(1L, 101L);
         verifyNoMoreInteractions(orderService);

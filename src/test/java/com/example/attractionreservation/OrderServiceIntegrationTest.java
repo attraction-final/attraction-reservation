@@ -457,6 +457,8 @@ class OrderServiceIntegrationTest {
 
         // then
         assertThat(response.orderId()).isEqualTo(createdOrder.orderId());
+        assertThat(createdOrder.pgId()).isNotBlank();
+        assertThat(response.pgId()).isEqualTo(createdOrder.pgId());
         assertThat(response.totalAmount()).isEqualTo(120000);
         assertThat(response.status()).isEqualTo("PENDING");
         assertThat(response.createdAt()).isEqualTo(expectedCreatedAt);
@@ -724,5 +726,35 @@ class OrderServiceIntegrationTest {
         assertThat(secondPage.page()).isEqualTo(1);
         assertThat(secondPage.totalElements()).isEqualTo(2L);
         assertThat(secondPage.totalPages()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("결제 데이터가 없는 본인 주문도 상세 조회할 수 있다")
+    void findOrderById_orderWithoutPayment_returnsNullPgId() {
+        // given
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("결제없는주문조회")
+                        .build()
+        );
+
+        Order order = orderRepository.saveAndFlush(
+                Order.create(user, 10000, validVisitDate())
+        );
+
+        Long userId = user.getId();
+        Long orderId = order.getId();
+
+        entityManager.clear();
+
+        // when
+        SearchOrderResponse response =
+                orderService.findOrderById(userId, orderId);
+
+        // then
+        assertThat(response.orderId()).isEqualTo(orderId);
+        assertThat(response.pgId()).isNull();
     }
 }

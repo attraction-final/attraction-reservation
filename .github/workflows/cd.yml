@@ -148,7 +148,13 @@ jobs:
             [ -n "$(git diff --name-only "$base" "$VERSION" -- "$@")" ]
           }
 
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_run" ] && [ "$VERSION" != "$(git rev-parse origin/main)" ]; then
+            # 자동 배포는 main의 최신 커밋만 한다. 늦게 끝나거나 재실행한 CI가 되돌린 변경을 배포하지 않게 한다.
+            # 건너뛴 변경은 최신 커밋의 CD가 마지막 반영 버전부터 비교해 함께 배포한다.
+            echo "::notice::main의 최신 커밋이 아니라 배포하지 않습니다: ${VERSION}"
+            APP=false
+            MONITORING=false
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             # 수동 실행은 롤백 용도라 앱만 지정한 버전으로 배포한다.
             APP=true
             MONITORING=false
@@ -313,6 +319,7 @@ jobs:
               Failed|Cancelled|Cancelling|RollbackInProgress|RollbackFailed|RollbackSuccessful)
                 echo "::error::Instance refresh가 ${STATUS} 상태로 끝났습니다."
                 exit 1 ;;
+              *) ;;   # Pending, InProgress 등은 계속 기다린다
             esac
             sleep "$REFRESH_POLL_SECONDS"
           done

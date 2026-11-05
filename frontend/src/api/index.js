@@ -709,7 +709,7 @@ const adminOrderApi = {
     return page.content.map(toAdminOrder);
   },
 
-  // [GET /api/admin/orders/{id}] 상세: 주문 상품과 결제번호(pgId)가 같이 와요.
+  // [GET /api/admin/orders/{id}] 상세: 주문 상품, 발급된 입장권, 결제번호(pgId)가 같이 와요.
   // 주문 상품에는 상품 "번호"만 있어서, 상품 목록에서 이름을 찾아 붙여요.
   orderDetail: async (id) => {
     const [o, byId] = await Promise.all([http.get(`/admin/orders/${id}`), productsById()]);
@@ -722,6 +722,14 @@ const adminOrderApi = {
         price: i.price,         // 주문 당시 가격
         quantity: i.quantity,
       })),
+      // 부분 환불할 입장권을 고를 때 써요. 결제 전 주문은 빈 목록이에요.
+      tickets: (o.tickets ?? []).map((t) => ({
+        id: t.ticketId,
+        orderItemId: t.orderItemId, // 어느 주문 상품(단가)에 속한 입장권인지
+        name: t.name,
+        status: t.status,           // UNUSED | IN_USE | USED | REFUNDED | EXPIRED
+        validDate: t.validDate,
+      })),
     };
   },
 
@@ -731,6 +739,11 @@ const adminOrderApi = {
   // [POST /api/admin/payments/{pgId}/refunds] { reason }
   // 관리자 전체 환불: 그 주문의 "미사용" 입장권을 한꺼번에 환불해요.
   refundOrder: (pgId, reason) => http.post(`/admin/payments/${pgId}/refunds`, { reason }),
+
+  // [POST /api/admin/payments/{pgId}/refunds/partial] { ticketIds: [입장권번호], reason }
+  // 관리자 부분 환불: 고른 입장권만 환불해요. 미사용이 아닌 입장권이 섞이면 서버가 거절해요.
+  refundOrderPartial: (pgId, ticketIds, reason) =>
+      http.post(`/admin/payments/${pgId}/refunds/partial`, { ticketIds, reason }),
 };
 
 // ───────── 관리자 입장권 상품 ✅ ─────────

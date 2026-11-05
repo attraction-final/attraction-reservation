@@ -145,7 +145,7 @@ class JevClientHttpTest {
         withApiKey().run(context -> {
             TypeSafeClient client = context.getBean(TypeSafeClient.class);
 
-            assertThat(client.defaultModel()).isEqualTo("jev-1.14.0");
+            assertThat(client.defaultModel()).isEqualTo("jev-1.13.0");
             assertThat(client.timeout()).isEqualTo(Duration.ofSeconds(2));
             assertThat(client.retryPolicy().maxRetries()).isEqualTo(1);
             assertThat(client.retryPolicy().totalTimeout()).isEqualTo(Duration.ofSeconds(5));
@@ -168,7 +168,7 @@ class JevClientHttpTest {
 
             String body = requestBody.get();
             assertThat(authorization.get()).isEqualTo("Bearer " + API_KEY);
-            assertThat((String) JsonPath.read(body, "$.model")).isEqualTo("jev-1.14.0");
+            assertThat((String) JsonPath.read(body, "$.model")).isEqualTo("jev-1.13.0");
             assertThat((String) JsonPath.read(body, "$.state")).isEqualTo(QUESTION);
             assertThat((String) JsonPath.read(body, "$.questions.attraction.type")).isEqualTo("choice");
             assertThat((String) JsonPath.read(body, "$.questions.attraction.criteria['2']")).isEqualTo("모니모 러쉬");
@@ -198,9 +198,9 @@ class JevClientHttpTest {
     @ParameterizedTest(name = "[{index}] {0}")
     @CsvSource(delimiter = '|', textBlock = """
             JSON이 아님 | not-json
-            답이 없음   | {"model": "jev-1.14.0", "answers": {}}
-            형식이 다름 | {"model": "jev-1.14.0", "answers": {"attraction": {"type": "score", "score": 0.5}, "intent": {"type": "score", "score": 0.5}}}
-            선택지 없음 | {"model": "jev-1.14.0", "answers": {"attraction": {"type": "choice", "choice": "2", "confidence": 0.8, "probabilities": {"2": 0.9}}, "intent": {"type": "choice", "confidence": 0.8, "probabilities": {"OTHER": 0.9}}}}
+            답이 없음   | {"model": "jev-1.13.0", "answers": {}}
+            형식이 다름 | {"model": "jev-1.13.0", "answers": {"attraction": {"type": "score", "score": 0.5}, "intent": {"type": "score", "score": 0.5}}}
+            선택지 없음 | {"model": "jev-1.13.0", "answers": {"attraction": {"type": "choice", "choice": "2", "confidence": 0.8, "probabilities": {"2": 0.9}}, "intent": {"type": "choice", "confidence": 0.8, "probabilities": {"OTHER": 0.9}}}}
             """)
     @DisplayName("200이어도 응답을 해석할 수 없으면 503으로 응답한다")
     void classify_invalidBody(String description, String body) {

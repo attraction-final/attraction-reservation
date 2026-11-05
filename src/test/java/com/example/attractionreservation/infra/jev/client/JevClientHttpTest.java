@@ -177,7 +177,7 @@ class JevClientHttpTest {
             assertThat((String) JsonPath.read(body, "$.model")).isEqualTo("jev-1.13.0");
             assertThat((String) JsonPath.read(body, "$.state")).isEqualTo(QUESTION);
             assertThat((String) JsonPath.read(body, "$.questions.attraction.type")).isEqualTo("choice");
-            assertThat((String) JsonPath.read(body, "$.questions.attraction.criteria.2")).isEqualTo("모니모 러쉬");
+            assertThat((String) JsonPath.read(body, "$.questions.attraction.criteria["2"]")).isEqualTo("모니모 러쉬");
             assertThat(output)
                     .contains("event=ATTRACTION_QNA_CLASSIFIED target=jev durationMs=")
                     .contains("model=\"jev-1.13.0\" inputTokens=120");

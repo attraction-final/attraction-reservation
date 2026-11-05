@@ -8,6 +8,7 @@ import { MEMBER_ROLE, ORDER_STATUS, formatPrice } from '../api/labels.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PasswordChangeSheet from '../components/PasswordChangeSheet.jsx';
 import WithdrawSheet from '../components/WithdrawSheet.jsx';
+import OrderCancelSheet from '../components/OrderCancelSheet.jsx';
 
 
 // 가입 방식 → 화면에 보여 줄 이름
@@ -22,6 +23,8 @@ export default function MyPage() {
   const [message, setMessage] = useState('');
   // 지금 열려 있는 확인창: null(없음) | 'password'(비밀번호 변경) | 'withdraw'(회원 탈퇴)
   const [sheet, setSheet] = useState(null);
+  const [cancelOrder, setCancelOrder] = useState(null); // 취소 확인창에 띄울 주문
+  const [orderMessage, setOrderMessage] = useState(''); // 결제 내역 위에 보여 줄 안내
   useEffect(() => { if (user) setNickname(user.nickname); }, [user]);
 
   // 가입 방식(GET /api/users/me 의 provider): LOCAL | KAKAO | GOOGLE
@@ -101,6 +104,7 @@ export default function MyPage() {
                   <h2 className="display" style={{ fontSize: 18 }}>결제 내역</h2>
                   <Link to="/my/tickets" className="bold" style={{ fontSize: 13, textDecoration: 'none' }}>입장권 보기</Link>
                 </div>
+                {orderMessage && <div className="toast">{orderMessage}</div>}
                 {orders.error && <span className="error-text" role="alert">{orders.error.message}</span>}
                 {orders.data?.length === 0 && <span className="small muted">결제 내역이 없어요.</span>}
                 {orders.data?.map((o) => (
@@ -111,8 +115,15 @@ export default function MyPage() {
                       {o.productSummary && <span style={{ fontSize: 14 }}>{o.productSummary}</span>}
                       <span className="small muted">{o.createdAt}</span>
                       {/* 결제 대기 주문은 결제 화면으로 다시 갈 수 있어요 */}
+                      {/* 결제 대기 주문은 결제를 이어서 하거나, 취소할 수 있어요 */}
                       {o.status === 'PENDING' && (
-                        <Link to={`/checkout/${o.id}`} className="bold" style={{ fontSize: 13, color: 'var(--blue-ink)' }}>결제 이어서 하기</Link>
+                        <span className="row gap-12">
+                          <Link to={`/checkout/${o.id}`} className="bold" style={{ fontSize: 13, color: 'var(--blue-ink)' }}>결제 이어서 하기</Link>
+                          <button type="button" onClick={() => { setOrderMessage(''); setCancelOrder(o); }} className="bold"
+                            style={{ border: 0, background: 'none', padding: 0, fontSize: 13, color: 'var(--orange-ink)' }}>
+                            주문 취소
+                          </button>
+                        </span>
                       )}
                     </span>
                     <span className="stack" style={{ alignItems: 'flex-end', gap: 4 }}>
@@ -136,6 +147,13 @@ export default function MyPage() {
 
       {user && sheet === 'password' && (
         <PasswordChangeSheet onClose={() => setSheet(null)} onDone={onPasswordChanged} />
+      )}
+      {user && cancelOrder && (
+        <OrderCancelSheet
+          order={cancelOrder}
+          onClose={() => setCancelOrder(null)}
+          onDone={() => { setCancelOrder(null); setOrderMessage('주문을 취소했어요.'); orders.reload(); }}
+        />
       )}
       {user && sheet === 'withdraw' && (
         <WithdrawSheet onClose={() => setSheet(null)} onDone={onWithdrawn} />

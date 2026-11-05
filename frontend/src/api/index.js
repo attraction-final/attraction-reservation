@@ -422,6 +422,9 @@ export const orderApi = {
     return toOrder(o, byId);
   },
 
+  // [POST /api/orders/{id}/cancel] 결제 대기(PENDING) 주문만 취소돼요. 응답: { orderId, status: 'CANCELLED' }
+  cancel: (id) => http.post(`/orders/${id}/cancel`),
+
   // [GET /api/orders/me?page=0&size=20] 내 결제 내역
   // 목록 응답의 items 에 상품 이름·수량이 같이 와요.
   mine: async () => {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import * as PortOne from '@portone/browser-sdk/v2';
 import Icon from '../components/Icon.jsx';
+import OrderCancelSheet from '../components/OrderCancelSheet.jsx';
 import { BackHeader, Badge, ErrorBox, Loading } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { orderApi, paymentApi } from '../api/index.js';
@@ -35,6 +36,7 @@ export default function Checkout() {
   const [agreed, setAgreed] = useState(false);
   const [payError, setPayError] = useState('');
   const [paying, setPaying] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false); // 주문 취소 확인창
 
   async function pay() {
     setPayError('');
@@ -145,6 +147,14 @@ export default function Checkout() {
               주문 내용 및 환불 정책에 동의합니다
             </label>
             {payError && <span className="error-text" role="alert">{payError}</span>}
+
+            {/* 결제 대기일 때만 주문 취소 가능 (결제 중에는 막아요) */}
+            {order.status === 'PENDING' && (
+              <button type="button" onClick={() => setCancelOpen(true)} disabled={paying}
+                style={{ alignSelf: 'center', border: 0, background: 'none', fontSize: 13, color: 'var(--muted)', textDecoration: 'underline', padding: 4 }}>
+                이 주문 취소하기
+              </button>
+            )}
           </div>
 
           <div className="bottom-bar">
@@ -153,6 +163,15 @@ export default function Checkout() {
             </button>
           </div>
         </>
+      )}
+
+      {cancelOpen && order && (
+        <OrderCancelSheet
+          order={order}
+          onClose={() => setCancelOpen(false)}
+          // 취소된 주문은 결제할 수 없으니 마이페이지(결제 내역)로 보내요. replace: 뒤로 가기로 다시 오지 않게
+          onDone={() => navigate('/my', { replace: true })}
+        />
       )}
     </div>
   );

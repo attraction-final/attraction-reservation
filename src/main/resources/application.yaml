@@ -32,7 +32,7 @@ spring:
   # 키가 없으면 앱은 뜨고 Q&A만 503으로 응답한다. 값을 비우거나 ${...}로 적으면 기동에 실패한다.
   ai:
     typesafe:
-      model: "jev-1.14.0"
+      model: "jev-1.13.0"
       timeout: 2s
       retry:
         max-retries: 1

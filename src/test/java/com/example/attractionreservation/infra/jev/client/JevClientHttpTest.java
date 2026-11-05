@@ -44,7 +44,7 @@ class JevClientHttpTest {
             new AttractionCandidate(2L, "모니모 러쉬"));
     private static final String SUCCESS_BODY = """
             {
-              "model": "jev-1.14.0",
+              "model": "jev-1.13.0",
               "answers": {
                 "attraction": {
                   "type": "choice",

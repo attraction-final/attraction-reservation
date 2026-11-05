@@ -46,7 +46,7 @@ services:
       APP_ENV: ${APP_ENV:?}
       LOKI_URL: ${LOKI_URL:?}
       PROMETHEUS_URL: ${PROMETHEUS_URL:?}
-      INSTANCE_ID: ${INSTANCE_ID:?}   # 메트릭의 instance 레이블
+      INSTANCE_ID: ${INSTANCE_ID:?}   # 로그·메트릭의 instance 레이블
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
       # 재시작해도 어디까지 읽었는지(position)를 이어서 쓴다.

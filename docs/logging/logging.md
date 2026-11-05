@@ -191,6 +191,7 @@ implementation 'io.micrometer:micrometer-tracing-bridge-brave'
 | 구분 | 키 | 이유 |
 | --- | --- | --- |
 | 레이블로 사용 | `app`, `env` (+ 필요 시 `level`) | 값 종류가 적어 스트림 수가 작게 유지됨 |
+| 레이블로 사용 | `instance` (EC2 인스턴스 ID) | 인스턴스별로 스트림을 나눠, 한 인스턴스의 전송이 늦어져도 다른 인스턴스 로그 때문에 거부(`too far behind`)되지 않게 한다. 값은 배포마다 바뀌지만 동시에 떠 있는 인스턴스 수만큼만 생긴다 |
 | 레이블 금지 | `userId`, `orderId`, `traceId`, `uri`, `event` 등 | 값이 많아 스트림이 폭증하고 Loki 성능이 저하됨 |
 
 **수집기 설정**

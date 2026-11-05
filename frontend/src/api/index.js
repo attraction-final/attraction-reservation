@@ -343,6 +343,7 @@ function toOrder(o, byId) {
   return {
     id: o.orderId,
     status: o.status,                      // PENDING | COMPLETED | ...
+    visitDate: o.visitDate,                // 방문일 "2026-11-01" (새로고침해도 서버에서 다시 받아요)
     totalPrice: o.totalAmount,
     productName: byId.get(item?.ticketProductId)?.name ?? '입장권',
     quantity: item?.quantity ?? 0,
@@ -369,7 +370,7 @@ export const orderApi = {
   },
 
   // [GET /api/orders/me?page=0&size=20] 내 결제 내역
-  // 목록 응답에는 상품 이름·수량이 없어서 주문번호·금액·상태·주문 일시만 보여 줘요.
+  // 목록 응답의 items 에 상품 이름·수량이 같이 와요.
   mine: async () => {
     const page = await http.get(`/orders/me${toQuery({ page: 0, size: 20 })}`);
     return page.content.map((o) => ({
@@ -377,6 +378,10 @@ export const orderApi = {
       totalPrice: o.totalAmount,
       status: o.status,
       createdAt: toDateTimeText(o.createdAt),
+      // "종일권 × 2, 오후권 × 1" 처럼 한 줄 글자로 만들어요. 상품이 없으면 빈 글자예요.
+      productSummary: (o.items ?? [])
+          .map((i) => `${i.ticketProductName} × ${i.quantity}`)
+          .join(', '),
     }));
   },
 };

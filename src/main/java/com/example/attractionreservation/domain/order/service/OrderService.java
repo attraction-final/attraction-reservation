@@ -305,9 +305,23 @@ public class OrderService {
                 )
         );
 
+        // 1번 쿼리: 주문 목록을 페이지 단위로 조회한다.
         Page<Order> orders = orderRepository.findAllByUser_Id(userId, pageable);
 
-        return SearchOrderListResponse.from(orders);
+        List<Long> orderIds = orders.getContent().stream()
+                .map(Order::getId)
+                .toList();
+
+        // 2번 쿼리: 이번 페이지 주문들의 상품을 한 번에 조회한다.
+        // 주문이 없으면 빈 IN 조건 쿼리를 보내지 않는다.
+        Map<Long, List<OrderItem>> orderItemsByOrderId = orderIds.isEmpty()
+                ? Map.of()
+                : orderRepository.findOrderItemsWithProductByOrderIds(orderIds).stream()
+                .collect(Collectors.groupingBy(
+                        orderItem -> orderItem.getOrder().getId()
+                ));
+
+        return SearchOrderListResponse.from(orders, orderItemsByOrderId);
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

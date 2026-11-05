@@ -19,12 +19,14 @@ export default function Checkout() {
   const { orderId } = useParams();
   const navigate = useNavigate();
 
-  // Tickets 화면이 navigate(..., { state }) 로 넣어 준 "가방" (방문일)
-  // 방문일은 주문 상세 응답에 없어서 가방에서만 받을 수 있어요. 새로고침하면 '-' 로 보여요.
+  // Tickets 화면이 navigate(..., { state }) 로 넣어 준 "가방"
   const { state } = useLocation();
-  const visitDate = state?.date;
 
   const { data: order, loading, error, reload } = useApi(() => orderApi.detail(orderId), [orderId]);
+
+  // 방문일은 주문 상세 응답(서버)에서 먼저 받고, 아직 응답이 오기 전이면 가방 값을 잠깐 써요.
+  // → 새로고침하거나 결제 내역의 "결제 이어서 하기"로 들어와도 방문일이 보여요.
+  const visitDate = order?.visitDate ?? state?.date;
 
   // 결제번호(pgId)는 주문 상세 응답에서 받아요 → 새로고침하거나 결제 내역에서 들어와도 결제할 수 있어요.
   const pgId = order?.pgId ?? state?.pgId;

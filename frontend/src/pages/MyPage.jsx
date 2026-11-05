@@ -79,6 +79,8 @@ export default function MyPage() {
                   <div key={o.id} className="card row between" style={{ borderRadius: 18, padding: '14px 16px' }}>
                     <span className="stack" style={{ gap: 2 }}>
                       <span className="bold" style={{ fontSize: 15 }}>주문번호 {o.id}</span>
+                      {/* 상품 이름 × 수량 (예: 종일권 × 2) */}
+                      {o.productSummary && <span style={{ fontSize: 14 }}>{o.productSummary}</span>}
                       <span className="small muted">{o.createdAt}</span>
                       {/* 결제 대기 주문은 결제 화면으로 다시 갈 수 있어요 */}
                       {o.status === 'PENDING' && (

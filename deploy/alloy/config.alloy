@@ -5,8 +5,9 @@
 // 메트릭은 같은 시계열이 인스턴스끼리 겹치지 않도록 instance(EC2 인스턴스 ID)를 함께 붙인다.
 
 // compose의 app 서비스 컨테이너만 수집한다. (Alloy 자신의 로그는 제외)
+// Docker API는 소켓을 직접 마운트하지 않고 읽기 전용 프록시(docker-proxy)로 접근한다. (deploy/compose.yml)
 discovery.docker "app" {
-  host = "unix:///var/run/docker.sock"
+  host = "tcp://docker-proxy:2375"
 
   filter {
     name   = "label"
@@ -15,7 +16,7 @@ discovery.docker "app" {
 }
 
 loki.source.docker "app" {
-  host       = "unix:///var/run/docker.sock"
+  host       = "tcp://docker-proxy:2375"
   targets    = discovery.docker.app.targets
   labels     = {
     app = "attraction-reservation",

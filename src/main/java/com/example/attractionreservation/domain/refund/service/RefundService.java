@@ -14,6 +14,7 @@ import com.example.attractionreservation.domain.refund.repository.RefundReposito
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
@@ -116,6 +117,7 @@ public class RefundService {
     @Transactional
     public Long createAdminFullRefund(String pgId, String reason, Instant requestedAt) {
         Payment payment = getPaymentWithLock(pgId);
+        validateRefundableOwner(payment.getOrder().getUser());
         validateRefundablePaymentStatus(payment);
 
         List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
@@ -139,6 +141,7 @@ public class RefundService {
         }
 
         Payment payment = getPaymentWithLock(pgId);
+        validateRefundableOwner(payment.getOrder().getUser());
         validateRefundablePaymentStatus(payment);
 
         List<Ticket> tickets = ticketService.findRefundTicketsForUpdate(orderItemIds(payment), uniqueTicketIds);
@@ -154,6 +157,9 @@ public class RefundService {
         if (!payment.getOrder().getUser().getId().equals(userId)) {
             throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
         }
+
+        // 본인 결제로 확인된 뒤 탈퇴 상태를 검사한다.
+        validateRefundableOwner(payment.getOrder().getUser());
 
         // 환불 가능한 결제 상태를 검사한다.
         validateRefundablePaymentStatus(payment);
@@ -232,8 +238,15 @@ public class RefundService {
         );
 
         // 잠금은 이 메서드 종료가 아니라 호출한 환불 요청 트랜잭션이 끝날 때 해제된다.
-        User user = userRepository.findByIdForUpdate(userId).orElseThrow(
+        userRepository.findByIdForUpdate(userId).orElseThrow(
                 () -> new BusinessException(ErrorCode.USER_NOT_FOUND)
         );
+    }
+
+    // 이미 잠근 결제 소유자가 탈퇴 상태인지 확인한다.
+    private void validateRefundableOwner(User user) {
+        if (user.getStatus() == UserStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.REFUND_USER_WITHDRAW);
+        }
     }
 }

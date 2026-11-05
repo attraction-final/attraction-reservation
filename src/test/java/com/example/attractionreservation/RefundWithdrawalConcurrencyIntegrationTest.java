@@ -1,7 +1,9 @@
 package com.example.attractionreservation;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.payment.entity.Payment;
+import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.refund.entity.Refund;
 import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.refund.service.RefundService;
@@ -14,6 +16,7 @@ import com.example.attractionreservation.domain.ticketProduct.entity.enums.Ticke
 import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.domain.user.entity.UserStatus;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.domain.user.service.UserWithdrawalService;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
@@ -26,6 +29,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.framework.Advised;
 import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,13 +51,16 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 // 실제 서비스·Repository·MySQL 트랜잭션을 사용한다. PG 호출·환불 완료 처리는 실행하지 않는다.
 @DataJpaTest(properties = {
@@ -74,6 +82,9 @@ class RefundWithdrawalConcurrencyIntegrationTest {
 
     @Autowired
     private TicketRepository ticketRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -218,6 +229,95 @@ class RefundWithdrawalConcurrencyIntegrationTest {
         } finally {
             allowRefundCommit.countDown();
             allowRefundCheck.countDown();
+            executor.shutdownNow();
+            try {
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("동시 작업 종료 후 fixture 정리").isTrue();
+            } finally {
+                repositoryProxy.removeAdvisor(advisor);
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "전체 환불 여부: {0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("탈퇴가 먼저 커밋되면 회원 잠금을 기다리던 관리자 전체·부분 환불을 거부한다")
+    void adminRefund_withdrawalCommitsFirst_rejectsRefund(boolean fullRefund) throws Exception {
+        // given
+        CountDownLatch withdrawalWritten = new CountDownLatch(1);
+        CountDownLatch allowWithdrawalCommit = new CountDownLatch(1);
+        CountDownLatch refundLockRequested = new CountDownLatch(1);
+        AtomicReference<Thread> refundThread = new AtomicReference<>();
+
+        // 환불 스레드가 실제 회원 잠금 쿼리를 호출하기 직전임을 확인한다.
+        // 결과를 바꾸거나 잠금 자체를 대체하지 않는다.
+        var advisor = new DefaultPointcutAdvisor((MethodInterceptor) invocation -> {
+            if (Thread.currentThread() == refundThread.get()
+                    && invocation.getMethod().getName().equals("findByIdForUpdate")) {
+                refundLockRequested.countDown();
+            }
+            return invocation.proceed();
+        });
+        Advised repositoryProxy = (Advised) userRepository;
+        repositoryProxy.addAdvisor(0, advisor);
+        var executor = Executors.newFixedThreadPool(2);
+
+        try {
+            // when: 실제 탈퇴를 수행하되 바깥 트랜잭션을 열어 회원 잠금을 유지한다.
+            var withdrawalFuture = executor.submit(() -> transactionTemplate.execute(transaction -> {
+                withdrawalService.withdraw(fixture.userId());
+                entityManager.flush();
+                withdrawalWritten.countDown();
+                await(allowWithdrawalCommit, "탈퇴 커밋");
+                return true;
+            }));
+            await(withdrawalWritten, "탈퇴 변경 저장");
+
+            var refundFuture = executor.submit(() -> {
+                refundThread.set(Thread.currentThread());
+                try {
+                    if (fullRefund) {
+                        refundService.createAdminFullRefund(fixture.pgId(), "관리자 환불", Instant.now());
+                    } else {
+                        refundService.createAdminPartialRefund(
+                                fixture.pgId(), List.of(fixture.ticketId()), "관리자 환불", Instant.now());
+                    }
+                    return (ErrorCode) null;
+                } catch (BusinessException exception) {
+                    return exception.getErrorCode();
+                }
+            });
+            await(refundLockRequested, "환불의 회원 잠금 요청");
+
+            // 탈퇴 커밋 전에는 환불 요청이 끝나지 않아야 한다.
+            // 이 시간 검사는 DB 잠금 대기 자체의 증명이 아니므로 최종 업무 결과도 함께 검증한다.
+            assertThatThrownBy(() -> refundFuture.get(500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            allowWithdrawalCommit.countDown();
+            assertThat(withdrawalFuture.get(10, TimeUnit.SECONDS)).isTrue();
+            ErrorCode refundError = refundFuture.get(10, TimeUnit.SECONDS);
+
+            // then: 대기 전의 ACTIVE가 아니라 잠금 획득 후의 WITHDRAWN을 기준으로 거부해야 한다.
+            assertThat(refundError).isEqualTo(ErrorCode.REFUND_USER_WITHDRAW);
+            transactionTemplate.executeWithoutResult(transaction -> {
+                User user = entityManager.find(User.class, fixture.userId());
+                assertThat(user.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
+                assertThat(user.getWithdrawnAt()).isNotNull();
+                Long refundCount = entityManager.createQuery(
+                                "SELECT COUNT(r) FROM Refund r WHERE r.payment.id = :paymentId", Long.class)
+                        .setParameter("paymentId", fixture.paymentId()).getSingleResult();
+                assertThat(refundCount).isZero();
+                assertThat(entityManager.find(Ticket.class, fixture.ticketId()).getStatus())
+                        .isEqualTo(TicketStatus.UNUSED);
+                assertThat(entityManager.find(Payment.class, fixture.paymentId()).getStatus())
+                        .isEqualTo(PaymentStatus.PAID);
+                assertThat(entityManager.find(Order.class, fixture.orderId()).getStatus())
+                        .isEqualTo(OrderStatus.COMPLETED);
+                assertThat(entityManager.find(TicketProduct.class, fixture.productId()).getStock())
+                        .isEqualTo(99);
+            });
+        } finally {
+            allowWithdrawalCommit.countDown();
             executor.shutdownNow();
             try {
                 assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))

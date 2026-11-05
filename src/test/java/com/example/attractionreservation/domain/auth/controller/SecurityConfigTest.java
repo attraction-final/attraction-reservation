@@ -92,7 +92,8 @@ class SecurityConfigTest {
             "/actuator/health",
             "/actuator/health/liveness",
             "/actuator/health/readiness",
-            "/actuator/prometheus"
+            "/actuator/prometheus",
+            "/readyz"
     })
     @DisplayName("헬스 체크와 메트릭 수집 경로는 인증 없이 접근할 수 있다")
     void actuator_withoutAuthentication_returnsOk(String path) throws Exception {
@@ -113,6 +114,16 @@ class SecurityConfigTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    @DisplayName("로드밸런서가 쓰지 않는 서비스 포트의 liveness 경로는 인증 없이 접근할 수 없다")
+    void livez_withoutAuthentication_returnsUnauthorized() throws Exception {
+        // given
+        // when
+        // then
+        mockMvc.perform(get("/livez"))
+                .andExpect(status().isUnauthorized());
+    }
+
     // 실제 서비스 로직 없이 보안 설정만 검증하는 테스트 전용 API
     // actuator 경로는 @WebMvcTest에 등록되지 않으므로 같은 경로를 매핑해 보안 설정만 확인한다.
     @RestController
@@ -127,7 +138,9 @@ class SecurityConfigTest {
                 "/actuator/health/liveness",
                 "/actuator/health/readiness",
                 "/actuator/prometheus",
-                "/actuator/env"
+                "/actuator/env",
+                "/readyz",
+                "/livez"
         })
         public String success() {
             return "ok";

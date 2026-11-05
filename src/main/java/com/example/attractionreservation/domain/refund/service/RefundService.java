@@ -23,6 +23,7 @@ import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -67,7 +68,8 @@ public class RefundService {
      *                           환불 가능 수량을 넘으면 {@code REFUND_INVALID_QUANTITY},
      *                           미사용 티켓이 아니면 {@code TICKET_NOT_REFUNDABLE}
      */
-    @Transactional
+    // 소유자 ID 사전 조회 이후 잠금을 기다려도 환불 수량은 최신 커밋 결과로 조회한다.
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createRefund(Long userId, String pgId, List<Long> ticketIds, String reason, Instant requestedAt) {
         if (ticketIds == null || ticketIds.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
@@ -94,7 +96,7 @@ public class RefundService {
      *                           입장일 당일 이후(KST)면 {@code REFUND_DEADLINE_PASSED},
      *                           환불할 미사용 티켓이 하나도 없으면 {@code REFUND_INVALID_QUANTITY}
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createFullRefund(Long userId, String pgId, String reason, Instant requestedAt) {
         Payment payment = getRefundablePayment(userId, pgId, requestedAt);
         List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
@@ -114,7 +116,7 @@ public class RefundService {
     }
 
     // 관리자 전체 환불
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createAdminFullRefund(String pgId, String reason, Instant requestedAt) {
         Payment payment = getPaymentWithLock(pgId);
         validateRefundableOwner(payment.getOrder().getUser());
@@ -129,7 +131,7 @@ public class RefundService {
     }
 
     // 관리자 부분 환불
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createAdminPartialRefund(String pgId, List<Long> ticketIds, String reason, Instant requestedAt) {
         if (ticketIds == null || ticketIds.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);

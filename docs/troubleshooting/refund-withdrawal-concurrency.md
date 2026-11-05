@@ -219,8 +219,8 @@ Gradle 실행마다 이전 결과 파일이 덮어써질 수 있다. 위 63개�
 
 ## 7. 남은 검증과 한계
 
-- [ ] 같은 결제의 두 환불 요청을 겹쳐, 소유자 ID 사전 조회 후 회원 잠금을 기다린 요청이 최신 환불 점유 수량을 반영하는지 확인한다.
-- [ ] 위 검증 결과에 따라 snapshot 영향의 보완 필요 여부를 결정한다. 격리 수준 변경만으로 모든 경합이 해결됐다고 판단하지 않는다.
+- [ ] 소유자 ID 사전 조회 후 다른 환불이 커밋되는 사용자·관리자 부분 환불 회귀 테스트를 실행한다. 테스트는 추가했으나 아직 실행하지 않았다.
+- [ ] 환불 요청 네 경로에 적용한 READ_COMMITTED 보완을 검증한다. 격리 수준 변경만으로 모든 경합이 해결됐다고 판단하지 않는다.
 - [ ] 관련 환불·결제·티켓·회원 탈퇴 회귀 테스트를 실행하고 최신 결과를 확인한다.
 - [ ] 탈퇴 회원 환불 차단 정책을 팀 문서에 반영한다. 이 문서 작성으로 원본 요구사항이 자동 변경되지는 않는다.
 - [ ] 티켓 `REFUNDED`와 금전 환불 완료의 의미 차이 및 상태 구조 개선 여부를 팀과 정리한다.
@@ -228,3 +228,45 @@ Gradle 실행마다 이전 결과 파일이 덮어써질 수 있다. 위 63개�
 PG 호출, 실패·재시도, 환불 완료 시 결제·주문·재고 반영 전체를 이번 새 테스트가 검증한 것은 아니다. 기존 테스트의 회귀 확인과 별개로 취급한다.
 
 현재까지 확인한 결과는 **미완료 환불 탈퇴 제한, 환불·탈퇴 양쪽 선행 순서의 처리, 타인 결제 오류 응답 유지**다. 미검증 snapshot 영향까지 해결 완료로 기록하지 않는다.
+
+## 8. PR #222 CI 실패와 snapshot 보완
+
+[CI 실행 결과](https://github.com/attraction-final/attraction-reservation/actions/runs/42050577061/job/127325271187?pr=222)와 test-results artifact의 XML을 확인했다.
+
+```text
+전체: 1,911개 중 1개 실패
+실패: RefundServiceConcurrencyTest.createRefund_concurrentRequests_NoOverRefund()
+위치: RefundServiceConcurrencyTest.java:136
+예상: unexpectedErrors가 비어 있음
+실제: TICKET_NOT_REFUNDABLE 예외 4개
+```
+
+세 장 중 서로 겹치는 두 장씩 다섯 요청을 보내는 기존 테스트다. 수량 부족으로 거부될 요청이 `Ticket.refund()`까지 진행하여 이미 환불된 티켓이라는 이유로 거부됐다. 이 실패만으로 중복 환불 저장이나 재고 중복 복구까지 발생했다고 판단하지 않는다.
+
+소유자 ID 사전 SELECT로 생성될 수 있는 이전 snapshot을 환불 수량 합계 조회도 사용하면, 앞선 요청이 커밋한 환불 수량을 놓칠 수 있다. 티켓 잠금 조회가 보는 현재 상태와 일반 수량 조회의 기준이 달라지는 것이 문제다.
+
+### 보완 내용
+
+- `RefundService`의 사용자 전체·부분, 관리자 전체·부분 환불 요청에 `@Transactional(isolation = Isolation.READ_COMMITTED)` 적용
+- 일반 수량 SELECT가 실행되는 시점의 커밋 결과를 읽도록 변경
+- 회원 → 결제 → 티켓 잠금 순서와 모든 환불 상태를 점유 수량에 포함하는 정책 유지
+- 기존 동시성 테스트의 허용 예외를 늘려 실패를 숨기는 방식은 사용하지 않음
+
+새 회귀 테스트 `createPartialRefund_ownerReadBeforeOtherCommit_usesLatestRefundQuantity()`는 사용자·관리자 부분 환불 두 케이스를 검증한다.
+
+```text
+후행 요청: 소유자 ID만 실제 조회하고 일시 정지
+선행 요청: 같은 티켓 두 장을 실제 환불 요청하고 커밋
+후행 요청: 회원·결제·티켓 잠금과 수량 조회 재개
+기대: REFUND_INVALID_QUANTITY, 저장된 환불 1건·환불 티켓 2장
+```
+
+이 회귀 테스트는 DB 잠금 대기를 시간으로 추정하지 않고 사전 조회 → 다른 요청 커밋 → 후속 검증의 순서를 제어한다. 별도의 기존 테스트가 동시 요청과 회원 잠금 경합을 검증한다.
+
+변경 후 테스트는 아직 실행하지 않았다. 다음 명령으로 기존 CI 실패와 추가 회귀를 함께 확인해야 한다.
+
+```bash
+./gradlew test --tests "*RefundServiceConcurrencyTest" --tests "*RefundWithdrawalConcurrencyIntegrationTest" --tests "*RefundServiceTest" --rerun-tasks
+```
+
+`READ_COMMITTED`는 해당 메서드가 새 트랜잭션을 시작할 때 적용된다. 이미 열린 외부 트랜잭션에 기본 REQUIRED로 참여하면 외부 격리 수준을 바꾸지 않는다. 현재 환불 Facade에는 외부 트랜잭션이 없으며, 앞으로 호출 구조를 변경할 때 이 조건을 유지하거나 별도로 검증해야 한다.

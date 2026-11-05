@@ -12,6 +12,7 @@ import PaymentComplete from './pages/PaymentComplete.jsx';
 import RouteSetup from './pages/RouteSetup.jsx';
 import RouteResult from './pages/RouteResult.jsx';
 import MyReservations from './pages/MyReservations.jsx';
+import ReservationDetail from './pages/ReservationDetail.jsx';
 import MyTickets from './pages/MyTickets.jsx';
 import MyPage from './pages/MyPage.jsx';
 import OAuthCallback from './pages/OAuthCallback.jsx';
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/route" element={<RouteSetup />} />
         <Route path="/route/result" element={<RouteResult />} />
         <Route path="/my/reservations" element={<MyReservations />} />
+        <Route path="/my/reservations/:id" element={<ReservationDetail />} />
         <Route path="/my/tickets" element={<MyTickets />} />
         <Route path="/my" element={<MyPage />} />
 

@@ -351,6 +351,31 @@ export const reservationApi = {
 
   // [PATCH /api/reservations/{id}/cancel]
   cancel: (id) => http.patch(`/reservations/${id}/cancel`),
+  // [GET /api/reservations/{id}] 내 예약 한 건 상세 (SearchReservationDetailResponse)
+  // 남의 예약 번호를 넣으면 서버가 막아요. (userId 로 본인 것만 조회)
+  // 위치·탑승 시간은 응답에 없어서, 같이 온 attractionId 로 어트랙션 상세를 한 번 더 불러와요.
+  detail: async (id) => {
+    const r = await http.get(`/reservations/${id}`);
+    // 어트랙션이 삭제됐어도 예약 상세는 보여야 하니까, 실패하면 null 로 두고 넘어가요.
+    const a = await attractionApi.detail(r.attractionId).catch(() => null);
+    return {
+      id: r.reservationId,
+      number: r.reservationNumber,
+      status: RESERVATION_STATUS_MAP[r.status] || r.status,
+      date: r.startsAt.slice(0, 10),        // "2026-11-02"
+      startTime: toHHmm(r.startsAt),        // "14:30"
+      endTime: r.endsAt ? toHHmm(r.endsAt) : null,
+      attractionId: r.attractionId,
+      attractionName: r.attractionName,
+      image: a?.image ?? imageOf(r.attractionName),
+      zone: a?.zone ?? '',
+      rideMinutes: a?.rideMinutes ?? null,
+      ticketId: r.ticketId,
+      createdAt: r.createdAt,               // Instant(UTC) → 화면에서 한국 시간으로 바꿔 보여 줘요
+      cancelReason: r.cancelReasonMessage,  // 예) "운영 사정으로 인한 취소" (서버가 만든 문장)
+      cancelledAt: r.cancelledAt,
+    };
+  },
 };
 
 // ───────── 주문 ✅ (생성·상세·결제 내역 연결) ─────────

@@ -46,6 +46,7 @@ public class CandidateSelector {
         return List.of(
                 new SlotFilter(slot -> isWithinTimeRange(slot, startAt, endAt), ExclusionReason.OUT_OF_TIME_RANGE),
                 new SlotFilter(CandidateSelector::isNotStopped, ExclusionReason.SLOT_NOT_OPEN),
+                new SlotFilter(CandidateSelector::isNotManuallyClosed, ExclusionReason.SLOT_MANUALLY_CLOSED),
                 new SlotFilter(CandidateSelector::hasRemainingCapacity, ExclusionReason.SLOT_FULL),
                 new SlotFilter(slot -> isBeforeReservationDeadline(slot, now), ExclusionReason.RESERVATION_CLOSED)
         );
@@ -77,6 +78,10 @@ public class CandidateSelector {
 
     private static boolean isNotStopped(SlotView slot) {
         return slot.state() != SlotState.SUSPENDED && slot.state() != SlotState.CANCELLED;
+    }
+
+    private static boolean isNotManuallyClosed(SlotView slot) {
+        return !(slot.state() == SlotState.CLOSED && slot.remainingCapacity() > 0);
     }
 
     private static boolean hasRemainingCapacity(SlotView slot) {

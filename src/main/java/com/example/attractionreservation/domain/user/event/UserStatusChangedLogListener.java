@@ -14,7 +14,7 @@ public class UserStatusChangedLogListener {
     public void onUserStatusChanged(UserStatusChangedEvent event) {
         log.info(
                 "event=USER_STATUS_CHANGED "
-                        + "adminId={} userId={} previousStatus={} currentStatus={}",
+                        + "userId={} targetUserId={} previousStatus={} currentStatus={}",
                 event.adminId(),
                 event.userId(),
                 event.previousStatus(),

@@ -99,7 +99,7 @@ class AdminUserStatusIntegrationTest {
                     .isFalse();
             assertThat(output.getAll()).contains(
                     "event=USER_STATUS_CHANGED "
-                            + "adminId=1 userId=" + userId
+                            + "userId=1 targetUserId=" + userId
                             + " previousStatus=ACTIVE currentStatus=SUSPENDED"
             );
         } finally {

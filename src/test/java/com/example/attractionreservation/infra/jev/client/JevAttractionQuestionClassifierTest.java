@@ -23,7 +23,10 @@ import org.springaicommunity.typesafe.exception.TypeSafeException;
 import org.springaicommunity.typesafe.question.Choice;
 import org.springaicommunity.typesafe.response.ChoiceAnswer;
 import org.springaicommunity.typesafe.response.SystemOneResponse;
+import org.springaicommunity.typesafe.response.Usage;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.time.Duration;
 import java.util.List;
@@ -39,7 +42,7 @@ import static org.mockito.Mockito.verify;
 
 // 어댑터가 하는 일만 검증한다: 질문을 Choice로 바꾸고, 응답을 분류 결과로 바꾸고, 실패를 503으로 바꾼다.
 // 실제 HTTP 동작(재시도, 타임아웃, 잘못된 JSON)은 JevClientHttpTest에서 검증한다.
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class JevAttractionQuestionClassifierTest {
 
     private static final String QUESTION = "모니모러쉬 키제한 있어?";
@@ -68,7 +71,7 @@ class JevAttractionQuestionClassifierTest {
     private void givenResponse(ChoiceAnswer attraction, ChoiceAnswer intent) {
         givenClient();
         given(typeSafeClient.systemOne(anyString(), anyMap())).willReturn(new SystemOneResponse(
-                "jev-1.14.0", Map.of("attraction", attraction, "intent", intent), null));
+                "jev-1.13.0", Map.of("attraction", attraction, "intent", intent), null));
     }
 
     private ChoiceAnswer attractionAnswer(String option) {
@@ -171,7 +174,7 @@ class JevAttractionQuestionClassifierTest {
         // given
         givenClient();
         given(typeSafeClient.systemOne(anyString(), anyMap())).willReturn(new SystemOneResponse(
-                "jev-1.14.0", Map.of("attraction", attractionAnswer("2")), null));
+                "jev-1.13.0", Map.of("attraction", attractionAnswer("2")), null));
 
         // when, then
         assertUnavailable();
@@ -220,5 +223,108 @@ class JevAttractionQuestionClassifierTest {
 
         // when, then
         assertUnavailable();
+    }
+
+    @ParameterizedTest(name = "[{index}] 옵션 {0}이면 attractionId={1}")
+    @CsvSource({
+            "2,    2",
+            "NONE, null"
+    })
+    @DisplayName("분류에 성공하면 소요 시간, 어트랙션, 확신도, 의도, 모델을 로그로 남긴다 (시나리오 16)")
+    void classify_logsClassification(String attractionOption, String loggedAttractionId, CapturedOutput output) {
+        // given
+        givenResponse(
+                new ChoiceAnswer(attractionOption, Map.of(attractionOption, 0.9), 0.85),
+                new ChoiceAnswer("HEIGHT_LIMIT", Map.of("HEIGHT_LIMIT", 0.8), 0.73));
+
+        // when
+        jevAttractionQuestionClassifier.classify(QUESTION, CANDIDATES);
+
+        // then
+        assertThat(output)
+                .contains("event=ATTRACTION_QNA_CLASSIFIED target=jev durationMs=")
+                .contains("questionLength=" + QUESTION.length() + " attractionId=" + loggedAttractionId
+                        + " attractionConfidence=0.85 intent=HEIGHT_LIMIT intentConfidence=0.73 model=\"jev-1.13.0\"");
+    }
+
+    @ParameterizedTest(name = "[{index}] 입력 토큰 {0}이면 inputTokens={1}")
+    @CsvSource(value = {
+            "120,  120",
+            "NULL, null"
+    }, nullValues = "NULL")
+    @DisplayName("Jev가 알려 준 입력 토큰 수를 로그로 남기고, 알려 주지 않으면 0이 아니라 null로 남긴다")
+    void classify_logsInputTokens(Integer inputTokens, String loggedInputTokens, CapturedOutput output) {
+        // given
+        givenClient();
+        given(typeSafeClient.systemOne(anyString(), anyMap())).willReturn(new SystemOneResponse(
+                "jev-1.13.0",
+                Map.of("attraction", attractionAnswer("2"), "intent", intentAnswer("HEIGHT_LIMIT")),
+                new Usage(inputTokens, 3)));
+
+        // when
+        jevAttractionQuestionClassifier.classify(QUESTION, CANDIDATES);
+
+        // then
+        assertThat(output).contains("model=\"jev-1.13.0\" inputTokens=" + loggedInputTokens);
+    }
+
+    @Test
+    @DisplayName("질문 원문은 로그에 남기지 않고 길이만 남긴다 (시나리오 16)")
+    void classify_doesNotLogQuestion(CapturedOutput output) {
+        // given
+        String question = "우리 딸 지우 키 105인데 썬더폴스 탈 수 있어?";
+        givenResponse(attractionAnswer("2"), intentAnswer("HEIGHT_LIMIT"));
+
+        // when
+        jevAttractionQuestionClassifier.classify(question, CANDIDATES);
+
+        // then
+        assertThat(output)
+                .contains("questionLength=" + question.length())
+                .doesNotContain("지우")
+                .doesNotContain("썬더폴스");
+    }
+
+    @Test
+    @DisplayName("Jev가 보낸 모델 이름은 로그 키를 끼워 넣지 못하게 바꿔서 남긴다")
+    void classify_modelWithQuote_logEscaped(CapturedOutput output) {
+        // given
+        givenClient();
+        given(typeSafeClient.systemOne(anyString(), anyMap())).willReturn(new SystemOneResponse(
+                "jev\" admin=\"true",
+                Map.of("attraction", attractionAnswer("2"), "intent", intentAnswer("HEIGHT_LIMIT")),
+                null));
+
+        // when
+        jevAttractionQuestionClassifier.classify(QUESTION, CANDIDATES);
+
+        // then
+        assertThat(output).contains("model=\"jev' admin='true\"");
+    }
+
+    @Test
+    @DisplayName("API 키가 없으면 원인을 로그로 남긴다 (시나리오 14)")
+    void classify_noClient_logsReason(CapturedOutput output) {
+        // given
+        given(typeSafeClientProvider.getIfAvailable()).willReturn(null);
+
+        // when, then
+        assertUnavailable();
+        assertThat(output).contains(
+                "event=ATTRACTION_QNA_JEV_FAILED target=jev reason=\"API 키 미설정\" errorCode=ATTRACTION_QUESTION_UNAVAILABLE");
+    }
+
+    @Test
+    @DisplayName("보내지 않은 옵션이 돌아오면 응답 값 없이 예외 종류만 로그로 남긴다")
+    void classify_unexpectedOption_logsExceptionTypeOnly(CapturedOutput output) {
+        // given
+        givenResponse(attractionAnswer("응답값"), intentAnswer("HEIGHT_LIMIT"));
+
+        // when, then
+        assertUnavailable();
+        assertThat(output)
+                .contains("event=ATTRACTION_QNA_JEV_FAILED target=jev durationMs=")
+                .contains("exceptionType=IllegalArgumentException errorCode=ATTRACTION_QUESTION_UNAVAILABLE")
+                .doesNotContain("응답값");
     }
 }

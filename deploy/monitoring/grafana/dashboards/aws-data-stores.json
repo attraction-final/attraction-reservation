@@ -986,7 +986,20 @@
           },
           "min": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "적중률"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1018,7 +1031,7 @@
           "matchExact": true,
           "metricQueryType": 0,
           "metricEditorMode": 0,
-          "id": "hits",
+          "id": "",
           "expression": "",
           "label": "",
           "hide": true
@@ -1043,7 +1056,7 @@
           "matchExact": true,
           "metricQueryType": 0,
           "metricEditorMode": 0,
-          "id": "misses",
+          "id": "",
           "expression": "",
           "label": "",
           "hide": true
@@ -1051,22 +1064,11 @@
         {
           "refId": "C",
           "datasource": {
-            "type": "cloudwatch",
-            "uid": "cloudwatch"
+            "type": "__expr__",
+            "uid": "__expr__"
           },
-          "queryMode": "Metrics",
-          "region": "default",
-          "metricQueryType": 0,
-          "metricEditorMode": 1,
-          "namespace": "",
-          "metricName": "",
-          "dimensions": {},
-          "statistic": "Average",
-          "period": "",
-          "matchExact": true,
-          "id": "",
-          "expression": "IF(hits + misses > 0, 100 * hits / (hits + misses))",
-          "label": "적중률",
+          "type": "math",
+          "expression": "100 * $A / ($A + $B)",
           "hide": false
         }
       ]

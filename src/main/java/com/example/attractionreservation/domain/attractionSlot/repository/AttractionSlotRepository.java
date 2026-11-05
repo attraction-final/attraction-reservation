@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface AttractionSlotRepository
@@ -38,6 +40,22 @@ public interface AttractionSlotRepository
        AND s.reservedCount > 0
     """)
     int tryReleaseCapacity(@Param("slotId") Long slotId);
+
+    // 슬롯 자동 생성 - 기간 안에 이미 있는 슬롯의 시작 시각 (취소된 슬롯 포함)
+    // 시작 시각의 날짜만 보고 "이미 슬롯이 있는 날"을 판단한다.
+    // (attraction_id, starts_at) 인덱스를 그대로 사용한다.
+    @Query("""
+    SELECT s.startsAt
+      FROM AttractionSlot s
+     WHERE s.attraction.id = :attractionId
+       AND s.startsAt >= :from
+       AND s.startsAt < :to
+    """)
+    List<LocalDateTime> findStartTimesByAttractionIdBetween(
+            @Param("attractionId") Long attractionId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to
+    );
 
     // 예약 인원을 복구하는 동안 같은 슬롯의 동시 변경을 보호한다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)

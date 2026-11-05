@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import DeviceFrame from './components/DeviceFrame.jsx';
+import RequireAdmin from './components/RequireAdmin.jsx';
 
 import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
@@ -44,16 +45,18 @@ export default function App() {
         <Route path="/my/tickets" element={<MyTickets />} />
         <Route path="/my" element={<MyPage />} />
 
-        {/* 관리자 화면 */}
-        <Route path="/admin" element={<Navigate to="/admin/slots" replace />} />
-        <Route path="/admin/slots" element={<AdminSlots />} />
-        <Route path="/admin/attractions/new" element={<AdminAttractionForm />} />
-        <Route path="/admin/attractions/:id/edit" element={<AdminAttractionForm />} />
-        <Route path="/admin/reservations" element={<AdminReservations />} />
-        <Route path="/admin/members" element={<AdminMembers />} />
-        <Route path="/admin/orders" element={<AdminOrders />} />
-        <Route path="/admin/products" element={<AdminProducts />} />
-        <Route path="/admin/entry" element={<AdminTicketEntry />} />
+        {/* 관리자 화면: RequireAdmin(문지기)이 먼저 검사하고, 관리자일 때만 안쪽 화면을 보여 줘요 */}
+        <Route element={<RequireAdmin />}>
+          <Route path="/admin" element={<Navigate to="/admin/slots" replace />} />
+          <Route path="/admin/slots" element={<AdminSlots />} />
+          <Route path="/admin/attractions/new" element={<AdminAttractionForm />} />
+          <Route path="/admin/attractions/:id/edit" element={<AdminAttractionForm />} />
+          <Route path="/admin/reservations" element={<AdminReservations />} />
+          <Route path="/admin/members" element={<AdminMembers />} />
+          <Route path="/admin/orders" element={<AdminOrders />} />
+          <Route path="/admin/products" element={<AdminProducts />} />
+          <Route path="/admin/entry" element={<AdminTicketEntry />} />
+        </Route>
 
         {/* 없는 주소로 오면 홈으로 */}
         <Route path="*" element={<Navigate to="/" replace />} />

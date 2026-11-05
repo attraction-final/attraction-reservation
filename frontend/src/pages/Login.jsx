@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import { FloatingBack } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -14,6 +14,7 @@ const SOCIAL_PROVIDERS = [
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation(); // 어디서 왔는지(state.from) 읽으려고
   const { login, signup } = useAuth();
 
   const [tab, setTab] = useState('login'); // 'login' | 'signup'
@@ -31,7 +32,9 @@ export default function Login() {
     try {
       if (tab === 'login') await login(form.email, form.password);
       else await signup(form.nickname, form.email, form.password);
-      navigate('/'); // 성공하면 홈으로
+      // 관리자 화면 등에서 쫓겨 온 경우(RequireAdmin) 그 주소로, 아니면 홈으로 돌아가요.
+      // replace: 뒤로 가기를 눌러도 로그인 화면으로 다시 오지 않게 해요.
+      navigate(location.state?.from ?? '/', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

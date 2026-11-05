@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import { FloatingBack } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import { OAUTH_BASE, USE_MOCK } from '../config.js';
+import { OAUTH_BASE } from '../config.js';
 
 // 백엔드(application-oauth.yml)에 등록된 제공자만 버튼을 만들어요. (네이버는 백엔드에 없어서 뺐어요)
 // id 는 백엔드 registrationId 와 같아야 해요 → /oauth2/authorization/{id}
@@ -79,33 +79,23 @@ export default function Login() {
           {submitting ? '처리 중…' : tab === 'login' ? '로그인' : '가입하고 시작하기'}
         </button>
 
-        {USE_MOCK && (
-          <p className="small muted" style={{ margin: 0, textAlign: 'center' }}>
-            테스트 계정: test@example.com / 1234 (관리자: admin@example.com / 1234)
-          </p>
-        )}
-
-        {/* 소셜 로그인: 가짜 서버(USE_MOCK) 모드에서는 백엔드가 없어서 숨겨요 */}
-        {!USE_MOCK && (
-          <>
-            <div className="row gap-10 small" style={{ color: 'var(--subtle)' }}>
-              <span style={{ flex: 1, height: 1, background: '#DCE5F0' }} />
-              소셜 계정으로 시작하기
-              <span style={{ flex: 1, height: 1, background: '#DCE5F0' }} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-              {SOCIAL_PROVIDERS.map((p) => (
-                // <Link> 가 아니라 <a> 를 써요: 리액트 안에서 화면만 바꾸는 게 아니라
-                // 브라우저가 백엔드 → 카카오/구글 로그인 페이지로 "진짜 이동"해야 하기 때문이에요.
-                <a key={p.id} href={`${OAUTH_BASE}/oauth2/authorization/${p.id}`} className="bold"
-                  style={{ height: 46, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    textDecoration: 'none', fontSize: 14, ...p.style }}>
-                  {p.label}
-                </a>
-              ))}
-            </div>
-          </>
-        )}
+        {/* 소셜 로그인 */}
+        <div className="row gap-10 small" style={{ color: 'var(--subtle)' }}>
+          <span style={{ flex: 1, height: 1, background: '#DCE5F0' }} />
+          소셜 계정으로 시작하기
+          <span style={{ flex: 1, height: 1, background: '#DCE5F0' }} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+          {SOCIAL_PROVIDERS.map((p) => (
+            // <Link> 가 아니라 <a> 를 써요: 리액트 안에서 화면만 바꾸는 게 아니라
+            // 브라우저가 백엔드 → 카카오/구글 로그인 페이지로 "진짜 이동"해야 하기 때문이에요.
+            <a key={p.id} href={`${OAUTH_BASE}/oauth2/authorization/${p.id}`} className="bold"
+              style={{ height: 46, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                textDecoration: 'none', fontSize: 14, ...p.style }}>
+              {p.label}
+            </a>
+          ))}
+        </div>
       </form>
     </div>
   );

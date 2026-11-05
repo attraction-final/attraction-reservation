@@ -69,6 +69,7 @@ const ADMIN_TABS = [
   { to: '/admin/reservations', label: '예약', icon: 'calendar' },
   { to: '/admin/products', label: '입장권 상품', icon: 'ticket' },
   { to: '/admin/orders', label: '주문 · 환불', icon: 'receipt' },
+  { to: '/admin/entry', label: '입장', icon: 'check' },
 ];
 
 function Tabs({ tabs, label }) {

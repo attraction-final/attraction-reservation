@@ -98,9 +98,7 @@ export default function MyTickets() {
                 <span className="display" style={{ background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: '4px 12px', fontSize: 20 }}>{TICKET_TYPE[featured.type]}</span>
                 <Badge status={TICKET_STATUS[featured.status]} />
               </div>
-              <div className="row gap-14" style={{ padding: '12px 14px' }}>
-                {/* QR 코드는 나중에 서버가 주는 값으로 그리면 돼요 (예: qrcode.react 라이브러리) */}
-                <div className="icon-circle small muted" style={{ width: 92, height: 92, borderRadius: 14, border: '2px dashed #AEB8CB', background: '#F7F9FC' }}>입장 QR</div>
+              <div className="stack gap-10" style={{ padding: '12px 14px' }}>
                 <div className="stack gap-4" style={{ fontSize: 13 }}>
                   <span className="bold">{formatDate(featured.date)}</span>
                   <span className="muted">입장권번호 {featured.id}</span>
@@ -108,6 +106,10 @@ export default function MyTickets() {
                   <span className="muted">입장 가능 {featured.type === 'AFTERNOON' ? '15:00' : '개장'} ~ 폐장</span>
                   {featured.orderId && <span className="muted">주문번호 {featured.orderId}</span>}
                 </div>
+                {/* 미사용: 입구에서 보여 줄 입장 코드 / 사용중: 이미 입장 완료 */}
+                {featured.status === 'UNUSED'
+                  ? <EntryCode code={featured.code} />
+                  : <span className="small" style={{ color: 'var(--blue-ink)' }}>입장 처리가 끝났어요. 이제 어트랙션을 예약할 수 있어요.</span>}
               </div>
               <div style={{ borderTop: '2px dashed var(--line)', margin: '0 14px' }} />
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
@@ -124,15 +126,19 @@ export default function MyTickets() {
           {rest.map((t) => {
             const active = t.status === 'UNUSED' || t.status === 'IN_USE';
             return (
-              <div key={t.id} className="row gap-12" style={{ padding: '12px 14px', borderRadius: 18, ...(active ? { background: '#fff', boxShadow: 'var(--shadow)' } : { background: 'rgba(255,255,255,0.6)', border: '1.5px solid #DCE5F0' }) }}>
-                <span className="icon-circle" style={{ width: 38, height: 38, borderRadius: 12, ...(active ? { background: 'var(--yellow-soft)', color: 'var(--yellow-ink)' } : { background: 'var(--soft)', color: 'var(--subtle)' }) }}>
-                  <Icon name="ticket" size={20} />
-                </span>
-                <span className="stack grow" style={{ gap: 1 }}>
-                  <span className="bold" style={{ fontSize: 15 }}>{TICKET_TYPE[t.type]}</span>
-                  <span className="small muted">{formatDate(t.date, false)} · {t.id}</span>
-                </span>
-                <Badge status={TICKET_STATUS[t.status]} />
+              <div key={t.id} className="stack gap-10" style={{ padding: '12px 14px', borderRadius: 18, ...(active ? { background: '#fff', boxShadow: 'var(--shadow)' } : { background: 'rgba(255,255,255,0.6)', border: '1.5px solid #DCE5F0' }) }}>
+                <div className="row gap-12">
+                  <span className="icon-circle" style={{ width: 38, height: 38, borderRadius: 12, ...(active ? { background: 'var(--yellow-soft)', color: 'var(--yellow-ink)' } : { background: 'var(--soft)', color: 'var(--subtle)' }) }}>
+                    <Icon name="ticket" size={20} />
+                  </span>
+                  <span className="stack grow" style={{ gap: 1 }}>
+                    <span className="bold" style={{ fontSize: 15 }}>{TICKET_TYPE[t.type]}</span>
+                    <span className="small muted">{formatDate(t.date, false)} · {t.id}</span>
+                  </span>
+                  <Badge status={TICKET_STATUS[t.status]} />
+                </div>
+                {/* 여러 장을 산 경우: 두 번째 미사용 입장권부터도 코드가 보여야 입장할 수 있어요 */}
+                {t.status === 'UNUSED' && <EntryCode code={t.code} />}
               </div>
             );
           })}
@@ -187,4 +193,34 @@ export default function MyTickets() {
 // (환불 기한 같은 나머지 규칙은 서버가 검사하고, 안 되면 이유를 오류 메시지로 보내 줘요)
 function canRefund(t) {
   return t.status === 'UNUSED' && Boolean(t.pgId);
+}
+
+// 입장 코드 상자: 입구(관리자 입장 처리 화면)에서 이 코드를 입력하면 입장이 처리돼요.
+// QR 코드는 나중에 이 code 값으로 그리면 돼요 (예: qrcode.react 라이브러리).
+function EntryCode({ code }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 복사가 막힌 환경(http 주소 등)에서는 직접 길게 눌러 복사하면 돼요.
+      setCopied(false);
+    }
+  }
+
+  if (!code) return null;
+  return (
+    <div className="row between gap-8" style={{ background: 'var(--soft)', borderRadius: 12, padding: '8px 10px' }}>
+      <span className="stack" style={{ gap: 2, minWidth: 0 }}>
+        <span className="small muted">입장 코드 (입구에서 보여 주세요)</span>
+        <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12, wordBreak: 'break-all', userSelect: 'all' }}>{code}</span>
+      </span>
+      <button type="button" className="btn btn-sm btn-outline" onClick={copy} style={{ flexShrink: 0 }}>
+        {copied ? '복사됨' : '복사'}
+      </button>
+    </div>
+  );
 }

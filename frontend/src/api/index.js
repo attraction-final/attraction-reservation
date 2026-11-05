@@ -799,10 +799,43 @@ const adminProductApi = {
   deleteProduct: (id) => http.delete(`/admin/ticket-products/${id}`),
 };
 
+// ───────── 관리자 입장 처리 ✅ ─────────
+
+// Instant(예: "2026-11-05T01:30:00Z") → 한국 시각 "2026-11-05 10:30"
+// 서버 설정에 따라 숫자(초)로 올 수도 있어서 둘 다 받아요.
+function toKstDateTimeText(v) {
+  if (v === null || v === undefined) return '-';
+  const date = typeof v === 'number' ? new Date(v * 1000) : new Date(v);
+  if (Number.isNaN(date.getTime())) return String(v);
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
+const adminTicketApi = {
+  // [POST /api/admin/tickets/entry] { ticketCode } → CreateTicketEntryResponse
+  // 입장 처리에 성공하면 입장권이 UNUSED → IN_USE 로 바뀌고, 그때부터 어트랙션 예약·루트 추천을 할 수 있어요.
+  enterTicket: async (ticketCode) => {
+    const t = await http.post('/admin/tickets/entry', { ticketCode });
+    return {
+      id: t.ticketId,
+      code: t.ticketCode,
+      type: TICKET_TYPE_MAP[t.type] || t.type, // ALL_DAY → FULL_DAY (화면이 쓰는 이름)
+      date: t.validDate,
+      status: t.status,                         // 성공하면 IN_USE
+      enteredAt: toKstDateTimeText(t.enteredAt),
+    };
+  },
+};
+
 export const adminApi = {
   ...adminSlotApi,
   ...adminManageApi,
   ...adminAttractionApi,
   ...adminOrderApi,
   ...adminProductApi,
+  ...adminTicketApi,
 };

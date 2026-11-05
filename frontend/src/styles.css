@@ -181,7 +181,8 @@ img { display: block; }
 .tabbar {
   height: 76px; flex-shrink: 0; background: #fff;
   border-top: 1px solid #DCEAF5; border-radius: 22px 22px 0 0;
-  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* 탭 개수(회원 5개, 관리자 6개)만큼 칸을 똑같이 나눠요 */
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
   padding: 6px 8px 10px; box-shadow: 0 -6px 18px rgba(31, 42, 68, 0.05);
 }
 .tab {

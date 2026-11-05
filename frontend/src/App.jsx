@@ -19,6 +19,7 @@ import AdminReservations from './pages/admin/AdminReservations.jsx';
 import AdminMembers from './pages/admin/AdminMembers.jsx';
 import AdminOrders from './pages/admin/AdminOrders.jsx';
 import AdminProducts from './pages/admin/AdminProducts.jsx';
+import AdminTicketEntry from './pages/admin/AdminTicketEntry.jsx';
 
 // 주소(URL)와 화면(페이지)을 짝지어 주는 곳입니다.
 // 예) 브라우저에서 /attractions 로 가면 <Attractions /> 화면이 보여요.
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/admin/members" element={<AdminMembers />} />
         <Route path="/admin/orders" element={<AdminOrders />} />
         <Route path="/admin/products" element={<AdminProducts />} />
+        <Route path="/admin/entry" element={<AdminTicketEntry />} />
 
         {/* 없는 주소로 오면 홈으로 */}
         <Route path="*" element={<Navigate to="/" replace />} />

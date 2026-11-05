@@ -132,10 +132,17 @@ jobs:
             --query 'Parameter.Value' --output text 2>/dev/null || true)
 
           # base부터 VERSION까지 pathspec에 해당하는 변경이 있으면 성공(0)을 반환한다.
-          # base를 모르거나 VERSION의 조상이 아니면 비교할 수 없으므로 변경이 있다고 본다.
+          # VERSION이 base와 같거나 base보다 오래된 커밋이면 변경이 없다고 본다. (늦게 끝난 CI가 배포를 되돌리지 않게 한다)
+          # 그 밖에 base를 모르거나 VERSION의 조상이 아니면 비교할 수 없으므로 변경이 있다고 본다.
           has_changes() {
             local base="$1"; shift
-            if ! [[ "$base" =~ ^[0-9a-f]{40}$ ]] || ! git merge-base --is-ancestor "$base" "$VERSION" 2>/dev/null; then
+            if ! [[ "$base" =~ ^[0-9a-f]{40}$ ]]; then
+              return 0
+            fi
+            if git merge-base --is-ancestor "$VERSION" "$base" 2>/dev/null; then
+              return 1
+            fi
+            if ! git merge-base --is-ancestor "$base" "$VERSION" 2>/dev/null; then
               return 0
             fi
             [ -n "$(git diff --name-only "$base" "$VERSION" -- "$@")" ]

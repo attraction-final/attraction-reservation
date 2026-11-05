@@ -56,6 +56,13 @@ export function AuthProvider({ children }) {
         setUser(null);
       }
     },
+    // 회원 탈퇴: 서버 탈퇴가 "성공했을 때만" 화면의 로그인 정보를 지워요.
+    // (실패하면 에러가 그대로 화면으로 올라가고, 로그인 상태는 그대로예요)
+    async withdraw() {
+      await authApi.withdraw();
+      clearAccessToken();
+      setUser(null);
+    },
     setUser,
   };
 

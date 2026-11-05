@@ -129,6 +129,14 @@ export const authApi = {
     await http.patch('/users/me', { nickname });
     return http.get('/users/me');
   },
+  // [PATCH /api/users/me/password] { currentPassword, newPassword } → 응답 data 는 null
+  // 현재 비밀번호가 틀리면 400 "현재 비밀번호가 일치하지 않습니다." 가 와요.
+  changePassword: (currentPassword, newPassword) =>
+      http.patch('/users/me/password', { currentPassword, newPassword }),
+  // [DELETE /api/users/me] 진짜로 지우지 않고 탈퇴(WITHDRAWN) 상태로 바꿔요. (소프트 삭제)
+  // 서버가 이용 예정 예약을 자동 취소하고, Refresh Token 쿠키도 지워 줘요.
+  // 미사용 입장권이 있으면 409 "미사용 입장권이 있어 탈퇴할 수 없습니다..." 가 와요.
+  withdraw: () => http.delete('/users/me'),
 };
 
 // ───────── 어트랙션 / 슬롯 ✅ ─────────

@@ -6,6 +6,8 @@ import { useApi } from '../hooks/useApi.js';
 import { authApi, orderApi } from '../api/index.js';
 import { MEMBER_ROLE, ORDER_STATUS, formatPrice } from '../api/labels.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import PasswordChangeSheet from '../components/PasswordChangeSheet.jsx';
+import WithdrawSheet from '../components/WithdrawSheet.jsx';
 
 export default function MyPage() {
   const navigate = useNavigate();
@@ -14,6 +16,8 @@ export default function MyPage() {
 
   const [nickname, setNickname] = useState('');
   const [message, setMessage] = useState('');
+  // 지금 열려 있는 확인창: null(없음) | 'password'(비밀번호 변경) | 'withdraw'(회원 탈퇴)
+  const [sheet, setSheet] = useState(null);
   useEffect(() => { if (user) setNickname(user.nickname); }, [user]);
 
   async function saveNickname() {
@@ -29,6 +33,17 @@ export default function MyPage() {
   async function onLogout() {
     await logout();
     navigate('/login');
+  }
+
+  function onPasswordChanged() {
+    setSheet(null);
+    setMessage('비밀번호를 바꿨어요.');
+  }
+
+  function onWithdrawn() {
+    setSheet(null);
+    alert('회원 탈퇴가 완료되었어요. 그동안 이용해 주셔서 고마워요.');
+    navigate('/', { replace: true }); // 뒤로가기로 마이페이지에 돌아오지 않게 replace
   }
 
   return (
@@ -62,7 +77,7 @@ export default function MyPage() {
                   <button type="button" className="btn btn-sm btn-dark" style={{ width: 72, height: 48, borderRadius: 14 }} onClick={saveNickname}>변경</button>
                 </div>
                 {message && <span className="small" style={{ color: 'var(--blue-ink)' }}>{message}</span>}
-                <button type="button" className="row between" onClick={() => alert('비밀번호 변경 화면은 다음 단계에서 만들어요.')}
+                <button type="button" className="row between" onClick={() => { setMessage(''); setSheet('password'); }}
                   style={{ height: 48, borderRadius: 14, background: 'var(--soft)', border: 0, padding: '0 14px', fontSize: 14, fontWeight: 500 }}>
                   비밀번호 변경 <Icon name="chevron" size={18} strokeWidth={2} color="var(--subtle)" />
                 </button>
@@ -99,12 +114,19 @@ export default function MyPage() {
 
               <div className="row between" style={{ padding: '6px 4px 0' }}>
                 <button type="button" onClick={onLogout} style={{ border: 0, background: 'none', fontSize: 13, textDecoration: 'underline', padding: 0 }}>로그아웃</button>
-                <button type="button" onClick={() => alert('회원 탈퇴는 백엔드 연결 후 만들어요.')} style={{ border: 0, background: 'none', fontSize: 13, color: 'var(--muted)', textDecoration: 'underline', padding: 0 }}>회원 탈퇴</button>
+                <button type="button" onClick={() => setSheet('withdraw')} style={{ border: 0, background: 'none', fontSize: 13, color: 'var(--muted)', textDecoration: 'underline', padding: 0 }}>회원 탈퇴</button>
               </div>
             </div>
           </>
         )}
       </div>
+
+      {user && sheet === 'password' && (
+        <PasswordChangeSheet onClose={() => setSheet(null)} onDone={onPasswordChanged} />
+      )}
+      {user && sheet === 'withdraw' && (
+        <WithdrawSheet onClose={() => setSheet(null)} onDone={onWithdrawn} />
+      )}
       <TabBar />
     </div>
   );

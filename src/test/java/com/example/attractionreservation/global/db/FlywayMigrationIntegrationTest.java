@@ -17,6 +17,8 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.mysql.MySQLContainer;
@@ -27,6 +29,7 @@ import java.sql.Statement;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
 // 마이그레이션 SQL(db/migration)이 엔티티 매핑과 일치하는지 운영과 같은 MySQL 버전에서 검증한다.
@@ -53,6 +56,9 @@ class FlywayMigrationIntegrationTest {
 
     @Autowired
     private MySQLContainer mysql;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @TestConfiguration(proxyBeanMethods = false)
     static class MySqlConfig {
@@ -109,6 +115,42 @@ class FlywayMigrationIntegrationTest {
         });
         assertThat(Arrays.stream(applied).map(MigrationInfo::getVersion))
                 .contains(MigrationVersion.fromVersion("2"));
+    }
+
+    // validate는 UNIQUE 제약을 비교하지 않으므로 V2의 uk_attraction_name_active는 실제 INSERT로 검증한다.
+    @Test
+    @DisplayName("삭제되지 않은 어트랙션과 같은 이름으로 추가하면 UNIQUE 제약 위반이 발생한다")
+    void insertAttraction_DuplicateActiveName_ThrowsDuplicateKeyException() {
+        // given
+        insertAttraction("회전목마", null);
+
+        // when & then
+        assertThatThrownBy(() -> insertAttraction("회전목마", null))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    @DisplayName("같은 이름의 삭제된 어트랙션이 여러 건 있어도 그 이름으로 추가할 수 있다")
+    void insertAttraction_SameNameDeletedExists_Success() {
+        // given
+        insertAttraction("회전목마", "2026-01-01 00:00:00");
+        insertAttraction("회전목마", "2026-01-02 00:00:00");
+
+        // when
+        insertAttraction("회전목마", null);
+
+        // then
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attractions WHERE name = ?", Integer.class, "회전목마");
+        assertThat(count).isEqualTo(3);
+    }
+
+    private void insertAttraction(String name, String deletedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO attractions (created_at, updated_at, deleted_at, description,
+                    duration_minutes, entrance_move_minutes, location, name, operation_status)
+                VALUES (NOW(6), NOW(6), ?, '설명', 5, 1, '위치', ?, 'OPERATING')
+                """, deletedAt, name);
     }
 
     // 컨테이너의 root 계정으로 별도 스키마를 만들고 V1 SQL만 실행한다. (Flyway 이력 없음)

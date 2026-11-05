@@ -30,7 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
 // 마이그레이션 SQL(db/migration)이 엔티티 매핑과 일치하는지 운영과 같은 MySQL 버전에서 검증한다.
-// 다른 테스트는 엔티티로 스키마를 만들므로(create-drop), 엔티티만 바꾸고 마이그레이션을 빠뜨리면 이 테스트만 실패한다.
+// 다른 테스트는 엔티티로 스키마를 만들므로(create-drop), 테이블·컬럼을 빠뜨리거나 컬럼 타입이 다르면 이 테스트만 실패한다.
+// validate는 컬럼 길이·NULL 여부·UNIQUE 제약·인덱스·외래 키를 비교하지 않는다. (docs/database/migration.md 2장)
 @DataJpaTest(properties = {
         "spring.flyway.enabled=true",
         "spring.jpa.hibernate.ddl-auto=validate"

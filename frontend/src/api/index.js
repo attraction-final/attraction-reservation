@@ -647,25 +647,47 @@ function toAdminMember(m) {
 }
 
 const adminManageApi = {
-  // [GET /api/admin/reservations?status=&size=100]
-  // 백엔드는 상태·날짜·회원·어트랙션 필터만 있고 "글자 검색"이 없어서,
-  // 닉네임·이메일·예약번호 검색은 받아 온 목록에서 프론트가 걸러요.
-  reservations: async ({ q = '', status = '' } = {}) => {
-    const params = { size: 100 };
-    if (status) params.status = RESERVATION_STATUS_TO_BACK[status];
-    const [page, users, attractions] = await Promise.all([
-      http.get(`/admin/reservations${toQuery(params)}`),
-      fetchAdminUsers(),
-      attractionApi.list('ALL'),
-    ]);
-    const userById = new Map(users.map((u) => [u.id, u]));
-    const attractionById = new Map(attractions.map((a) => [a.id, a]));
-    const list = page.content.map((r) => toAdminReservation(r, userById, attractionById));
+  // 필터 선택지 + 이름 찾기용 표 (화면에 처음 들어올 때 한 번만 불러와요)
+  //  - members     : 회원 선택 목록 (회원 API 에 검색이 없어서 앞쪽 100명까지만 받아요)
+  //  - attractions : 어트랙션 선택 목록
+  //  - userById / attractionById : 예약 응답의 번호(userId, attractionId) → 닉네임·사진을 찾는 표
+  reservationFilterOptions: async () => {
+    const [users, attractions] = await Promise.all([fetchAdminUsers(), attractionApi.list('ALL')]);
+    return {
+      members: users,
+      attractions,
+      userById: new Map(users.map((u) => [u.id, u])),
+      attractionById: new Map(attractions.map((a) => [a.id, a])),
+    };
+  },
 
-    const keyword = q.trim().toLowerCase();
-    if (!keyword) return list;
-    return list.filter((r) =>
-        [r.number, r.memberNickname, r.memberEmail].some((v) => v.toLowerCase().includes(keyword)));
+  // [GET /api/admin/reservations?page=&size=&status=&attractionId=&userId=]
+  // 필터와 페이징을 모두 "서버에게" 맡겨요. (SearchAdminReservationCondition + Pageable)
+  // lookup 은 위 reservationFilterOptions 의 결과예요.
+  // 돌려주는 값: { items, page, totalElements, hasNext }
+  reservations: async ({ page = 0, size = 20, status = '', attractionId = '', userId = '' } = {}, lookup) => {
+    const params = { page, size, attractionId, userId };
+    if (status) params.status = RESERVATION_STATUS_TO_BACK[status];
+    const res = await http.get(`/admin/reservations${toQuery(params)}`); // 빈 값은 toQuery 가 빼 줘요
+    return {
+      items: res.content.map((r) => toAdminReservation(r, lookup.userById, lookup.attractionById)),
+      // ⚠️ 이 응답은 페이지 번호 이름이 page 가 아니라 number 예요. (SearchAdminReservationListResponse)
+      page: res.number,
+      totalElements: res.totalElements,
+      hasNext: res.number + 1 < res.totalPages,
+    };
+  },
+
+  // [GET /api/admin/reservations/{id}] 예약 한 건 상세 (카드를 펼칠 때, 상태를 바꾼 뒤에 불러와요)
+  // 목록 응답에 없는 입장권 번호·취소 사유·취소 시각이 더 들어 있어요.
+  reservationDetail: async (id, lookup) => {
+    const r = await http.get(`/admin/reservations/${id}`);
+    return {
+      ...toAdminReservation(r, lookup.userById, lookup.attractionById),
+      ticketId: r.ticketId,
+      cancelReason: r.cancelReasonMessage,
+      cancelledAt: toKstText(r.cancelledAt),
+    };
   },
 
   // [PATCH /api/admin/reservations/{id}/status] { status: COMPLETED | NO_SHOW }

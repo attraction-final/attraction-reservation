@@ -44,6 +44,14 @@ export function AuthProvider({ children }) {
     checking,
     isAdmin: user?.role === 'ADMIN',
     login,
+    // 소셜 로그인: 일회용 코드를 출입증으로 바꾼 뒤, 일반 로그인과 똑같이 내 정보를 불러와요.
+    async loginWithSocialCode(code) {
+      const token = await authApi.exchangeSocialCode(code);
+      setAccessToken(token.accessToken);
+      const me = await authApi.me();
+      setUser(me);
+      return me;
+    },
     async signup(nickname, email, password) {
       await authApi.signup(nickname, email, password); // 1) 가입
       return login(email, password);                   // 2) 바로 로그인

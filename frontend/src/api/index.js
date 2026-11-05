@@ -118,6 +118,10 @@ function markMine(raw, slot, myReserved) {
 export const authApi = {
   // [POST /api/auth/login] → { accessToken, tokenType, expiresIn }
   login: (email, password) => http.post('/auth/login', { email, password }),
+  // [POST /api/auth/oauth2/exchange] { code } → { accessToken, tokenType, expiresIn }
+  // code 는 카카오·구글 코드가 아니라 "우리 서버"가 발급한 일회용 로그인 코드예요. 한 번 쓰면 사라져요.
+  // /auth/ 로 시작해서 http.js 가 CSRF 도장을 자동으로 붙여 줘요.
+  exchangeSocialCode: (code) => http.post('/auth/oauth2/exchange', { code }),
   // [POST /api/users/signup] (가입만 하고 로그인은 따로 해야 해요 → AuthContext 에서 이어서 로그인)
   signup: (nickname, email, password) => http.post('/users/signup', { email, password, nickname }),
   // [POST /api/auth/logout]

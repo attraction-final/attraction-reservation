@@ -8,3 +8,9 @@ export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 // 스프링부트 API 주소의 앞부분. 모든 요청은 /api/... 로 갑니다.
 export const API_BASE = '/api';
+
+// 소셜 로그인 시작 주소의 앞부분 (.env 파일에서 정해요)
+// 소셜 로그인은 fetch 요청이 아니라 "브라우저가 페이지를 통째로 이동"하는 방식이라 /api 프록시를 안 타요.
+//  - 개발: 프론트(5173)와 백엔드(8080)가 따로 떠 있어서 백엔드 주소를 직접 적어요.
+//  - 배포: 같은 서버에서 프론트와 백엔드를 같이 내보내면 빈 값('')이면 돼요.
+export const OAUTH_BASE = import.meta.env.VITE_OAUTH_BASE_URL ?? '';

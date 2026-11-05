@@ -13,6 +13,7 @@ import RouteResult from './pages/RouteResult.jsx';
 import MyReservations from './pages/MyReservations.jsx';
 import MyTickets from './pages/MyTickets.jsx';
 import MyPage from './pages/MyPage.jsx';
+import OAuthCallback from './pages/OAuthCallback.jsx';
 import AdminSlots from './pages/admin/AdminSlots.jsx';
 import AdminAttractionForm from './pages/admin/AdminAttractionForm.jsx';
 import AdminReservations from './pages/admin/AdminReservations.jsx';
@@ -30,6 +31,8 @@ export default function App() {
         {/* 사용자 화면 */}
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
+        {/* 소셜 로그인을 마치고 백엔드가 돌려보내 주는 곳 */}
+        <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="/attractions" element={<Attractions />} />
         <Route path="/attractions/:id" element={<AttractionDetail />} />
         <Route path="/tickets" element={<Tickets />} />

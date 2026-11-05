@@ -13,6 +13,8 @@ import com.example.attractionreservation.domain.refund.repository.RefundItemRepo
 import com.example.attractionreservation.domain.refund.repository.RefundRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
+import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.AfterCommit;
@@ -45,6 +47,7 @@ public class RefundService {
     private final RefundItemRepository refundItemRepository;
     private final PaymentRepository paymentRepository;
     private final TicketService ticketService;
+    private final UserRepository userRepository;
 
     /**
      * 결제 완료된 주문의 선택한 티켓을 환불 요청한다(부분 환불). PG 취소는 하지 않고 REQUESTED로 저장한다.
@@ -208,6 +211,8 @@ public class RefundService {
     }
 
     private Payment getPaymentWithLock(String pgId) {
+        // 사용자·관리자 환불 요청 모두 회원 → 결제 → 티켓 순서로 잠금을 획득한다.
+        lockPaymentOwner(pgId);
         return paymentRepository.findWithLockByPgId(pgId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
@@ -216,5 +221,19 @@ public class RefundService {
         if (payment.getStatus() != PaymentStatus.PAID && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
             throw new BusinessException(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
         }
+    }
+
+    // 탈퇴와 같은 결제 소유자의 회원 행을 잠가 두 작업이 동시에 진행되지 않도록 한다.
+    private void lockPaymentOwner(String pgId) {
+        // 잠금 대상을 찾기 위해 소유자 ID만 조회한다. Payment·User 엔티티는 미리 로딩하지 않는다.
+        // 이 조회는 요청자의 소유권 검증을 대신하지 않으므로 기존 환불 권한 검사는 유지한다.
+        Long userId = paymentRepository.findUserIdByPgId(pgId).orElseThrow(
+                () -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND)
+        );
+
+        // 잠금은 이 메서드 종료가 아니라 호출한 환불 요청 트랜잭션이 끝날 때 해제된다.
+        User user = userRepository.findByIdForUpdate(userId).orElseThrow(
+                () -> new BusinessException(ErrorCode.USER_NOT_FOUND)
+        );
     }
 }

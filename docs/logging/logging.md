@@ -39,7 +39,7 @@ logging:
 
 메시지는 `event=이벤트이름` 다음에 `key=value` 쌍만 나열하며, 문장형 설명은 쓰지 않는다.
 
-```java
+```
 log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, amount);
 ```
 
@@ -111,7 +111,7 @@ log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, 
 
 예외는 객체째 마지막 인자로 넘기고, 처리하는 곳에서 한 번만 남긴다.
 
-```java
+```
 log.error("event=PAYMENT_FAILED orderId={} errorCode={}", orderId, errorCode.name(), e);  // O
 log.error("event=PAYMENT_FAILED reason=" + e.getMessage());                                // X
 ```
@@ -227,7 +227,7 @@ avg_over_time({app="order-api"} | logfmt | event="EXTERNAL_API_CALLED" | unwrap 
 
 **상황별 예시**
 
-```java
+```
 // 비즈니스 이벤트
 log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, amount);
 

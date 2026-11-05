@@ -9,6 +9,10 @@ import { useAuth } from '../context/AuthContext.jsx';
 import PasswordChangeSheet from '../components/PasswordChangeSheet.jsx';
 import WithdrawSheet from '../components/WithdrawSheet.jsx';
 
+
+// 가입 방식 → 화면에 보여 줄 이름
+const SOCIAL_LABEL = { KAKAO: '카카오', GOOGLE: 'Google' };
+
 export default function MyPage() {
   const navigate = useNavigate();
   const { user, setUser, logout, isAdmin } = useAuth();
@@ -19,6 +23,10 @@ export default function MyPage() {
   // 지금 열려 있는 확인창: null(없음) | 'password'(비밀번호 변경) | 'withdraw'(회원 탈퇴)
   const [sheet, setSheet] = useState(null);
   useEffect(() => { if (user) setNickname(user.nickname); }, [user]);
+
+  // 가입 방식(GET /api/users/me 의 provider): LOCAL | KAKAO | GOOGLE
+  // provider 가 없을 때(백엔드가 아직 안 바뀐 경우)는 일반 회원처럼 버튼을 보여 줘요.
+  const isSocial = Boolean(user?.provider) && user.provider !== 'LOCAL';
 
   async function saveNickname() {
     setMessage('');
@@ -77,10 +85,15 @@ export default function MyPage() {
                   <button type="button" className="btn btn-sm btn-dark" style={{ width: 72, height: 48, borderRadius: 14 }} onClick={saveNickname}>변경</button>
                 </div>
                 {message && <span className="small" style={{ color: 'var(--blue-ink)' }}>{message}</span>}
-                <button type="button" className="row between" onClick={() => { setMessage(''); setSheet('password'); }}
-                  style={{ height: 48, borderRadius: 14, background: 'var(--soft)', border: 0, padding: '0 14px', fontSize: 14, fontWeight: 500 }}>
-                  비밀번호 변경 <Icon name="chevron" size={18} strokeWidth={2} color="var(--subtle)" />
-                </button>
+                {/* 소셜 회원(카카오·구글)은 우리 서버에 비밀번호가 없어서 변경 버튼 대신 안내를 보여 줘요 */}
+                {isSocial ? (
+                  <span className="small muted">{SOCIAL_LABEL[user.provider] ?? '소셜'} 계정으로 가입해서 비밀번호가 없어요.</span>
+                ) : (
+                  <button type="button" className="row between" onClick={() => { setMessage(''); setSheet('password'); }}
+                    style={{ height: 48, borderRadius: 14, background: 'var(--soft)', border: 0, padding: '0 14px', fontSize: 14, fontWeight: 500 }}>
+                    비밀번호 변경 <Icon name="chevron" size={18} strokeWidth={2} color="var(--subtle)" />
+                  </button>
+                )}
               </div>
 
               <div className="stack gap-8">

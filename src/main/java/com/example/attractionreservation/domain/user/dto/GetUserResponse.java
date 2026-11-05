@@ -7,7 +7,10 @@ public record GetUserResponse(
         String email,
         String nickname,
         String role,
-        String status
+        String status,
+        // 가입 방식: LOCAL(이메일 가입) | KAKAO | GOOGLE
+        // 프론트가 소셜 회원에게 비밀번호 변경 버튼을 숨기는 데 사용한다.
+        String provider
 ) {
 
     public static GetUserResponse from(User user) {
@@ -16,7 +19,8 @@ public record GetUserResponse(
                 user.getEmail(),
                 user.getNickname(),
                 user.getRole().name(),
-                user.getStatus().name()
+                user.getStatus().name(),
+                user.getProvider().name()
         );
     }
 }

@@ -53,7 +53,6 @@ function toAttractionSummary(item) {
     rideMinutes: item.durationMinutes,
     description: item.description,
     status,
-    heightLimited: false, // 백엔드에 키 제한 정보가 아직 없어요
     // nextSlot 은 "오늘 예약 가능한 가장 빠른 슬롯" → 없으면 오늘은 예약 마감
     soldOut: status === 'OPERATING' && !item.nextSlot,
     nextSlot: item.nextSlot
@@ -150,9 +149,27 @@ export const attractionApi = {
     const params = { size: 50, sort: 'NAME' };
     if (filter === 'AVAILABLE') params.reservable = true; // 오늘 예약 가능한 슬롯이 있는 것만
     const page = await http.get(`/attractions${toQuery(params)}`);
-    const items = page.content.map(toAttractionSummary);
-    // 키 제한 필터: 백엔드에 정보가 없어서 지금은 빈 목록이 나와요.
-    return filter === 'HEIGHT' ? items.filter((a) => a.heightLimited) : items;
+    return page.content.map(toAttractionSummary);
+  },
+  // [GET /api/attractions?page=&size=&keyword=&sort=&reservable=&operating=]
+  // 어트랙션 목록 화면 전용: 검색·정렬·필터·페이징을 모두 "서버에게" 맡겨요.
+  //  - keyword : 이름 검색어 (빈 값이면 안 보내요)
+  //  - sort    : 'NAME'(이름순) | 'LATEST'(최신순)  ← 백엔드 @Pattern 이 이 두 개만 받아요
+  //  - filter  : 'ALL' | 'AVAILABLE'(예약 가능) | 'OPERATING'(운영 중)
+  // 돌려주는 값: { items, page, totalElements, hasNext }
+  search: async ({ page = 0, size = 10, keyword = '', sort = 'NAME', filter = 'ALL' } = {}) => {
+    const params = { page, size, sort };
+    if (keyword.trim()) params.keyword = keyword.trim();
+    if (filter === 'AVAILABLE') params.reservable = true;
+    if (filter === 'OPERATING') params.operating = true;
+    const res = await http.get(`/attractions${toQuery(params)}`);
+    return {
+      items: res.content.map(toAttractionSummary),
+      page: res.page,
+      totalElements: res.totalElements,
+      // 응답에 hasNext 가 없어서 계산해요. (page 는 0부터 시작)
+      hasNext: res.page + 1 < res.totalPages,
+    };
   },
   // [GET /api/attractions/{id}]
   detail: async (id) => toAttractionDetail(await http.get(`/attractions/${id}`)),

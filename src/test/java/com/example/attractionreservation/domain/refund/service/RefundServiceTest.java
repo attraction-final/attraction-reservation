@@ -129,7 +129,8 @@ class RefundServiceTest {
         //then
         assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
                 .singleElement().asString().contains("INFO")
-                .contains("refundId=1 pgId=" + payment.getPgId() + " userId=" + USER_ID + " amount=20000");
+                .contains("refundId=1 pgId=" + payment.getPgId() + " targetUserId=" + USER_ID + " amount=20000")
+                .doesNotContain(" userId=", " adminId=");
         assertThat(output).doesNotContain("단순 변심");
     }
 
@@ -542,7 +543,7 @@ class RefundServiceTest {
     @ParameterizedTest
     @ValueSource(longs = {0, 86400})
     @DisplayName("관리자 전체 환불은 회원 소유 결제의 방문일 당일·이후에도 미사용 티켓을 환불 요청한다")
-    void createAdminFullRefund_AfterDeadline_SavesUnusedTickets(long secondsAfterVisitStart) {
+    void createAdminFullRefund_AfterDeadline_SavesUnusedTickets(long secondsAfterVisitStart, CapturedOutput output) {
         // given
         ReflectionTestUtils.setField(payment.getOrder().getUser(), "id", OTHER_USER_ID);
         givenPayment(payment);
@@ -563,6 +564,11 @@ class RefundServiceTest {
         assertThat(saved.getStatus()).isEqualTo(RefundStatus.REQUESTED);
         assertThat(saved.getRefundAmount()).isEqualTo(20000);
         assertThat(unused).extracting(Ticket::getStatus).containsOnly(TicketStatus.REFUNDED);
+        // 공통 서비스가 알고 있는 결제 소유자는 요청자가 아닌 대상 회원으로 기록한다.
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
+                .singleElement().asString()
+                .contains("targetUserId=" + OTHER_USER_ID)
+                .doesNotContain(" userId=", " adminId=");
         var calls = org.mockito.Mockito.inOrder(paymentRepository, ticketService, refundRepository);
         calls.verify(paymentRepository).findWithLockByPgId(PG_ID);
         calls.verify(ticketService).findUnusedTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID));
@@ -572,7 +578,7 @@ class RefundServiceTest {
     @ParameterizedTest
     @ValueSource(longs = {0, 86400})
     @DisplayName("관리자 부분 환불은 회원 소유 결제의 방문일 당일·이후에도 지정한 미사용 티켓만 환불 요청한다")
-    void createAdminPartialRefund_AfterDeadline_SavesSelectedTickets(long secondsAfterVisitStart) {
+    void createAdminPartialRefund_AfterDeadline_SavesSelectedTickets(long secondsAfterVisitStart, CapturedOutput output) {
         // given
         ReflectionTestUtils.setField(payment.getOrder().getUser(), "id", OTHER_USER_ID);
         givenPayment(payment);
@@ -595,6 +601,11 @@ class RefundServiceTest {
             assertThat(item.getQuantity()).isEqualTo(1);
         });
         assertThat(selected.get(0).getStatus()).isEqualTo(TicketStatus.REFUNDED);
+        // 관리자 요청에서도 결제 소유자 ID를 요청자 ID로 오인하지 않도록 검증한다.
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
+                .singleElement().asString()
+                .contains("targetUserId=" + OTHER_USER_ID)
+                .doesNotContain(" userId=", " adminId=");
         var calls = org.mockito.Mockito.inOrder(paymentRepository, ticketService, refundRepository);
         calls.verify(paymentRepository).findWithLockByPgId(PG_ID);
         calls.verify(ticketService).findRefundTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID), Set.of(11L));

@@ -17,7 +17,7 @@ public class TicketIssuedEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleTicketIssued(TicketIssuedEvent event) {
         // 개별 티켓마다 기록하지 않고 주문별 발급 수량을 한 번에 기록한다.
-        log.info("event=TICKETS_ISSUED orderId={} userId={} count={}",
+        log.info("event=TICKETS_ISSUED orderId={} targetUserId={} count={}",
                 event.orderId(),
                 event.userId(),
                 event.count()

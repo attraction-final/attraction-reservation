@@ -154,6 +154,7 @@ public enum ErrorCode {
     REFUND_INVALID_TICKET(HttpStatus.BAD_REQUEST, "해당 주문의 티켓이 아닙니다."),
     REFUND_DUPLICATE_TICKET(HttpStatus.BAD_REQUEST, "같은 티켓을 중복해서 환불할 수 없습니다."),
     REFUND_DEADLINE_PASSED(HttpStatus.CONFLICT, "입장일 전날까지만 환불할 수 있습니다."),
+    REFUND_USER_WITHDRAW(HttpStatus.CONFLICT, "탈퇴한 회원의 결제는 환불을 요청할 수 없습니다."),
     REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다."),
 
     //jev ai / chatbot

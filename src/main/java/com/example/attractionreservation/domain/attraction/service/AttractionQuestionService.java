@@ -5,5 +5,5 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AttractionQuestionService {
-  
+  throw new UnsupportedOperationException("나중에 구현할거");
 }

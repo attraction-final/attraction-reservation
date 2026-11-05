@@ -26,10 +26,10 @@ public class AttractionQuestionService {
     private static final double MIN_CANDIDATE_PROBABILITY = 0.1;
 
     private static final String NEED_CLARIFICATION_MESSAGE =
-            "어떤 어트랙션을 말씀하시는지 확실하지 않습니다. 목록에서 어트랙션을 골라 다시 질문해주세요.";
+            "어떤 어트랙션을 말씀하시는지 확실하지 않습니다. 목록에서 어트랙션을 골라 다시 질문해 주세요.";
 
     private static final String UNSUPPORTED_MESSAGE =
-            "지금은 어트랙션의 키 제한 , 운영시간, 운영 상태만 안내할 수 있습니다.";
+            "지금은 어트랙션의 키 제한, 운영시간, 운영 상태만 안내할 수 있습니다.";
 
     private final AttractionRepository attractionRepository;
 

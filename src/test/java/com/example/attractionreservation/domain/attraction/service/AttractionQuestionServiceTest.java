@@ -174,7 +174,7 @@ class AttractionQuestionServiceTest {
 
         CreateAttractionQuestionResponse response = attractionQuestionService.answer(QUESTION);
 
-        assertThat(response.answer()).isEqualTo("지금은 어트랙션의 키 제한 , 운영시간, 운영 상태만 안내할 수 있습니다.");
+        assertThat(response.answer()).isEqualTo("지금은 어트랙션의 키 제한, 운영시간, 운영 상태만 안내할 수 있습니다.");
         assertThat(response.attractionId()).isNull();
         verifyNoInteractions(attractionAnswerComposer);
     }

@@ -96,7 +96,7 @@ public class Ticket extends BaseTimeEntity {
         statusTransition(TicketStatus.REFUNDED);
     }
 
-    public void statusTransition(TicketStatus newStatus) {
+    private void statusTransition(TicketStatus newStatus) {
         if (!this.status.canTransitTo(newStatus)) {
             throw new BusinessException(ErrorCode.INVALID_TICKET_STATUS_TRANSITION);
         }

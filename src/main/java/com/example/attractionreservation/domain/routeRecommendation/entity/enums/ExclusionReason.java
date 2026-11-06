@@ -10,6 +10,7 @@ public enum ExclusionReason {
     SLOT_NOT_OPEN("예약 가능한 상태의 슬롯이 없습니다."),
     SLOT_FULL("예약 가능한 슬롯이 모두 매진되었습니다."),
     RESERVATION_CLOSED("예약 마감 시각(탑승 30분 전)이 지난 슬롯만 남아 있습니다."),
+    SLOT_MANUALLY_CLOSED("관리자에 의해 예약이 마감된 슬롯만 남아 있습니다."),
     TIME_CONFLICT("선택한 이용 시간 내에 방문하기 어려워 추천에서 제외되었습니다.");
 
     private final String message;

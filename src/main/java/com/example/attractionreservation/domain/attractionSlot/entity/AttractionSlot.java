@@ -101,10 +101,15 @@ public class AttractionSlot extends BaseTimeEntity {
         if (now.isAfter(startsAt.minusMinutes(30))) {
             return UnavailableReason.DEADLINE_PASSED;
         }
+        // 잔여 정원이 있지만 관리자에 의해 수동 마감
+        if (status == SlotStatus.CLOSED && !autoClosed && getRemainingCount() > 0) {
+            return UnavailableReason.MANUALLY_CLOSED;
+        }
         // 자리가 없음 (CLOSED 상태도 여기로 모음)
         if (status == SlotStatus.CLOSED || getRemainingCount() <= 0) {
             return UnavailableReason.FULL;
         }
+
         // 아무 문제 없음: 예약 가능
         return null;
     }

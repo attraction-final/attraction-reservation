@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.attraction.cache.AttractionDetai
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
@@ -16,6 +17,7 @@ import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
+import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +27,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
+import org.springframework.aop.framework.Advised;
+import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -44,6 +48,11 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -70,6 +79,9 @@ class AttractionDurationIntegrationTest {
 
     @Autowired
     private AttractionSlotService attractionSlotService;
+
+    @Autowired
+    private AttractionRepository attractionRepository;
 
     // Redis 캐시 삭제만 제외하고 DB 검증과 수정 트랜잭션은 실제로 수행한다.
     @MockitoBean
@@ -297,6 +309,121 @@ class AttractionDurationIntegrationTest {
             assertThat(created.getReservedCount()).isZero();
             assertThat(created.getStatus()).isEqualTo(SlotStatus.OPEN);
         });
+    }
+
+    @ParameterizedTest(name = "슬롯 등록 선행 여부: {0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("슬롯 등록과 소요 시간 변경이 겹쳐도 먼저 커밋된 작업에 맞춰 변경 제한과 슬롯 길이를 유지한다")
+    void createSlot_overlapsDurationChange_preservesScheduleConsistency(boolean slotRegistrationFirst)
+            throws Exception {
+        // given
+        // 최초에는 과거 슬롯만 남겨 소요 시간 변경과 새 슬롯 등록이 각각 가능한 상태로 만든다.
+        moveSlotTo(SLOT_START.minusDays(1));
+        State before = readState();
+        CountDownLatch firstWritten = new CountDownLatch(1);
+        CountDownLatch allowFirstCommit = new CountDownLatch(1);
+        CountDownLatch secondLockRequested = new CountDownLatch(1);
+        AtomicReference<Thread> secondThread = new AtomicReference<>();
+
+        // 실제 잠금 조회 직전에 후행 작업의 도달 여부만 알리고 조회·결과는 그대로 실행한다.
+        var advisor = new DefaultPointcutAdvisor((MethodInterceptor) invocation -> {
+            if (Thread.currentThread() == secondThread.get()
+                    && invocation.getMethod().getName().equals("findActiveByIdForUpdate")) {
+                secondLockRequested.countDown();
+            }
+            return invocation.proceed();
+        });
+        Advised repositoryProxy = (Advised) attractionRepository;
+        repositoryProxy.addAdvisor(0, advisor);
+        var executor = Executors.newFixedThreadPool(2);
+
+        try {
+            // when: 선행 Service 작업을 실제 수행하고 외부 트랜잭션의 커밋 직전에 멈춘다.
+            var firstFuture = executor.submit(() -> transactionTemplate.execute(transaction -> {
+                Long createdSlotId = executeSlotOrDurationChange(slotRegistrationFirst);
+                entityManager.flush();
+                firstWritten.countDown();
+                awaitSignal(allowFirstCommit, "선행 작업 커밋");
+                return createdSlotId;
+            }));
+            awaitSignal(firstWritten, "선행 작업 저장");
+
+            var secondFuture = executor.submit(() -> {
+                secondThread.set(Thread.currentThread());
+                try {
+                    return new OperationResult(executeSlotOrDurationChange(!slotRegistrationFirst), null);
+                } catch (BusinessException exception) {
+                    return new OperationResult(null, exception.getErrorCode());
+                }
+            });
+            awaitSignal(secondLockRequested, "후행 작업의 어트랙션 잠금 요청");
+
+            // 미완료 여부만으로 DB 잠금을 증명하지 않고, 아래의 최종 응답·DB 상태도 함께 검증한다.
+            assertThatThrownBy(() -> secondFuture.get(500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            allowFirstCommit.countDown();
+            Long firstSlotId = firstFuture.get(10, TimeUnit.SECONDS);
+            OperationResult second = secondFuture.get(10, TimeUnit.SECONDS);
+
+            // then
+            int expectedDuration = slotRegistrationFirst ? 10 : 20;
+            String expectedDescription = slotRegistrationFirst ? before.description() : "동시 수정 설명";
+            assertThat(second.errorCode()).isEqualTo(slotRegistrationFirst
+                    ? ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED : null);
+            Long createdSlotId = slotRegistrationFirst ? firstSlotId : second.createdSlotId();
+            assertThat(createdSlotId).isNotNull();
+            assertThat(readState()).isEqualTo(new State(expectedDuration, expectedDescription,
+                    before.startsAt(), before.endsAt(), before.reservedCount(), before.status()));
+            transactionTemplate.executeWithoutResult(transaction -> {
+                AttractionSlot created = entityManager.find(AttractionSlot.class, createdSlotId);
+                assertThat(created.getAttraction().getId()).isEqualTo(fixture.attractionId());
+                assertThat(created.getStartsAt()).isEqualTo(SLOT_START);
+                assertThat(created.getEndsAt()).isEqualTo(SLOT_START.plusMinutes(expectedDuration));
+                assertThat(created.getStatus()).isEqualTo(SlotStatus.OPEN);
+                assertThat(created.getReservedCount()).isZero();
+                Long slotCount = entityManager.createQuery(
+                                "SELECT COUNT(s) FROM AttractionSlot s WHERE s.attraction.id = :attractionId", Long.class)
+                        .setParameter("attractionId", fixture.attractionId()).getSingleResult();
+                assertThat(slotCount).isEqualTo(2L);
+            });
+        } finally {
+            allowFirstCommit.countDown();
+            executor.shutdownNow();
+            try {
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("동시 작업 종료 후 fixture 정리").isTrue();
+            } finally {
+                repositoryProxy.removeAdvisor(advisor);
+            }
+        }
+    }
+
+    // static mock은 thread마다 적용해야 하므로 실제 Service를 실행하는 작업 스레드 안에서 만든다.
+    private Long executeSlotOrDurationChange(boolean registerSlot) {
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+            if (registerSlot) {
+                return attractionSlotService.createAttractionSlot(ADMIN_ID, fixture.attractionId(),
+                        new CreateAttractionSlotRequest(SLOT_START, 10)).slotId();
+            }
+            attractionService.updateAttraction(ADMIN_ID, fixture.attractionId(),
+                    new UpdateAttractionRequest(null, "동시 수정 설명", null, 20, null));
+            return null;
+        }
+    }
+
+    private static void awaitSignal(CountDownLatch signal, String step) {
+        try {
+            if (!signal.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(step + " 신호를 받지 못했습니다.");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(step + " 대기 중 중단됐습니다.", exception);
+        }
+    }
+
+    private record OperationResult(Long createdSlotId, ErrorCode errorCode) {
     }
 
     private SearchAttractionResponse updateAtFixedTime(UpdateAttractionRequest request) {

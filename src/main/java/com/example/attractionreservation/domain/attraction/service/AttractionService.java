@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.config.CacheConfig;
@@ -187,6 +188,16 @@ public class AttractionService {
         if (isNameChanged
                 && attractionRepository.existsByNameAndIdNotAndDeletedAtIsNull(request.name(), attractionId)) {
             throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+        }
+
+        // 소요 시간을 생략하거나 기존 값과 동일하게 요청하면 슬롯 검사를 수행하지 않는다.
+        boolean isDurationChanged = request.durationMinutes() != null && !request.durationMinutes().equals(previousDurationMinutes);
+        // 어트랙션 잠금 확보 후의 KST를 기준으로 취소되지 않은 운영 예정·진행 중 슬롯을 확인한다.
+        // 기존 슬롯·예약 시간표를 보존하기 위해 예약 인원과 관계없이 소요 시간 변경을 거부한다.
+        if (isDurationChanged &&
+                attractionSlotRepository.existsByAttraction_IdAndStatusNotAndEndsAtAfter(attractionId, SlotStatus.CANCELLED, KstTime.now())) {
+            // 엔티티 수정 전에 거부하여 함께 요청한 이름·설명 등도 변경되지 않도록 한다.
+            throw new BusinessException(ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED);
         }
 
         attraction.update(

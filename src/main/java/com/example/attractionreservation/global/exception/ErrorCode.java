@@ -24,6 +24,7 @@ public enum ErrorCode {
     ATTRACTION_STATUS_SAME(HttpStatus.BAD_REQUEST, "현재 상태와 같습니다."),
     ATTRACTION_HAS_UPCOMING_RESERVATIONS(HttpStatus.CONFLICT, "이용 예정 예약이 있어 처리할 수 없습니다. 예약을 먼저 처리해 주세요."),
     ATTRACTION_NOT_OPERATING(HttpStatus.CONFLICT, "현재 운영 중인 어트랙션이 아닙니다."),
+    ATTRACTION_DURATION_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "운영 예정이거나 진행 중인 슬롯이 있어 소요 시간을 변경할 수 없습니다."),
 
     // attractionSlot
     SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "슬롯을 찾을 수 없습니다."),

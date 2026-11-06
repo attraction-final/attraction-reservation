@@ -30,6 +30,11 @@ spring:
     scheduling:
       pool:
         size: 3   # 웹훅·보상·환불 스케줄러가 서로의 PG 지연에 밀리지 않도록 스레드를 나눈다
+      shutdown:
+        # 종료 신호를 받으면 실행 중인 스케줄러 작업이 끝날 때까지 기다린다.
+        # 컨테이너 종료 유예(stop_grace_period, ECS stopTimeout 30s)보다 짧게 둔다.
+        await-termination: true
+        await-termination-period: 20s
 
   data:
     redis:
@@ -97,5 +102,6 @@ payment:
 ticket:
   expiration:
     scheduler:
+      enabled: true
       batch-size: 100
       fixed-delay: 1m

@@ -192,7 +192,7 @@ class UserControllerTest {
 
         when(userService.getMe(userId))
                 .thenReturn(new GetUserResponse(
-                        userId, "test@gmail.com", "홍길동", "USER", "ACTIVE"
+                        userId, "test@gmail.com", "홍길동", "USER", "ACTIVE", "LOCAL"
                 ));
 
         // 다른 ID를 보내도 인증된 본인의 ID로 조회한다.
@@ -208,6 +208,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.data.nickname").value("홍길동"))
                 .andExpect(jsonPath("$.data.role").value("USER"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.provider").value("LOCAL"))
                 .andExpect(jsonPath("$.data.password").doesNotExist());
 
         verify(userService).getMe(userId);

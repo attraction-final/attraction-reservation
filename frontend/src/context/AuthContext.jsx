@@ -44,6 +44,14 @@ export function AuthProvider({ children }) {
     checking,
     isAdmin: user?.role === 'ADMIN',
     login,
+    // 소셜 로그인: 일회용 코드를 출입증으로 바꾼 뒤, 일반 로그인과 똑같이 내 정보를 불러와요.
+    async loginWithSocialCode(code) {
+      const token = await authApi.exchangeSocialCode(code);
+      setAccessToken(token.accessToken);
+      const me = await authApi.me();
+      setUser(me);
+      return me;
+    },
     async signup(nickname, email, password) {
       await authApi.signup(nickname, email, password); // 1) 가입
       return login(email, password);                   // 2) 바로 로그인
@@ -55,6 +63,13 @@ export function AuthProvider({ children }) {
         clearAccessToken(); // 서버 요청이 실패해도 화면에서는 로그아웃 처리
         setUser(null);
       }
+    },
+    // 회원 탈퇴: 서버 탈퇴가 "성공했을 때만" 화면의 로그인 정보를 지워요.
+    // (실패하면 에러가 그대로 화면으로 올라가고, 로그인 상태는 그대로예요)
+    async withdraw() {
+      await authApi.withdraw();
+      clearAccessToken();
+      setUser(null);
     },
     setUser,
   };

@@ -174,7 +174,7 @@ class UserServiceTest {
         GetUserResponse response = userService.getMe(userId);
 
         assertThat(response).isEqualTo(new GetUserResponse(
-                userId, "test@gmail.com", "홍길동", "USER", "ACTIVE"
+                userId, "test@gmail.com", "홍길동", "USER", "ACTIVE", "LOCAL"
         ));
 
         verify(userRepository).findById(userId);

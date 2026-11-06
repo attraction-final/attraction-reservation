@@ -1,0 +1,15 @@
+# deploy/monitoring/grafana/dashboards/ 의 JSON을 대시보드로 등록한다.
+# 저장소의 파일이 기준이므로 Grafana UI에서 저장하거나 지우지 못하게 한다.
+# 대시보드를 고칠 때는 UI에서 수정한 뒤 JSON을 내보내 이 디렉터리에 반영한다.
+
+apiVersion: 1
+
+providers:
+  - name: attraction-reservation
+    folder: attraction-reservation
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/dashboards

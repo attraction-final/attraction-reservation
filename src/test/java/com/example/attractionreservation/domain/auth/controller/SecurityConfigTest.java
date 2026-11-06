@@ -5,7 +5,10 @@ import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHan
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.config.SecurityConfig;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -84,7 +87,34 @@ class SecurityConfigTest {
                 .andExpect(status().isOk());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/actuator/health",
+            "/actuator/health/liveness",
+            "/actuator/health/readiness",
+            "/actuator/prometheus"
+    })
+    @DisplayName("헬스 체크와 메트릭 수집 경로는 인증 없이 접근할 수 있다")
+    void actuator_withoutAuthentication_returnsOk(String path) throws Exception {
+        // given
+        // when
+        // then
+        mockMvc.perform(get(path))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("노출하지 않은 actuator 경로는 인증 없이 접근할 수 없다")
+    void actuatorEnv_withoutAuthentication_returnsUnauthorized() throws Exception {
+        // given
+        // when
+        // then
+        mockMvc.perform(get("/actuator/env"))
+                .andExpect(status().isUnauthorized());
+    }
+
     // 실제 서비스 로직 없이 보안 설정만 검증하는 테스트 전용 API
+    // actuator 경로는 @WebMvcTest에 등록되지 않으므로 같은 경로를 매핑해 보안 설정만 확인한다.
     @RestController
     static class TestController {
 
@@ -92,7 +122,12 @@ class SecurityConfigTest {
                 "/api/admin/attractions",
                 "/api/attractions",
                 "/api/attractions/{attractionId}",
-                "/api/attractions/{attractionId}/slots"
+                "/api/attractions/{attractionId}/slots",
+                "/actuator/health",
+                "/actuator/health/liveness",
+                "/actuator/health/readiness",
+                "/actuator/prometheus",
+                "/actuator/env"
         })
         public String success() {
             return "ok";

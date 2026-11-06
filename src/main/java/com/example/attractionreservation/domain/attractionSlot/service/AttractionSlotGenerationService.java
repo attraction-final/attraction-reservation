@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +26,8 @@ import java.util.stream.Collectors;
  *    → 관리자가 직접 만든 시간표, 지운 슬롯이 다시 생기지 않는다.
  *  - 오늘은 지금보다 늦게 시작하는 슬롯만 만든다.
  *  - 종료 시각이 운영 시간(10:00~22:00)을 넘는 슬롯은 만들지 않는다. (BR-SLT-03)
+ *  - 어트랙션에 운영 시간(open_time, close_time)이 있으면 그 안에서만 만든다. (KAN-117)
+ *    시작은 open_time 이후, 끝은 close_time 이전. 값이 없으면(NULL) 정책 시간표를 그대로 쓴다.
  *  - 간격을 탑승 시간 이상으로 두어 같은 어트랙션의 슬롯끼리 겹치지 않는다. (BR-SLT-02)
  */
 @Service
@@ -97,8 +100,8 @@ public class AttractionSlotGenerationService {
         int stepMinutes = Math.max(policy.intervalMinutes(), durationMinutes);
 
         // LocalTime 으로 더하면 자정을 넘을 때 0시로 돌아가 무한 반복될 수 있어서, "하루 중 몇 분째"인 숫자로 센다.
-        int firstMinute = policy.firstStartTime().toSecondOfDay() / 60;
-        int lastMinute = policy.lastStartTime().toSecondOfDay() / 60;
+        int firstMinute = firstStartMinute(attraction, policy);
+        int lastMinute = lastStartMinute(attraction, policy, durationMinutes);
 
         List<AttractionSlot> slots = new ArrayList<>();
         for (int minute = firstMinute; minute <= lastMinute; minute += stepMinutes) {
@@ -116,5 +119,34 @@ public class AttractionSlotGenerationService {
             slots.add(AttractionSlot.create(attraction, startsAt, policy.capacity()));
         }
         return slots;
+    }
+
+    // 첫 슬롯 시작 시각(하루 중 몇 분째)
+    // 정책 첫 시작(10:00)과 어트랙션 운영 시작 중 "늦은 쪽"을 쓴다.
+    // 예) 운영 시작 12:45 → 12:45 부터 / 운영 시작 정보 없음 → 10:00 부터
+    private int firstStartMinute(Attraction attraction, SlotGenerationPolicy policy) {
+        int policyFirst = toMinuteOfDay(policy.firstStartTime());
+        LocalTime openTime = attraction.getOpenTime();
+        if (openTime == null) {
+            return policyFirst;
+        }
+        return Math.max(policyFirst, toMinuteOfDay(openTime));
+    }
+
+    // 마지막 슬롯 시작 시각(하루 중 몇 분째)
+    // 정책 마지막 시작(21:30)과 "운영 종료 - 탑승 시간" 중 "이른 쪽"을 쓴다.
+    // 탑승이 운영 종료 전에 끝나야 하므로 탑승 시간만큼 앞당긴다.
+    // 예) 운영 종료 13:00, 탑승 2분 → 12:58 까지 시작 가능 / 운영 종료 정보 없음 → 21:30 까지
+    private int lastStartMinute(Attraction attraction, SlotGenerationPolicy policy, int durationMinutes) {
+        int policyLast = toMinuteOfDay(policy.lastStartTime());
+        LocalTime closeTime = attraction.getCloseTime();
+        if (closeTime == null) {
+            return policyLast;
+        }
+        return Math.min(policyLast, toMinuteOfDay(closeTime) - durationMinutes);
+    }
+
+    private static int toMinuteOfDay(LocalTime time) {
+        return time.toSecondOfDay() / 60;
     }
 }

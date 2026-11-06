@@ -13,6 +13,7 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -55,6 +56,15 @@ class AttractionSlotGenerationServiceTest {
 
     private void givenAttraction(int durationMinutes) {
         Attraction attraction = Attraction.create("롤러코스터", "빠른 코스터", "A구역", durationMinutes, 5);
+        given(attractionRepository.findActiveByIdForUpdate(ATTRACTION_ID)).willReturn(Optional.of(attraction));
+    }
+
+    // 운영 시간이 있는 어트랙션 준비 (KAN-117)
+    // Attraction 에는 운영 시간을 넣는 메서드가 없어서 테스트에서는 필드에 직접 넣는다.
+    private void givenAttractionWithHours(int durationMinutes, LocalTime openTime, LocalTime closeTime) {
+        Attraction attraction = Attraction.create("롤러코스터", "빠른 코스터", "A구역", durationMinutes, 5);
+        ReflectionTestUtils.setField(attraction, "openTime", openTime);
+        ReflectionTestUtils.setField(attraction, "closeTime", closeTime);
         given(attractionRepository.findActiveByIdForUpdate(ATTRACTION_ID)).willReturn(Optional.of(attraction));
     }
 
@@ -191,5 +201,39 @@ class AttractionSlotGenerationServiceTest {
         assertThat(created).isZero();
         verify(attractionSlotRepository, never()).findStartTimesByAttractionIdBetween(anyLong(), any(), any());
         verify(attractionSlotRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("어트랙션 운영 시작이 정책보다 늦으면 운영 시작부터 만든다")
+    void generateSlots_lateOpenTime_startsFromOpenTime() {
+        // given: 12:45 ~ 19:30 운영, 탑승 3분 (모니모 러쉬와 같은 조건)
+        givenAttractionWithHours(3, LocalTime.of(12, 45), LocalTime.of(19, 30));
+        givenExistingStartTimes();
+
+        // when
+        int created = attractionSlotGenerationService.generateSlots(ATTRACTION_ID, policy(1), BEFORE_OPEN);
+
+        // then: 12:45, 13:15, ... 19:15 → 14개
+        List<AttractionSlot> slots = savedSlots();
+        assertThat(created).isEqualTo(14);
+        assertThat(slots.get(0).getStartsAt()).isEqualTo(DAY.atTime(12, 45));
+        assertThat(slots.get(13).getStartsAt()).isEqualTo(DAY.atTime(19, 15));
+    }
+
+    @Test
+    @DisplayName("탑승이 어트랙션 운영 종료 전에 끝나는 슬롯만 만든다")
+    void generateSlots_earlyCloseTime_endsBeforeCloseTime() {
+        // given: 운영 시작 정보 없음, 13:00 종료, 탑승 2분 (우주전투기와 같은 조건)
+        givenAttractionWithHours(2, null, LocalTime.of(13, 0));
+        givenExistingStartTimes();
+
+        // when
+        int created = attractionSlotGenerationService.generateSlots(ATTRACTION_ID, policy(1), BEFORE_OPEN);
+
+        // then: 10:00, 10:30, ... 12:30 → 6개, 마지막은 12:32에 끝남
+        List<AttractionSlot> slots = savedSlots();
+        assertThat(created).isEqualTo(6);
+        assertThat(slots).allSatisfy(slot ->
+                assertThat(slot.getEndsAt()).isBeforeOrEqualTo(DAY.atTime(13, 0)));
     }
 }

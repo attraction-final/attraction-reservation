@@ -155,7 +155,7 @@ class PaymentServiceTest {
         //then
         assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_CANCELLED")))
                 .singleElement().asString().contains("INFO")
-                .contains("pgId=" + payment.getPgId() + " orderId=" + ORDER_ID + " userId=" + USER_ID);
+                .contains("pgId=" + payment.getPgId() + " orderId=" + ORDER_ID + " targetUserId=" + USER_ID);
     }
 
     @Test

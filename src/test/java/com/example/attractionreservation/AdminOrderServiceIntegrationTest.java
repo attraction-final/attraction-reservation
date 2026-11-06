@@ -5,7 +5,11 @@ import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.user.entity.UserStatus;
 import com.example.attractionreservation.domain.order.dto.SearchAdminOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchAdminOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.ticket.entity.Ticket;
+import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
 import com.example.attractionreservation.domain.order.service.AdminOrderService;
@@ -38,6 +42,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
@@ -59,6 +64,9 @@ class AdminOrderServiceIntegrationTest {
 
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Autowired
+    private TicketRepository ticketRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -190,6 +198,36 @@ class AdminOrderServiceIntegrationTest {
         assertThat(response.items()).hasSize(1);
         assertThat(response.items().get(0).quantity()).isEqualTo(1);
         assertThat(response.pgId()).isEqualTo(firstPgId);
+        // 결제 전 주문은 아직 발급된 입장권이 없다.
+        assertThat(response.tickets()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("관리자 상세 조회에서 주문에 발급된 입장권 번호와 상태를 ID 순서로 반환한다")
+    void findOrderById_issuedTickets_returnsTickets() {
+        Order order = orderRepository.findById(secondOrderId).orElseThrow();
+        OrderItem orderItem = order.getOrderItems().get(0);
+
+        Ticket unused = ticketRepository.save(new Ticket(order.getVisitDate(), orderItem));
+        Ticket refunded = ticketRepository.save(new Ticket(order.getVisitDate(), orderItem));
+        refunded.refund();
+
+        entityManager.flush();
+        entityManager.clear();
+
+        var response = adminOrderService.findOrderById(secondOrderId);
+
+        assertThat(response.tickets())
+                .extracting(
+                        SearchAdminOrderResponse.TicketSummary::ticketId,
+                        SearchAdminOrderResponse.TicketSummary::orderItemId,
+                        SearchAdminOrderResponse.TicketSummary::name,
+                        SearchAdminOrderResponse.TicketSummary::status
+                )
+                .containsExactly(
+                        tuple(unused.getId(), orderItem.getId(), "관리자조회상품", "UNUSED"),
+                        tuple(refunded.getId(), orderItem.getId(), "관리자조회상품", "REFUNDED")
+                );
     }
 
     @Test

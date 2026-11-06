@@ -3,7 +3,7 @@ import Icon from '../../components/Icon.jsx';
 import { AdminHeader, AdminTabBar, Badge, Empty, ErrorBox, Loading } from '../../components/ui.jsx';
 import { useApi } from '../../hooks/useApi.js';
 import { adminApi } from '../../api/index.js';
-import { ORDER_STATUS, formatPrice, shortDate } from '../../api/labels.js';
+import { ORDER_STATUS, TICKET_STATUS, formatPrice, shortDate } from '../../api/labels.js';
 
 // 상태 필터: 백엔드 OrderStatus 다섯 개 (labels.js 의 ORDER_STATUS 순서 그대로)
 const FILTERS = [{ code: '', label: '전체' }, ...Object.entries(ORDER_STATUS).map(([code, v]) => ({ code, label: v.label }))];
@@ -11,7 +11,7 @@ const FILTERS = [{ code: '', label: '전체' }, ...Object.entries(ORDER_STATUS).
 // 환불 사유 최대 글자 수 (백엔드 CreateRefundRequest 의 @Size(max = 200))
 const REASON_MAX = 200;
 
-// 전체 환불 버튼을 보여 줄 주문 상태: 결제 완료, 부분 환불
+// 전체·부분 환불 버튼을 보여 줄 주문 상태: 결제 완료, 부분 환불
 const REFUNDABLE = ['COMPLETED', 'PARTIALLY_REFUNDED'];
 
 export default function AdminOrders() {
@@ -25,9 +25,11 @@ export default function AdminOrders() {
   const [details, setDetails] = useState({});   // 주문번호 → 상세 정보 (한 번 불러오면 저장)
   const [detailError, setDetailError] = useState('');
   const [message, setMessage] = useState('');
+  const [selectedTicketIds, setSelectedTicketIds] = useState([]); // 부분 환불하려고 체크한 입장권 번호들
 
   // 환불 확인창
-  const [refundTarget, setRefundTarget] = useState(null); // 환불할 주문 상세
+  // refundTarget = { detail: 주문 상세, mode: 'full' | 'partial', ticketIds: [...] }
+  const [refundTarget, setRefundTarget] = useState(null);
   const [reason, setReason] = useState('');
   const [refundError, setRefundError] = useState('');
   const [busy, setBusy] = useState(false);                 // 요청 중 버튼 두 번 누르기 방지
@@ -40,6 +42,7 @@ export default function AdminOrders() {
     }
     setOpenId(order.id);
     setDetailError('');
+    setSelectedTicketIds([]); // 다른 주문을 펼치면 체크를 비워요
     if (details[order.id]) return; // 이미 불러온 적 있으면 다시 안 불러요
     try {
       const d = await adminApi.orderDetail(order.id);
@@ -57,6 +60,7 @@ export default function AdminOrders() {
       return next;
     });
     setOpenId(null);
+    setSelectedTicketIds([]);
     reload();
   }
 
@@ -75,8 +79,16 @@ export default function AdminOrders() {
     }
   }
 
-  function openRefund(detail) {
-    setRefundTarget(detail);
+  // 입장권 체크박스를 누르면 목록에 넣거나 빼요.
+  function toggleTicket(ticketId) {
+    setSelectedTicketIds((prev) =>
+      prev.includes(ticketId) ? prev.filter((id) => id !== ticketId) : [...prev, ticketId]
+    );
+  }
+
+  // mode: 'full'(전체 환불) 또는 'partial'(고른 입장권만 환불)
+  function openRefund(detail, mode) {
+    setRefundTarget({ detail, mode, ticketIds: mode === 'partial' ? selectedTicketIds : [] });
     setReason('');
     setRefundError('');
   }
@@ -92,19 +104,22 @@ export default function AdminOrders() {
       setRefundError('환불 사유를 입력해 주세요.');
       return;
     }
+    const { detail, mode, ticketIds } = refundTarget;
     setBusy(true);
     setRefundError('');
     try {
-      const result = await adminApi.refundOrder(refundTarget.pgId, trimmed);
+      const result = mode === 'partial'
+        ? await adminApi.refundOrderPartial(detail.pgId, ticketIds, trimmed)
+        : await adminApi.refundOrder(detail.pgId, trimmed);
+      const what = mode === 'partial' ? `입장권 ${ticketIds.length}매 환불` : '환불';
       // 서버가 포트원에 취소를 요청하는 단계가 있어서 바로 끝나지 않을 수 있어요.
       setMessage(
         result?.status === 'COMPLETED'
-          ? `주문번호 ${refundTarget.id} 환불이 완료됐어요. (${formatPrice(result.refundAmount)})`
-          : `주문번호 ${refundTarget.id} 환불 요청을 접수했어요. (상태: ${result?.status ?? '-'})`
+          ? `주문번호 ${detail.id} ${what}이 완료됐어요. (${formatPrice(result.refundAmount)})`
+          : `주문번호 ${detail.id} ${what} 요청을 접수했어요. (상태: ${result?.status ?? '-'})`
       );
-      const id = refundTarget.id;
       setRefundTarget(null);
-      refresh(id);
+      refresh(detail.id);
     } catch (e) {
       // 환불 기한 지남, 미사용 입장권 없음 등 서버가 보낸 이유를 그대로 보여 줘요.
       setRefundError(e.message);
@@ -126,7 +141,7 @@ export default function AdminOrders() {
             </div>
             <button type="submit" className="btn btn-sm btn-dark">검색</button>
           </form>
-          <div className="row gap-8" style={{ overflowX: 'auto' }}>
+          <div className="row gap-8" style={{ overflowX: 'auto', paddingBottom: 8 }}>
             {FILTERS.map((f) => (
               <button key={f.code || 'all'} type="button" className={`chip${status === f.code ? ' on' : ''}`} onClick={() => setStatus(f.code)}
                 style={{ height: 34, padding: '0 12px', fontSize: 12, flexShrink: 0 }}>
@@ -197,6 +212,30 @@ export default function AdminOrders() {
                           </div>
                         </div>
 
+                        {/* 발급된 입장권 목록: 결제 완료·부분 환불 주문의 "미사용" 입장권만 고를 수 있어요 */}
+                        {d.tickets.length > 0 && (
+                          <div className="stack gap-6">
+                            <span className="bold" style={{ fontSize: 13 }}>입장권 {d.tickets.length}매</span>
+                            {d.tickets.map((t) => {
+                              const selectable = REFUNDABLE.includes(d.status) && !!d.pgId && t.status === 'UNUSED';
+                              return (
+                                <label key={t.id} className="row between gap-8"
+                                  style={{ padding: '8px 12px', borderRadius: 12, background: 'var(--soft)', fontSize: 13, opacity: selectable ? 1 : 0.55, cursor: selectable ? 'pointer' : 'default' }}>
+                                  <span className="row gap-8">
+                                    <input type="checkbox" aria-label={`입장권 ${t.id} 선택`}
+                                      checked={selectedTicketIds.includes(t.id)}
+                                      disabled={!selectable || busy}
+                                      onChange={() => toggleTicket(t.id)}
+                                      style={{ width: 20, height: 20, accentColor: 'var(--blue)' }} />
+                                    <span>#{t.id} {t.name}</span>
+                                  </span>
+                                  <Badge status={TICKET_STATUS[t.status]} small />
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+
                         {/* 결제 대기 주문: 취소만 가능 */}
                         {d.status === 'PENDING' && (
                           <>
@@ -207,13 +246,17 @@ export default function AdminOrders() {
                           </>
                         )}
 
-                        {/* 결제 완료·부분 환불 주문: 전체 환불 가능 */}
+                        {/* 결제 완료·부분 환불 주문: 부분 환불, 전체 환불 가능 */}
                         {REFUNDABLE.includes(d.status) && (
                           <>
-                            <button type="button" className="btn btn-sm btn-danger-outline" style={{ width: '100%', height: 46 }} disabled={busy || !d.pgId} onClick={() => openRefund(d)}>
+                            <button type="button" className="btn btn-sm btn-danger-outline" style={{ width: '100%', height: 46 }}
+                              disabled={busy || !d.pgId || selectedTicketIds.length === 0} onClick={() => openRefund(d, 'partial')}>
+                              선택한 입장권 {selectedTicketIds.length}매 환불
+                            </button>
+                            <button type="button" className="btn btn-sm btn-danger-outline" style={{ width: '100%', height: 46 }} disabled={busy || !d.pgId} onClick={() => openRefund(d, 'full')}>
                               전체 환불 처리
                             </button>
-                            <span className="small muted">이 주문의 미사용 입장권을 한꺼번에 환불해요. 이미 사용한 입장권은 환불되지 않아요.</span>
+                            <span className="small muted">위에서 미사용 입장권을 골라 일부만 환불하거나, 미사용 입장권을 한꺼번에 환불할 수 있어요. 이미 사용한 입장권은 환불되지 않아요.</span>
                           </>
                         )}
                       </>
@@ -229,11 +272,21 @@ export default function AdminOrders() {
       {/* 아래에서 올라오는 환불 확인창 (회원 화면 환불 창과 같은 모양) */}
       {refundTarget && (
         <div className="sheet-backdrop" onClick={closeRefund}>
-          <div className="sheet" role="dialog" aria-label="관리자 전체 환불" onClick={(e) => e.stopPropagation()}>
-            <span className="display" style={{ fontSize: 21 }}>주문을 환불할까요?</span>
+          <div className="sheet" role="dialog" aria-label={refundTarget.mode === 'partial' ? '관리자 부분 환불' : '관리자 전체 환불'} onClick={(e) => e.stopPropagation()}>
+            <span className="display" style={{ fontSize: 21 }}>
+              {refundTarget.mode === 'partial' ? `입장권 ${refundTarget.ticketIds.length}매를 환불할까요?` : '주문을 환불할까요?'}
+            </span>
             <span className="muted" style={{ fontSize: 13, lineHeight: 1.55 }}>
-              주문번호 {refundTarget.id} · {refundTarget.nickname} · {formatPrice(refundTarget.totalPrice)}
-              <br />미사용 입장권이 모두 환불되고, 되돌릴 수 없어요.
+              주문번호 {refundTarget.detail.id} · {refundTarget.detail.nickname} · {formatPrice(refundTarget.detail.totalPrice)}
+              {refundTarget.mode === 'partial' ? (
+                <>
+                  <br />입장권 {refundTarget.ticketIds.map((id) => `#${id}`).join(', ')}
+                  <br />예상 환불 금액 {formatPrice(expectedRefundAmount(refundTarget.detail, refundTarget.ticketIds))} (최종 금액은 서버가 계산해요)
+                  <br />환불하면 되돌릴 수 없어요.
+                </>
+              ) : (
+                <><br />미사용 입장권이 모두 환불되고, 되돌릴 수 없어요.</>
+              )}
             </span>
 
             <div className="field">
@@ -269,4 +322,12 @@ export default function AdminOrders() {
       <AdminTabBar />
     </div>
   );
+}
+
+// 고른 입장권들의 예상 환불 금액: 입장권이 속한 주문 상품의 "주문 당시 단가"를 더해요.
+function expectedRefundAmount(detail, ticketIds) {
+  const priceByItemId = new Map(detail.items.map((i) => [i.id, i.price]));
+  return detail.tickets
+    .filter((t) => ticketIds.includes(t.id))
+    .reduce((sum, t) => sum + (priceByItemId.get(t.orderItemId) ?? 0), 0);
 }

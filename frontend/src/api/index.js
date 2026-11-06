@@ -3,8 +3,7 @@ import { http, toQuery } from './http.js';
 /*
  * 화면에서 부르는 API 함수 목록입니다.
  *
- * ✅ 연결 완료 : 진짜 스프링부트 서버(http)를 부르고, 서버 응답을 "화면이 원래 쓰던 모양"으로 바꿔 줘요.
- * 🔌 연결 전   : 가짜 서버(mockHttp)를 쓰는 기능. (지금은 모든 기능이 ✅ 로 연결됐어요)
+ * 모든 함수는 진짜 스프링부트 서버(http)를 부르고, 서버 응답을 "화면이 쓰는 모양"으로 바꿔 줘요.
  *
  * 화면(pages/*.jsx) 코드는 이 파일의 함수 이름과 돌려주는 모양만 알면 돼요.
  * 그래서 "모양 바꾸기(toXxx 함수)"를 여기서 해 두면 화면 코드는 고치지 않아도 됩니다.
@@ -24,16 +23,16 @@ function todayString() {
 
 // 백엔드에는 사진 정보가 없어서, 이름이 같으면 public/images 사진을 쓰고 없으면 공원 사진을 써요.
 const IMAGE_BY_NAME = {
-  'T 익스프레스': '/images/t-express.jpg',
+  '모니모 러쉬': '/images/monimo-rush.jpg',
   '롤링 엑스 트레인': '/images/rolling-x-train.jpg',
   '아마존 익스프레스': '/images/amazon-express.jpg',
   '썬더폴스': '/images/thunder-falls.jpg',
-  '사파리 월드': '/images/safari-world.jpg',
-  '슈팅 고스트': '/images/shooting-ghost.jpg',
-  '회전 디스크': '/images/disk.jpg',
-  '윈드밀': '/images/windmill.jpg',
-  '해적선 회전배': '/images/pirate-boat.jpg',
   '범퍼카': '/images/bumper-car.jpg',
+  '우주전투기': '/images/space-fighter.jpg',
+  '콜럼버스 대탐험': '/images/columbus.jpg',
+  '렛츠 트위스트': '/images/lets-twist.jpg',
+  '더블 락스핀': '/images/double-rock-spin.jpg',
+  '허리케인': '/images/hurricane.jpg', // AI 생성 이미지
 };
 const imageOf = (name) => IMAGE_BY_NAME[name] || '/images/park.jpg';
 
@@ -54,7 +53,6 @@ function toAttractionSummary(item) {
     rideMinutes: item.durationMinutes,
     description: item.description,
     status,
-    heightLimited: false, // 백엔드에 키 제한 정보가 아직 없어요
     // nextSlot 은 "오늘 예약 가능한 가장 빠른 슬롯" → 없으면 오늘은 예약 마감
     soldOut: status === 'OPERATING' && !item.nextSlot,
     nextSlot: item.nextSlot
@@ -118,6 +116,10 @@ function markMine(raw, slot, myReserved) {
 export const authApi = {
   // [POST /api/auth/login] → { accessToken, tokenType, expiresIn }
   login: (email, password) => http.post('/auth/login', { email, password }),
+  // [POST /api/auth/oauth2/exchange] { code } → { accessToken, tokenType, expiresIn }
+  // code 는 카카오·구글 코드가 아니라 "우리 서버"가 발급한 일회용 로그인 코드예요. 한 번 쓰면 사라져요.
+  // /auth/ 로 시작해서 http.js 가 CSRF 도장을 자동으로 붙여 줘요.
+  exchangeSocialCode: (code) => http.post('/auth/oauth2/exchange', { code }),
   // [POST /api/users/signup] (가입만 하고 로그인은 따로 해야 해요 → AuthContext 에서 이어서 로그인)
   signup: (nickname, email, password) => http.post('/users/signup', { email, password, nickname }),
   // [POST /api/auth/logout]
@@ -129,6 +131,14 @@ export const authApi = {
     await http.patch('/users/me', { nickname });
     return http.get('/users/me');
   },
+  // [PATCH /api/users/me/password] { currentPassword, newPassword } → 응답 data 는 null
+  // 현재 비밀번호가 틀리면 400 "현재 비밀번호가 일치하지 않습니다." 가 와요.
+  changePassword: (currentPassword, newPassword) =>
+      http.patch('/users/me/password', { currentPassword, newPassword }),
+  // [DELETE /api/users/me] 진짜로 지우지 않고 탈퇴(WITHDRAWN) 상태로 바꿔요. (소프트 삭제)
+  // 서버가 이용 예정 예약을 자동 취소하고, Refresh Token 쿠키도 지워 줘요.
+  // 미사용 입장권이 있으면 409 "미사용 입장권이 있어 탈퇴할 수 없습니다..." 가 와요.
+  withdraw: () => http.delete('/users/me'),
 };
 
 // ───────── 어트랙션 / 슬롯 ✅ ─────────
@@ -139,9 +149,27 @@ export const attractionApi = {
     const params = { size: 50, sort: 'NAME' };
     if (filter === 'AVAILABLE') params.reservable = true; // 오늘 예약 가능한 슬롯이 있는 것만
     const page = await http.get(`/attractions${toQuery(params)}`);
-    const items = page.content.map(toAttractionSummary);
-    // 키 제한 필터: 백엔드에 정보가 없어서 지금은 빈 목록이 나와요.
-    return filter === 'HEIGHT' ? items.filter((a) => a.heightLimited) : items;
+    return page.content.map(toAttractionSummary);
+  },
+  // [GET /api/attractions?page=&size=&keyword=&sort=&reservable=&operating=]
+  // 어트랙션 목록 화면 전용: 검색·정렬·필터·페이징을 모두 "서버에게" 맡겨요.
+  //  - keyword : 이름 검색어 (빈 값이면 안 보내요)
+  //  - sort    : 'NAME'(이름순) | 'LATEST'(최신순)  ← 백엔드 @Pattern 이 이 두 개만 받아요
+  //  - filter  : 'ALL' | 'AVAILABLE'(예약 가능) | 'OPERATING'(운영 중)
+  // 돌려주는 값: { items, page, totalElements, hasNext }
+  search: async ({ page = 0, size = 10, keyword = '', sort = 'NAME', filter = 'ALL' } = {}) => {
+    const params = { page, size, sort };
+    if (keyword.trim()) params.keyword = keyword.trim();
+    if (filter === 'AVAILABLE') params.reservable = true;
+    if (filter === 'OPERATING') params.operating = true;
+    const res = await http.get(`/attractions${toQuery(params)}`);
+    return {
+      items: res.content.map(toAttractionSummary),
+      page: res.page,
+      totalElements: res.totalElements,
+      // 응답에 hasNext 가 없어서 계산해요. (page 는 0부터 시작)
+      hasNext: res.page + 1 < res.totalPages,
+    };
   },
   // [GET /api/attractions/{id}]
   detail: async (id) => toAttractionDetail(await http.get(`/attractions/${id}`)),
@@ -323,6 +351,31 @@ export const reservationApi = {
 
   // [PATCH /api/reservations/{id}/cancel]
   cancel: (id) => http.patch(`/reservations/${id}/cancel`),
+  // [GET /api/reservations/{id}] 내 예약 한 건 상세 (SearchReservationDetailResponse)
+  // 남의 예약 번호를 넣으면 서버가 막아요. (userId 로 본인 것만 조회)
+  // 위치·탑승 시간은 응답에 없어서, 같이 온 attractionId 로 어트랙션 상세를 한 번 더 불러와요.
+  detail: async (id) => {
+    const r = await http.get(`/reservations/${id}`);
+    // 어트랙션이 삭제됐어도 예약 상세는 보여야 하니까, 실패하면 null 로 두고 넘어가요.
+    const a = await attractionApi.detail(r.attractionId).catch(() => null);
+    return {
+      id: r.reservationId,
+      number: r.reservationNumber,
+      status: RESERVATION_STATUS_MAP[r.status] || r.status,
+      date: r.startsAt.slice(0, 10),        // "2026-11-02"
+      startTime: toHHmm(r.startsAt),        // "14:30"
+      endTime: r.endsAt ? toHHmm(r.endsAt) : null,
+      attractionId: r.attractionId,
+      attractionName: r.attractionName,
+      image: a?.image ?? imageOf(r.attractionName),
+      zone: a?.zone ?? '',
+      rideMinutes: a?.rideMinutes ?? null,
+      ticketId: r.ticketId,
+      createdAt: r.createdAt,               // Instant(UTC) → 화면에서 한국 시간으로 바꿔 보여 줘요
+      cancelReason: r.cancelReasonMessage,  // 예) "운영 사정으로 인한 취소" (서버가 만든 문장)
+      cancelledAt: r.cancelledAt,
+    };
+  },
 };
 
 // ───────── 주문 ✅ (생성·상세·결제 내역 연결) ─────────
@@ -343,6 +396,7 @@ function toOrder(o, byId) {
   return {
     id: o.orderId,
     status: o.status,                      // PENDING | COMPLETED | ...
+    visitDate: o.visitDate,                // 방문일 "2026-11-01" (새로고침해도 서버에서 다시 받아요)
     totalPrice: o.totalAmount,
     productName: byId.get(item?.ticketProductId)?.name ?? '입장권',
     quantity: item?.quantity ?? 0,
@@ -368,8 +422,11 @@ export const orderApi = {
     return toOrder(o, byId);
   },
 
+  // [POST /api/orders/{id}/cancel] 결제 대기(PENDING) 주문만 취소돼요. 응답: { orderId, status: 'CANCELLED' }
+  cancel: (id) => http.post(`/orders/${id}/cancel`),
+
   // [GET /api/orders/me?page=0&size=20] 내 결제 내역
-  // 목록 응답에는 상품 이름·수량이 없어서 주문번호·금액·상태·주문 일시만 보여 줘요.
+  // 목록 응답의 items 에 상품 이름·수량이 같이 와요.
   mine: async () => {
     const page = await http.get(`/orders/me${toQuery({ page: 0, size: 20 })}`);
     return page.content.map((o) => ({
@@ -377,6 +434,10 @@ export const orderApi = {
       totalPrice: o.totalAmount,
       status: o.status,
       createdAt: toDateTimeText(o.createdAt),
+      // "종일권 × 2, 오후권 × 1" 처럼 한 줄 글자로 만들어요. 상품이 없으면 빈 글자예요.
+      productSummary: (o.items ?? [])
+          .map((i) => `${i.ticketProductName} × ${i.quantity}`)
+          .join(', '),
     }));
   },
 };
@@ -589,25 +650,47 @@ function toAdminMember(m) {
 }
 
 const adminManageApi = {
-  // [GET /api/admin/reservations?status=&size=100]
-  // 백엔드는 상태·날짜·회원·어트랙션 필터만 있고 "글자 검색"이 없어서,
-  // 닉네임·이메일·예약번호 검색은 받아 온 목록에서 프론트가 걸러요.
-  reservations: async ({ q = '', status = '' } = {}) => {
-    const params = { size: 100 };
-    if (status) params.status = RESERVATION_STATUS_TO_BACK[status];
-    const [page, users, attractions] = await Promise.all([
-      http.get(`/admin/reservations${toQuery(params)}`),
-      fetchAdminUsers(),
-      attractionApi.list('ALL'),
-    ]);
-    const userById = new Map(users.map((u) => [u.id, u]));
-    const attractionById = new Map(attractions.map((a) => [a.id, a]));
-    const list = page.content.map((r) => toAdminReservation(r, userById, attractionById));
+  // 필터 선택지 + 이름 찾기용 표 (화면에 처음 들어올 때 한 번만 불러와요)
+  //  - members     : 회원 선택 목록 (회원 API 에 검색이 없어서 앞쪽 100명까지만 받아요)
+  //  - attractions : 어트랙션 선택 목록
+  //  - userById / attractionById : 예약 응답의 번호(userId, attractionId) → 닉네임·사진을 찾는 표
+  reservationFilterOptions: async () => {
+    const [users, attractions] = await Promise.all([fetchAdminUsers(), attractionApi.list('ALL')]);
+    return {
+      members: users,
+      attractions,
+      userById: new Map(users.map((u) => [u.id, u])),
+      attractionById: new Map(attractions.map((a) => [a.id, a])),
+    };
+  },
 
-    const keyword = q.trim().toLowerCase();
-    if (!keyword) return list;
-    return list.filter((r) =>
-        [r.number, r.memberNickname, r.memberEmail].some((v) => v.toLowerCase().includes(keyword)));
+  // [GET /api/admin/reservations?page=&size=&status=&attractionId=&userId=]
+  // 필터와 페이징을 모두 "서버에게" 맡겨요. (SearchAdminReservationCondition + Pageable)
+  // lookup 은 위 reservationFilterOptions 의 결과예요.
+  // 돌려주는 값: { items, page, totalElements, hasNext }
+  reservations: async ({ page = 0, size = 20, status = '', attractionId = '', userId = '' } = {}, lookup) => {
+    const params = { page, size, attractionId, userId };
+    if (status) params.status = RESERVATION_STATUS_TO_BACK[status];
+    const res = await http.get(`/admin/reservations${toQuery(params)}`); // 빈 값은 toQuery 가 빼 줘요
+    return {
+      items: res.content.map((r) => toAdminReservation(r, lookup.userById, lookup.attractionById)),
+      // ⚠️ 이 응답은 페이지 번호 이름이 page 가 아니라 number 예요. (SearchAdminReservationListResponse)
+      page: res.number,
+      totalElements: res.totalElements,
+      hasNext: res.number + 1 < res.totalPages,
+    };
+  },
+
+  // [GET /api/admin/reservations/{id}] 예약 한 건 상세 (카드를 펼칠 때, 상태를 바꾼 뒤에 불러와요)
+  // 목록 응답에 없는 입장권 번호·취소 사유·취소 시각이 더 들어 있어요.
+  reservationDetail: async (id, lookup) => {
+    const r = await http.get(`/admin/reservations/${id}`);
+    return {
+      ...toAdminReservation(r, lookup.userById, lookup.attractionById),
+      ticketId: r.ticketId,
+      cancelReason: r.cancelReasonMessage,
+      cancelledAt: toKstText(r.cancelledAt),
+    };
   },
 
   // [PATCH /api/admin/reservations/{id}/status] { status: COMPLETED | NO_SHOW }
@@ -704,7 +787,7 @@ const adminOrderApi = {
     return page.content.map(toAdminOrder);
   },
 
-  // [GET /api/admin/orders/{id}] 상세: 주문 상품과 결제번호(pgId)가 같이 와요.
+  // [GET /api/admin/orders/{id}] 상세: 주문 상품, 발급된 입장권, 결제번호(pgId)가 같이 와요.
   // 주문 상품에는 상품 "번호"만 있어서, 상품 목록에서 이름을 찾아 붙여요.
   orderDetail: async (id) => {
     const [o, byId] = await Promise.all([http.get(`/admin/orders/${id}`), productsById()]);
@@ -717,6 +800,14 @@ const adminOrderApi = {
         price: i.price,         // 주문 당시 가격
         quantity: i.quantity,
       })),
+      // 부분 환불할 입장권을 고를 때 써요. 결제 전 주문은 빈 목록이에요.
+      tickets: (o.tickets ?? []).map((t) => ({
+        id: t.ticketId,
+        orderItemId: t.orderItemId, // 어느 주문 상품(단가)에 속한 입장권인지
+        name: t.name,
+        status: t.status,           // UNUSED | IN_USE | USED | REFUNDED | EXPIRED
+        validDate: t.validDate,
+      })),
     };
   },
 
@@ -726,6 +817,11 @@ const adminOrderApi = {
   // [POST /api/admin/payments/{pgId}/refunds] { reason }
   // 관리자 전체 환불: 그 주문의 "미사용" 입장권을 한꺼번에 환불해요.
   refundOrder: (pgId, reason) => http.post(`/admin/payments/${pgId}/refunds`, { reason }),
+
+  // [POST /api/admin/payments/{pgId}/refunds/partial] { ticketIds: [입장권번호], reason }
+  // 관리자 부분 환불: 고른 입장권만 환불해요. 미사용이 아닌 입장권이 섞이면 서버가 거절해요.
+  refundOrderPartial: (pgId, ticketIds, reason) =>
+      http.post(`/admin/payments/${pgId}/refunds/partial`, { ticketIds, reason }),
 };
 
 // ───────── 관리자 입장권 상품 ✅ ─────────
@@ -781,10 +877,43 @@ const adminProductApi = {
   deleteProduct: (id) => http.delete(`/admin/ticket-products/${id}`),
 };
 
+// ───────── 관리자 입장 처리 ✅ ─────────
+
+// Instant(예: "2026-11-05T01:30:00Z") → 한국 시각 "2026-11-05 10:30"
+// 서버 설정에 따라 숫자(초)로 올 수도 있어서 둘 다 받아요.
+function toKstDateTimeText(v) {
+  if (v === null || v === undefined) return '-';
+  const date = typeof v === 'number' ? new Date(v * 1000) : new Date(v);
+  if (Number.isNaN(date.getTime())) return String(v);
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
+const adminTicketApi = {
+  // [POST /api/admin/tickets/entry] { ticketCode } → CreateTicketEntryResponse
+  // 입장 처리에 성공하면 입장권이 UNUSED → IN_USE 로 바뀌고, 그때부터 어트랙션 예약·루트 추천을 할 수 있어요.
+  enterTicket: async (ticketCode) => {
+    const t = await http.post('/admin/tickets/entry', { ticketCode });
+    return {
+      id: t.ticketId,
+      code: t.ticketCode,
+      type: TICKET_TYPE_MAP[t.type] || t.type, // ALL_DAY → FULL_DAY (화면이 쓰는 이름)
+      date: t.validDate,
+      status: t.status,                         // 성공하면 IN_USE
+      enteredAt: toKstDateTimeText(t.enteredAt),
+    };
+  },
+};
+
 export const adminApi = {
   ...adminSlotApi,
   ...adminManageApi,
   ...adminAttractionApi,
   ...adminOrderApi,
   ...adminProductApi,
+  ...adminTicketApi,
 };

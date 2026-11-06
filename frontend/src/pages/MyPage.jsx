@@ -6,6 +6,13 @@ import { useApi } from '../hooks/useApi.js';
 import { authApi, orderApi } from '../api/index.js';
 import { MEMBER_ROLE, ORDER_STATUS, formatPrice } from '../api/labels.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import PasswordChangeSheet from '../components/PasswordChangeSheet.jsx';
+import WithdrawSheet from '../components/WithdrawSheet.jsx';
+import OrderCancelSheet from '../components/OrderCancelSheet.jsx';
+
+
+// 가입 방식 → 화면에 보여 줄 이름
+const SOCIAL_LABEL = { KAKAO: '카카오', GOOGLE: 'Google' };
 
 export default function MyPage() {
   const navigate = useNavigate();
@@ -14,7 +21,15 @@ export default function MyPage() {
 
   const [nickname, setNickname] = useState('');
   const [message, setMessage] = useState('');
+  // 지금 열려 있는 확인창: null(없음) | 'password'(비밀번호 변경) | 'withdraw'(회원 탈퇴)
+  const [sheet, setSheet] = useState(null);
+  const [cancelOrder, setCancelOrder] = useState(null); // 취소 확인창에 띄울 주문
+  const [orderMessage, setOrderMessage] = useState(''); // 결제 내역 위에 보여 줄 안내
   useEffect(() => { if (user) setNickname(user.nickname); }, [user]);
+
+  // 가입 방식(GET /api/users/me 의 provider): LOCAL | KAKAO | GOOGLE
+  // provider 가 없을 때(백엔드가 아직 안 바뀐 경우)는 일반 회원처럼 버튼을 보여 줘요.
+  const isSocial = Boolean(user?.provider) && user.provider !== 'LOCAL';
 
   async function saveNickname() {
     setMessage('');
@@ -29,6 +44,17 @@ export default function MyPage() {
   async function onLogout() {
     await logout();
     navigate('/login');
+  }
+
+  function onPasswordChanged() {
+    setSheet(null);
+    setMessage('비밀번호를 바꿨어요.');
+  }
+
+  function onWithdrawn() {
+    setSheet(null);
+    alert('회원 탈퇴가 완료되었어요. 그동안 이용해 주셔서 고마워요.');
+    navigate('/', { replace: true }); // 뒤로가기로 마이페이지에 돌아오지 않게 replace
   }
 
   return (
@@ -62,10 +88,15 @@ export default function MyPage() {
                   <button type="button" className="btn btn-sm btn-dark" style={{ width: 72, height: 48, borderRadius: 14 }} onClick={saveNickname}>변경</button>
                 </div>
                 {message && <span className="small" style={{ color: 'var(--blue-ink)' }}>{message}</span>}
-                <button type="button" className="row between" onClick={() => alert('비밀번호 변경 화면은 다음 단계에서 만들어요.')}
-                  style={{ height: 48, borderRadius: 14, background: 'var(--soft)', border: 0, padding: '0 14px', fontSize: 14, fontWeight: 500 }}>
-                  비밀번호 변경 <Icon name="chevron" size={18} strokeWidth={2} color="var(--subtle)" />
-                </button>
+                {/* 소셜 회원(카카오·구글)은 우리 서버에 비밀번호가 없어서 변경 버튼 대신 안내를 보여 줘요 */}
+                {isSocial ? (
+                  <span className="small muted">{SOCIAL_LABEL[user.provider] ?? '소셜'} 계정으로 가입해서 비밀번호가 없어요.</span>
+                ) : (
+                  <button type="button" className="row between" onClick={() => { setMessage(''); setSheet('password'); }}
+                    style={{ height: 48, borderRadius: 14, background: 'var(--soft)', border: 0, padding: '0 14px', fontSize: 14, fontWeight: 500 }}>
+                    비밀번호 변경 <Icon name="chevron" size={18} strokeWidth={2} color="var(--subtle)" />
+                  </button>
+                )}
               </div>
 
               <div className="stack gap-8">
@@ -73,16 +104,26 @@ export default function MyPage() {
                   <h2 className="display" style={{ fontSize: 18 }}>결제 내역</h2>
                   <Link to="/my/tickets" className="bold" style={{ fontSize: 13, textDecoration: 'none' }}>입장권 보기</Link>
                 </div>
+                {orderMessage && <div className="toast">{orderMessage}</div>}
                 {orders.error && <span className="error-text" role="alert">{orders.error.message}</span>}
                 {orders.data?.length === 0 && <span className="small muted">결제 내역이 없어요.</span>}
                 {orders.data?.map((o) => (
                   <div key={o.id} className="card row between" style={{ borderRadius: 18, padding: '14px 16px' }}>
                     <span className="stack" style={{ gap: 2 }}>
                       <span className="bold" style={{ fontSize: 15 }}>주문번호 {o.id}</span>
+                      {/* 상품 이름 × 수량 (예: 종일권 × 2) */}
+                      {o.productSummary && <span style={{ fontSize: 14 }}>{o.productSummary}</span>}
                       <span className="small muted">{o.createdAt}</span>
                       {/* 결제 대기 주문은 결제 화면으로 다시 갈 수 있어요 */}
+                      {/* 결제 대기 주문은 결제를 이어서 하거나, 취소할 수 있어요 */}
                       {o.status === 'PENDING' && (
-                        <Link to={`/checkout/${o.id}`} className="bold" style={{ fontSize: 13, color: 'var(--blue-ink)' }}>결제 이어서 하기</Link>
+                        <span className="row gap-12">
+                          <Link to={`/checkout/${o.id}`} className="bold" style={{ fontSize: 13, color: 'var(--blue-ink)' }}>결제 이어서 하기</Link>
+                          <button type="button" onClick={() => { setOrderMessage(''); setCancelOrder(o); }} className="bold"
+                            style={{ border: 0, background: 'none', padding: 0, fontSize: 13, color: 'var(--orange-ink)' }}>
+                            주문 취소
+                          </button>
+                        </span>
                       )}
                     </span>
                     <span className="stack" style={{ alignItems: 'flex-end', gap: 4 }}>
@@ -97,12 +138,26 @@ export default function MyPage() {
 
               <div className="row between" style={{ padding: '6px 4px 0' }}>
                 <button type="button" onClick={onLogout} style={{ border: 0, background: 'none', fontSize: 13, textDecoration: 'underline', padding: 0 }}>로그아웃</button>
-                <button type="button" onClick={() => alert('회원 탈퇴는 백엔드 연결 후 만들어요.')} style={{ border: 0, background: 'none', fontSize: 13, color: 'var(--muted)', textDecoration: 'underline', padding: 0 }}>회원 탈퇴</button>
+                <button type="button" onClick={() => setSheet('withdraw')} style={{ border: 0, background: 'none', fontSize: 13, color: 'var(--muted)', textDecoration: 'underline', padding: 0 }}>회원 탈퇴</button>
               </div>
             </div>
           </>
         )}
       </div>
+
+      {user && sheet === 'password' && (
+        <PasswordChangeSheet onClose={() => setSheet(null)} onDone={onPasswordChanged} />
+      )}
+      {user && cancelOrder && (
+        <OrderCancelSheet
+          order={cancelOrder}
+          onClose={() => setCancelOrder(null)}
+          onDone={() => { setCancelOrder(null); setOrderMessage('주문을 취소했어요.'); orders.reload(); }}
+        />
+      )}
+      {user && sheet === 'withdraw' && (
+        <WithdrawSheet onClose={() => setSheet(null)} onDone={onWithdrawn} />
+      )}
       <TabBar />
     </div>
   );

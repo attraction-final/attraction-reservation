@@ -46,6 +46,10 @@ public interface TicketRepository extends JpaRepository<Ticket, Long>, TicketCus
             @Param("status") TicketStatus status
     );
 
+    // 관리자 주문 상세 - 한 주문에 발급된 티켓을 ID 순서로 조회한다. 화면 표시용이라 잠그지 않는다.
+    @Query("SELECT t FROM Ticket t WHERE t.orderItem.order.id = :orderId ORDER BY t.id")
+    List<Ticket> findAllByOrderId(@Param("orderId") Long orderId);
+
     // 내 티켓 목록에 붙일 주문번호와 결제번호를 티켓 ID 묶음으로 한 번에 조회한다. (티켓마다 따로 조회하는 N+1 방지)
     // Payment가 Order를 가리키고 Order는 Payment를 모르므로, Payment를 ON 조건으로 조인한다.
     // 결제가 없는 주문도 주문번호는 보여야 하므로 LEFT JOIN 한다.

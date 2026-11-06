@@ -19,7 +19,7 @@ export default function Tickets() {
 
   const [date, setDate] = useState(null);
   const [productId, setProductId] = useState(null);
-  const [qty, setQty] = useState(2);
+  const [qty, setQty] = useState(1);
   const [error, setError] = useState('');
 
   // 처음 들어오면 "오늘"과 "살 수 있는 첫 번째 상품"을 기본 선택

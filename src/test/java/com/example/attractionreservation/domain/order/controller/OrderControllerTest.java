@@ -282,6 +282,7 @@ class OrderControllerTest {
                 101L,
                 120000,
                 "PENDING",
+                LocalDate.of(2026, 11, 1),
                 LocalDateTime.of(2026, 10, 14, 10, 0),
                 List.of(
                         new SearchOrderResponse.Item(201L, 1L, 60000, 2)
@@ -303,6 +304,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.orderId").value(101))
                 .andExpect(jsonPath("$.data.totalAmount").value(120000))
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.visitDate").value("2026-11-01"))
                 .andExpect(jsonPath("$.data.createdAt")
                         .value("2026-10-14T10:00:00"))
                 .andExpect(jsonPath("$.data.items.length()").value(1))
@@ -311,7 +313,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.items[0].price").value(60000))
                 .andExpect(jsonPath("$.data.items[0].quantity").value(2))
                 .andExpect(jsonPath("$.data.pgId")
-                .value("test-order-payment-101"));
+                        .value("test-order-payment-101"));
 
         verify(orderService).findOrderById(1L, 101L);
         verifyNoMoreInteractions(orderService);
@@ -362,7 +364,10 @@ class OrderControllerTest {
                         101L,
                         120000,
                         "PENDING",
-                        LocalDateTime.of(2026, 10, 14, 10, 0)
+                        LocalDateTime.of(2026, 10, 14, 10, 0),
+                        List.of(new SearchOrderListResponse.ItemSummary(
+                                1L, "종일권", 2
+                        ))
                 )),
                 0,
                 10,
@@ -387,6 +392,10 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.content[0].status").value("PENDING"))
                 .andExpect(jsonPath("$.data.content[0].createdAt")
                         .value("2026-10-14T10:00:00"))
+                .andExpect(jsonPath("$.data.content[0].items.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].items[0].ticketProductId").value(1))
+                .andExpect(jsonPath("$.data.content[0].items[0].ticketProductName").value("종일권"))
+                .andExpect(jsonPath("$.data.content[0].items[0].quantity").value(2))
                 .andExpect(jsonPath("$.data.page").value(0))
                 .andExpect(jsonPath("$.data.size").value(10))
                 .andExpect(jsonPath("$.data.totalElements").value(1))

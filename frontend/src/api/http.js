@@ -1,5 +1,4 @@
 import { API_BASE } from '../config.js';
-import { mockRequest } from './mockServer.js';
 import { ApiError } from './ApiError.js';
 
 /**
@@ -106,14 +105,6 @@ export const http = {
   put: (path, body) => request('PUT', path, body),
   patch: (path, body) => request('PATCH', path, body),
   delete: (path) => request('DELETE', path),
-};
-
-// 아직 백엔드와 연결하지 않은 API가 잠시 쓰는 가짜 서버
-export const mockHttp = {
-  get: (path) => mockRequest('GET', path),
-  post: (path, body) => mockRequest('POST', path, body),
-  patch: (path, body) => mockRequest('PATCH', path, body),
-  delete: (path) => mockRequest('DELETE', path),
 };
 
 // { date: '2026-10-24', q: '' } → "?date=2026-10-24" (빈 값은 빼고 만들어 줘요)

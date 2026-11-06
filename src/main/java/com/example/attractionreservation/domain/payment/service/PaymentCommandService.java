@@ -82,7 +82,7 @@ public class PaymentCommandService {
         Long orderId = payment.getOrder().getId();
         Long userId = payment.getOrder().getUser().getId();
         int amount = payment.getAmount();
-        AfterCommit.run(() -> log.info("event=PAYMENT_APPROVED pgId={} orderId={} userId={} amount={}",
+        AfterCommit.run(() -> log.info("event=PAYMENT_APPROVED pgId={} orderId={} targetUserId={} amount={}",
                 pgId, orderId, userId, amount));
         return ConfirmPaymentResponse.from(payment);
     }
@@ -139,7 +139,7 @@ public class PaymentCommandService {
         String pgId = payment.getPgId();
         Long orderId = payment.getOrder().getId();
         Long userId = payment.getOrder().getUser().getId();
-        AfterCommit.run(() -> log.info("event=PAYMENT_MARKED_FAILED pgId={} orderId={} userId={} reason=\"{}\"",
+        AfterCommit.run(() -> log.info("event=PAYMENT_MARKED_FAILED pgId={} orderId={} targetUserId={} reason=\"{}\"",
                 pgId, orderId, userId, reason));
         return true;
     }
@@ -148,7 +148,7 @@ public class PaymentCommandService {
         String pgId = payment.getPgId();
         Long orderId = payment.getOrder().getId();
         Long userId = payment.getOrder().getUser().getId();
-        AfterCommit.run(() -> log.info("event=PAYMENT_COMPENSATION_REQUESTED pgId={} orderId={} userId={} amount={} reason=\"{}\"",
+        AfterCommit.run(() -> log.info("event=PAYMENT_COMPENSATION_REQUESTED pgId={} orderId={} targetUserId={} amount={} reason=\"{}\"",
                 pgId, orderId, userId, amount, reason));
     }
 

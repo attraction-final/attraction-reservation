@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.order.repository;
 
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -22,6 +23,20 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     // 인증된 회원의 주문만 페이지 단위로 조회한다.
     Page<Order> findAllByUser_Id(Long userId, Pageable pageable);
+
+    // 주문 목록 화면에 필요한 주문 상품과 상품 이름을 한 번의 쿼리로 조회한다.
+    // 주문마다 따로 조회하면 N+1 문제가 생기므로 주문 ID 목록을 IN 조건으로 묶는다.
+    // 컬렉션 fetch join과 페이징을 함께 쓰지 않기 위해 주문 목록 조회와 분리했다.
+    @Query("""
+            SELECT oi
+            FROM OrderItem oi
+            JOIN FETCH oi.ticketProduct
+            WHERE oi.order.id IN :orderIds
+            ORDER BY oi.id ASC
+            """)
+    List<OrderItem> findOrderItemsWithProductByOrderIds(
+            @Param("orderIds") List<Long> orderIds
+    );
 
     // 실제 수정 시점에도 소유자와 PENDING 상태를 확인한다.
     // 직접 수정 쿼리이므로 수정 시각도 함께 갱신한다.

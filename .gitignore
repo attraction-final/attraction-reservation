@@ -36,5 +36,9 @@ out/
 ### VS Code ###
 .vscode/
 
+### 로컬 전용 파일 ###
+frontend/portone-check.http
+frontend/spring-guide/
+
 ### jev ai 키 ###
 http-client.private.env.json

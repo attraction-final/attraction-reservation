@@ -126,6 +126,9 @@ class AdminOrderControllerTest {
                 List.of(new SearchOrderResponse.Item(
                         201L, 301L, 10000, 1
                 )),
+                List.of(new SearchAdminOrderResponse.TicketSummary(
+                        401L, 201L, "종일권", "UNUSED", LocalDate.of(2026, 11, 5)
+                )),
                 "test-payment-101"
         );
 
@@ -145,6 +148,12 @@ class AdminOrderControllerTest {
                 .andExpect(jsonPath("$.data.pgId")
                         .value("test-payment-101"))
                 .andExpect(jsonPath("$.data.items[0].quantity").value(1))
+                .andExpect(jsonPath("$.data.tickets.length()").value(1))
+                .andExpect(jsonPath("$.data.tickets[0].ticketId").value(401))
+                .andExpect(jsonPath("$.data.tickets[0].orderItemId").value(201))
+                .andExpect(jsonPath("$.data.tickets[0].name").value("종일권"))
+                .andExpect(jsonPath("$.data.tickets[0].status").value("UNUSED"))
+                .andExpect(jsonPath("$.data.tickets[0].validDate").value("2026-11-05"))
                 .andExpect(jsonPath("$.data.password").doesNotExist());
 
         verify(adminOrderService).findOrderById(101L);

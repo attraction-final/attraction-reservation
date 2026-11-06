@@ -123,6 +123,11 @@ public class TicketService {
         return tickets;
     }
 
+    // 관리자 주문 상세 - 주문에 발급된 티켓을 조회한다. (부분 환불할 티켓을 고르는 데 쓴다)
+    public List<Ticket> findTicketsByOrderId(Long orderId) {
+        return ticketRepository.findAllByOrderId(orderId);
+    }
+
     // 환불 - 주문 상품들의 미사용 티켓을 잠가서 조회한다.
     @Transactional
     public List<Ticket> findUnusedTicketsForUpdate(Collection<Long> orderItemIds) {

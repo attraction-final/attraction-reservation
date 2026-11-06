@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import * as PortOne from '@portone/browser-sdk/v2';
 import Icon from '../components/Icon.jsx';
+import OrderCancelSheet from '../components/OrderCancelSheet.jsx';
 import { BackHeader, Badge, ErrorBox, Loading } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { orderApi, paymentApi } from '../api/index.js';
@@ -19,12 +20,14 @@ export default function Checkout() {
   const { orderId } = useParams();
   const navigate = useNavigate();
 
-  // Tickets 화면이 navigate(..., { state }) 로 넣어 준 "가방" (방문일)
-  // 방문일은 주문 상세 응답에 없어서 가방에서만 받을 수 있어요. 새로고침하면 '-' 로 보여요.
+  // Tickets 화면이 navigate(..., { state }) 로 넣어 준 "가방"
   const { state } = useLocation();
-  const visitDate = state?.date;
 
   const { data: order, loading, error, reload } = useApi(() => orderApi.detail(orderId), [orderId]);
+
+  // 방문일은 주문 상세 응답(서버)에서 먼저 받고, 아직 응답이 오기 전이면 가방 값을 잠깐 써요.
+  // → 새로고침하거나 결제 내역의 "결제 이어서 하기"로 들어와도 방문일이 보여요.
+  const visitDate = order?.visitDate ?? state?.date;
 
   // 결제번호(pgId)는 주문 상세 응답에서 받아요 → 새로고침하거나 결제 내역에서 들어와도 결제할 수 있어요.
   const pgId = order?.pgId ?? state?.pgId;
@@ -33,6 +36,7 @@ export default function Checkout() {
   const [agreed, setAgreed] = useState(false);
   const [payError, setPayError] = useState('');
   const [paying, setPaying] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false); // 주문 취소 확인창
 
   async function pay() {
     setPayError('');
@@ -61,7 +65,13 @@ export default function Checkout() {
 
       // ③ 사용자가 결제창을 닫았거나 결제가 실패하면 res.code 에 오류 코드가 들어와요.
       if (res?.code != null) {
-        throw new Error(res.message || '결제가 취소되었거나 실패했어요.');
+        // 결제사가 보내 준 원래 메시지(예: "[W002] 사용자 취소")는 개발자용이라
+        // 손님에게는 쉬운 안내 문구만 보여 주고, 자세한 내용은 콘솔에만 남겨요.
+        console.warn('[결제 실패]', res.code, res.message);
+        const friendly = '결제가 완료되지 않았어요. 다시 시도해 주세요.';
+        // import.meta.env.DEV: npm run dev 로 띄웠을 때만 true, 배포(build)하면 false 예요.
+        // 그래서 개발 중에는 오류 코드까지 같이 보이고, 배포 화면에서는 안 보여요.
+        throw new Error(import.meta.env.DEV && res.message ? `${friendly} (${res.message})` : friendly);
       }
 
       // ④ 서버에 승인 요청 → 서버가 포트원에 금액을 다시 확인하고 주문을 "결제 완료"로 바꿔요.
@@ -143,6 +153,14 @@ export default function Checkout() {
               주문 내용 및 환불 정책에 동의합니다
             </label>
             {payError && <span className="error-text" role="alert">{payError}</span>}
+
+            {/* 결제 대기일 때만 주문 취소 가능 (결제 중에는 막아요) */}
+            {order.status === 'PENDING' && (
+              <button type="button" onClick={() => setCancelOpen(true)} disabled={paying}
+                style={{ alignSelf: 'center', border: 0, background: 'none', fontSize: 13, color: 'var(--muted)', textDecoration: 'underline', padding: 4 }}>
+                이 주문 취소하기
+              </button>
+            )}
           </div>
 
           <div className="bottom-bar">
@@ -151,6 +169,15 @@ export default function Checkout() {
             </button>
           </div>
         </>
+      )}
+
+      {cancelOpen && order && (
+        <OrderCancelSheet
+          order={order}
+          onClose={() => setCancelOpen(false)}
+          // 취소된 주문은 결제할 수 없으니 마이페이지(결제 내역)로 보내요. replace: 뒤로 가기로 다시 오지 않게
+          onDone={() => navigate('/my', { replace: true })}
+        />
       )}
     </div>
   );

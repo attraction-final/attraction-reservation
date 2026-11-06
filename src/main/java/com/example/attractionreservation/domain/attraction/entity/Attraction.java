@@ -8,10 +8,23 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.time.LocalTime;
 
 @Getter
 @Entity
-@Table(name = "attractions")
+// 삭제되지 않은 어트랙션은 같은 이름을 사용할 수 없도록 DB에서 보장한다.
+// 삭제된 행의 active_attraction은 NULL이므로 같은 이름의 삭제 이력을 보존하고 이름을 재사용할 수 있다.
+@Table(name = "attractions",
+        uniqueConstraints = {
+            @UniqueConstraint(
+                    name = "uk_attraction_name_active",
+                    columnNames = {
+                            "name",
+                            "active_attraction"
+                    }
+            )
+        }
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Attraction extends BaseTimeEntity {
 
@@ -38,6 +51,36 @@ public class Attraction extends BaseTimeEntity {
     @Column(name = "deleted_at")
     private Instant deletedAt; // 어트랙션이 삭제 처리된 시각을 저장
 
+    // 이름 중복 방지용 보조 컬럼: DB가 deleted_at이 NULL이면 1, 삭제된 행이면 NULL로 계산한다.
+    // JPA는 이 값을 직접 저장·수정하지 않으며, name과 묶인 UNIQUE 제약에 사용한다.
+    @Column(name = "active_attraction",
+            insertable = false,
+            updatable = false,
+            columnDefinition = """
+                    INT GENERATED ALWAYS AS (
+                        CASE WHEN deleted_at IS NULL THEN 1 ELSE NULL END
+                    )
+                    """
+    )
+    private Integer activeAttraction;
+
+
+    //추가: 어트랙션 Q&A 답변에 쓰는 탑승 정보, 관리자 api가 아직 없어 마이그레이션 sql로만 값을 넣는다.
+    //전부 NULL을 허용한다. NULL은 제한 없음이 아니라 등록된 정보 없음이다.
+    @Column(name = "min_height_cm")
+    private Integer minHeightCm;  //혼자 탈 수 있는 최소 키
+
+    @Column(name = "max_height_cm")
+    private Integer maxHeightCm; //탈 수 있는 최대 키
+
+    @Column(name = "guardian_height_cm")
+    private Integer guardianHeightCm;
+
+    @Column(name = "open_time")
+    private LocalTime openTime;
+
+    @Column(name = "close_time")
+    private LocalTime closeTime;
 
     // Attraction Service 등록에 필요
     private Attraction(String name, String description, String location, Integer durationMinutes) {

@@ -5,16 +5,19 @@ import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.config.CacheConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -51,11 +54,27 @@ public class AttractionService {
                 request.durationMinutes(),
                 request.entranceMoveMinutes() // 추가
         );
-        Attraction savedAttraction = attractionRepository.save(attraction); // 생성한 엔티티를 Repository를 통해 저장, 저장 결과를 savedAttraction 변수에 담음
+        Attraction savedAttraction;
+        try {
+            // DB 반영까지 시도하여 이름 중복 제약 위반을 이 catch에서 처리한다.
+            savedAttraction = attractionRepository.saveAndFlush(attraction);
+        } catch (DataIntegrityViolationException e) {
+            // 동시 요청으로 사전 중복 검사를 통과했더라도 이름 중복은 기존 업무 예외로 변환한다.
+            if (isAttractionNameDuplicate(e)) {
+                throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+            }
+            // 다른 DB 제약 위반은 이름 중복으로 처리하지 않고 원래 예외를 전달한다.
+            throw e;
+        }
 
-        // 추가
-        log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
-                savedAttraction.getId(), adminId, savedAttraction.getDurationMinutes());
+        // 등록 시점의 ID와 소요 시간을 미리 보관하여 callback에서 엔티티를 다시 읽지 않도록 한다.
+        Long attractionId = savedAttraction.getId();
+        Integer durationMinutes = savedAttraction.getDurationMinutes();
+        // 등록 트랜잭션이 commit된 경우에만 완료 로그를 남긴다.
+        AfterCommit.run(() ->
+                log.info("event=ATTRACTION_CREATED attractionId={} userId={} durationMinutes={}",
+                        attractionId, adminId, durationMinutes)
+        );
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
     }
@@ -64,6 +83,31 @@ public class AttractionService {
         if (attractionRepository.existsByNameAndDeletedAtIsNull(name)) {
             throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
         }
+    }
+
+    // 원인 예외를 순회하여 어트랙션 이름 중복 제약 위반인지 판별한다.
+    // 등록·수정에서 함께 사용하며, 업무 예외로 변환하는 처리는 호출부에서 수행한다.
+    private boolean isAttractionNameDuplicate(DataIntegrityViolationException exception) {
+        Throwable throwable = exception;
+
+        while (throwable != null) {
+            // Spring 예외 안에 감싸진 Hibernate 예외에서 DB 제약 이름을 확인한다.
+            if (throwable instanceof ConstraintViolationException violation) {
+                String constraintName = violation.getConstraintName();
+
+                boolean isNameDuplicated = constraintName != null
+                        && (constraintName.equals("uk_attraction_name_active")
+                        || constraintName.endsWith(".uk_attraction_name_active")
+                );
+                if (isNameDuplicated) {
+                    return true;
+                }
+            }
+            // 현재 예외에서 찾지 못했으면 안쪽 원인을 확인한다.
+            throwable = throwable.getCause();
+        }
+        // 원인 예외를 모두 확인해도 이름 중복 제약을 찾지 못한 경우다.
+        return false;
     }
 
 
@@ -146,6 +190,16 @@ public class AttractionService {
             throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
         }
 
+        // 소요 시간을 생략하거나 기존 값과 동일하게 요청하면 슬롯 검사를 수행하지 않는다.
+        boolean isDurationChanged = request.durationMinutes() != null && !request.durationMinutes().equals(previousDurationMinutes);
+        // 어트랙션 잠금 확보 후의 KST를 기준으로 취소되지 않은 운영 예정·진행 중 슬롯을 확인한다.
+        // 기존 슬롯·예약 시간표를 보존하기 위해 예약 인원과 관계없이 소요 시간 변경을 거부한다.
+        if (isDurationChanged &&
+                attractionSlotRepository.existsByAttraction_IdAndStatusNotAndEndsAtAfter(attractionId, SlotStatus.CANCELLED, KstTime.now())) {
+            // 엔티티 수정 전에 거부하여 함께 요청한 이름·설명 등도 변경되지 않도록 한다.
+            throw new BusinessException(ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED);
+        }
+
         attraction.update(
                 request.name(),
                 request.description(),
@@ -154,14 +208,26 @@ public class AttractionService {
                 request.entranceMoveMinutes() // 추가
         );
         // updatedAt 은 DB에 반영(flush)될 때 채워지므로, 응답 전에 먼저 반영한다.
-        attractionRepository.flush();
+        try {
+            attractionRepository.flush();
+        } catch (DataIntegrityViolationException e) {
+            if (isAttractionNameDuplicate(e)) {
+                throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
+            }
+            throw e;
+        }
 
         // 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
-                attractionId, adminId, previousDurationMinutes, attraction.getDurationMinutes());
+        // 변경 시점의 값을 미리 보관하여 callback에서 엔티티를 다시 읽지 않도록 한다.
+        Integer currentDurationMinutes = attraction.getDurationMinutes();
+        // 람다를 commit 후 실행할 작업으로 등록한다. rollback되면 수정 완료 로그는 남기지 않는다.
+        AfterCommit.run(() ->
+                log.info("event=ATTRACTION_UPDATED attractionId={} userId={} previousDurationMinutes={} currentDurationMinutes={}",
+                        attractionId, adminId, previousDurationMinutes, currentDurationMinutes)
+        );
+
 
         return SearchAttractionResponse.from(attraction);
     }
@@ -191,9 +257,11 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
-                attractionId, adminId, previousStatus, newStatus);
+        // 미리 보관한 변경 전·후 상태로 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다.
+        AfterCommit.run(() ->
+        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} userId={} previousStatus={} currentStatus={}",
+                attractionId, adminId, previousStatus, newStatus)
+        );
 
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
     }
@@ -218,8 +286,10 @@ public class AttractionService {
 
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId);
+        // 삭제 트랜잭션이 commit된 경우에만 완료 로그를 남기고, rollback되면 기록하지 않는다.
+        AfterCommit.run(() ->
+            log.info("event=ATTRACTION_DELETED attractionId={} userId={}", attractionId, adminId)
+        );
     }
 
     // 예약 - 잠금 전용 조회 메서드

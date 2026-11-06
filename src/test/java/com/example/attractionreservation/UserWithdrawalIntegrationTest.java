@@ -17,6 +17,10 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.payment.entity.Payment;
+import com.example.attractionreservation.domain.refund.entity.Refund;
+import com.example.attractionreservation.domain.refund.entity.RefundItem;
+import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
@@ -29,8 +33,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.UUID;
@@ -164,7 +170,7 @@ class UserWithdrawalIntegrationTest {
                     entityManager.persist(ticket);
 
                     Attraction attraction = Attraction.create(
-                            "관람차", "테스트 시설", "A구역", 10, 5
+                            "관람차-" + UUID.randomUUID(), "테스트 시설", "A구역", 10, 5
                     );
                     entityManager.persist(attraction);
 
@@ -333,6 +339,151 @@ class UserWithdrawalIntegrationTest {
                     }
                 }
         );
+    }
+
+    @ParameterizedTest(name = "환불 상태: {0}")
+    @EnumSource(value = RefundStatus.class,
+            names = {"REQUESTED", "PROCESSING", "PG_PENDING", "FAILED", "DEAD"})
+    @DisplayName("미완료 환불이 있으면 미사용 티켓이 없어도 탈퇴를 보류한다")
+    void withdraw_incompleteRefund_rejectsWithdrawal(RefundStatus refundStatus) {
+        // given
+        Long userId = createUserWithRefund(refundStatus);
+
+        // when & then
+        assertThatThrownBy(() -> withdrawalService.withdraw(userId))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.USER_WITHDRAWAL_INCOMPLETE_REFUND));
+
+        // 서비스 트랜잭션이 끝난 뒤 DB에서 탈퇴되지 않았는지 확인한다.
+        User savedUser = userRepository.findById(userId).orElseThrow();
+        assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(savedUser.getWithdrawnAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("완료된 환불만 있고 다른 제한 조건이 없으면 탈퇴할 수 있다")
+    void withdraw_onlyCompletedRefund_commitsWithdrawal() {
+        // given
+        Long userId = createUserWithRefund(RefundStatus.COMPLETED);
+
+        // when
+        withdrawalService.withdraw(userId);
+
+        // then
+        User savedUser = userRepository.findById(userId).orElseThrow();
+        assertThat(savedUser.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
+        assertThat(savedUser.getWithdrawnAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("다른 회원에게만 미완료 환불이 있으면 본인의 탈퇴는 허용한다")
+    void withdraw_otherUserHasIncompleteRefund_commitsWithdrawal() {
+        // given
+        Long otherUserId = createUserWithRefund(RefundStatus.PG_PENDING);
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname("환불없는탈퇴회원")
+                        .build()
+        );
+        Long userId = user.getId();
+
+        // when
+        withdrawalService.withdraw(userId);
+
+        // then
+        User savedUser = userRepository.findById(userId).orElseThrow();
+        assertThat(savedUser.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
+        assertThat(savedUser.getWithdrawnAt()).isNotNull();
+
+        User otherUser = userRepository.findById(otherUserId).orElseThrow();
+        assertThat(otherUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(otherUser.getWithdrawnAt()).isNull();
+    }
+
+    // 티켓을 환불 요청 시점에 사용 불가로 만들고, 지정한 환불 상태를 실제 DB에 저장한다.
+    private Long createUserWithRefund(RefundStatus refundStatus) {
+        return new TransactionTemplate(transactionManager).execute(
+                transaction -> {
+                    Instant now = Instant.now();
+                    LocalDate visitDate = LocalDate.now(
+                            ZoneId.of("Asia/Seoul")
+                    ).plusDays(1);
+
+                    User user = User.builder()
+                            .email(UUID.randomUUID() + "@test.com")
+                            .password("test-password-hash")
+                            .nickname("환불대기탈퇴테스트")
+                            .build();
+                    entityManager.persist(user);
+
+                    TicketProduct product = new TicketProduct(
+                            "종일권",
+                            10000,
+                            "환불 대기 중 탈퇴 검증용 상품",
+                            TicketType.ALL_DAY,
+                            100,
+                            TicketProductStatus.ON_SALE
+                    );
+                    entityManager.persist(product);
+
+                    Order order = Order.create(user, 10000, visitDate);
+                    order.addOrderItem(product, 1);
+                    order.markAsPaid();
+                    entityManager.persist(order);
+
+                    Payment payment = Payment.create(order);
+                    payment.markAsPaid(now);
+                    entityManager.persist(payment);
+
+                    Ticket ticket = new Ticket(
+                            visitDate, order.getOrderItems().get(0)
+                    );
+                    entityManager.persist(ticket);
+
+                    // 현재 환불 요청 구현처럼 티켓은 먼저 사용 불가 상태가 된다.
+                    ticket.refund();
+
+                    Refund refund = Refund.create(payment, "단순 변심", now);
+                    refund.addRefundItem(
+                            RefundItem.of(order.getOrderItems().get(0), 1, 1)
+                    );
+                    // 실제 상태 전이 메서드로 요청·진행·완료 상태를 구성한다.
+                    if (refundStatus != RefundStatus.REQUESTED) {
+                        refund.markAsProcessing();
+                    }
+                    switch (refundStatus) {
+                        case REQUESTED, PROCESSING -> {
+                            // 위 단계까지 구성한 상태를 그대로 유지한다.
+                        }
+                        case PG_PENDING -> refund.markAsPgPending("kan120-" + UUID.randomUUID(), now);
+                        case FAILED -> refund.markAsFailed("테스트 PG 취소 실패", now);
+                        case DEAD -> refund.markAsDead("테스트 수동 확인 필요");
+                        case COMPLETED -> {
+                            refund.markAsComplete(now);
+                            payment.markAsRefunded();
+                            order.markAsRefunded();
+                        }
+                    }
+                    entityManager.persist(refund);
+                    entityManager.flush();
+
+                    assertThat(ticket.getStatus())
+                            .isEqualTo(TicketStatus.REFUNDED);
+                    assertThat(refund.getStatus())
+                            .isEqualTo(refundStatus);
+                    if (refundStatus == RefundStatus.COMPLETED) {
+                        assertThat(refund.getCompletedAt()).isNotNull();
+                    } else {
+                        assertThat(refund.getCompletedAt()).isNull();
+                    }
+
+                    return user.getId();
+                }
+        );
+
     }
 
     private Long createUserWithUnusedTicket(LocalDate validDate) {

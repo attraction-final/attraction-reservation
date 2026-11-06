@@ -477,6 +477,9 @@ class OrderServiceTest {
         when(orderRepository.findOrderById(101L))
                 .thenReturn(Optional.of(order));
 
+        when(orderRepository.findPaymentPgIdByOrderId(101L))
+                .thenReturn(Optional.of("test-order-payment-101"));
+
         // when
         SearchOrderResponse response = orderService.findOrderById(1L, 101L);
 
@@ -487,10 +490,11 @@ class OrderServiceTest {
         assertThat(response.createdAt())
                 .isEqualTo(LocalDateTime.of(2026, 10, 14, 10, 0));
         assertThat(response.items()).containsExactly(
-                new SearchOrderResponse.Item(201L, 10L, 60000, 2)
-        );
+                new SearchOrderResponse.Item(201L, 10L, 60000, 2));
+        assertThat(response.pgId()).isEqualTo("test-order-payment-101");
 
         verify(orderRepository).findOrderById(101L);
+        verify(orderRepository).findPaymentPgIdByOrderId(101L);
         verifyNoMoreInteractions(orderRepository);
         verifyNoInteractions(ticketProductRepository, userRepository);
     }

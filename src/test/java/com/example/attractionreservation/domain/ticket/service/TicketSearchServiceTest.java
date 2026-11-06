@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.ticket.service;
 
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketCondition;
 import com.example.attractionreservation.domain.ticket.dto.SearchTicketResponse;
+import com.example.attractionreservation.domain.ticket.dto.TicketOrderPayment;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
@@ -61,6 +62,8 @@ class TicketSearchServiceTest {
         when(ticketRepository.findAllByUserIdWithCondition(
                 userId, "종일", TicketType.ALL_DAY, TicketStatus.UNUSED, pageable
         )).thenReturn(new PageImpl<>(List.of(ticket), pageable, 3));
+        when(ticketRepository.findOrderPaymentsByTicketIdIn(List.of(10L)))
+                .thenReturn(List.of(new TicketOrderPayment(10L, 100L, "pg-test-id")));
 
         // when
         Page<SearchTicketResponse> result =
@@ -74,7 +77,9 @@ class TicketSearchServiceTest {
                         "종일이용권",
                         TicketType.ALL_DAY,
                         validDate,
-                        TicketStatus.UNUSED
+                        TicketStatus.UNUSED,
+                        100L,
+                        "pg-test-id"
                 )
         );
         assertThat(result.getNumber()).isEqualTo(1);

@@ -190,5 +190,16 @@ class AttractionRepositoryTest {
         assertThat(result.getTotalElements()).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("Q&A 분류 대상은 삭제된 어트랙션을 빼고 점검 중인 어트랙션은 포함해 id 순으로 조회한다")
+    void findAllByDeletedAtIsNullOrderByIdAsc_ExcludesDeletedOnly() {
+        // when
+        List<Attraction> result = attractionRepository.findAllByDeletedAtIsNullOrderByIdAsc();
 
+        //then
+        assertThat(result)
+                .extracting(Attraction::getName)
+                .containsExactly("롤러코스터", "회전목마", "바이킹");
+        //점검중인 회전목마는 상태 질문에 답해야 하므로 포함
+    }
 }

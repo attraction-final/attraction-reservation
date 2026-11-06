@@ -12,6 +12,14 @@ spring:
       connection-init-sql: SET SESSION innodb_lock_wait_timeout = 3
 
 
+  # 스키마는 Flyway 마이그레이션(db/migration)으로만 바꾸고, Hibernate는 엔티티와 일치하는지 검증만 한다.
+  # 작성 방법은 docs/database/migration.md
+  flyway:
+    # Flyway 도입 전에 테이블을 만들어 둔 DB(운영, Hibernate로 만든 로컬 DB)는
+    # V1(초기 스키마)이 적용된 것으로 표시하고 V2부터 적용한다. 빈 DB는 V1부터 적용한다.
+    baseline-on-migrate: true
+    baseline-version: 1
+
   jpa:
     hibernate:
       ddl-auto: validate

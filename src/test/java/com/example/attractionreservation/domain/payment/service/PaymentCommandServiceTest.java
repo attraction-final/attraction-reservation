@@ -119,7 +119,7 @@ class PaymentCommandServiceTest {
 
         //then
         assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_APPROVED")))
-                .singleElement().asString().contains("INFO").contains("pgId=" + PG_ID).contains("userId=" + USER_ID);
+                .singleElement().asString().contains("INFO").contains("pgId=" + PG_ID).contains("targetUserId=" + USER_ID);
     }
 
     @Test
@@ -260,7 +260,7 @@ class PaymentCommandServiceTest {
                 .singleElement().asString()
                 .contains("INFO")
                 .contains("pgId=" + payment.getPgId())
-                .contains("userId=" + USER_ID)
+                .contains("targetUserId=" + USER_ID)
                 .contains("reason=\"PG 결제 실패\"");
     }
 
@@ -327,7 +327,7 @@ class PaymentCommandServiceTest {
         assertThat(output.getAll().lines().filter(line -> line.contains("event=PAYMENT_COMPENSATION_REQUESTED")))
                 .singleElement().asString().contains("INFO")
                 .contains("pgId=" + payment.getPgId())
-                .contains("userId=" + USER_ID + " amount=9999 reason=\"결제 금액 불일치\"");
+                .contains("targetUserId=" + USER_ID + " amount=9999 reason=\"결제 금액 불일치\"");
     }
 
     @Test

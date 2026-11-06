@@ -16,14 +16,23 @@ export function Badge({ status, tone, small, children, style }) {
 
 // 뒤로가기 버튼 + 제목이 있는 위쪽 줄
 export function BackHeader({ title, to }) {
-  const navigate = useNavigate();
   return (
     <div className="back-header">
-      <button type="button" className="icon-btn" aria-label="뒤로 가기" onClick={() => (to ? navigate(to) : navigate(-1))}>
-        <Icon name="back" strokeWidth={2.2} />
-      </button>
-      <h1 className="display" style={{ fontSize: 22 }}>{title}</h1>
+      <BackButton to={to} />
+      {/* Jua 글꼴은 가운데 정렬해도 글자가 살짝 위로 떠 보여서 2px 내려 화살표와 맞춰요. */}
+      <h1 className="display" style={{ fontSize: 22, position: 'relative', top: 2 }}>{title}</h1>
     </div>
+  );
+}
+
+// 뒤로가기 화살표 버튼만 따로 쓰고 싶을 때 (예: 아래 탭바가 있는 화면의 제목 옆)
+// to 가 있으면 그 주소로, 없으면 브라우저의 "이전 화면"으로 가요.
+export function BackButton({ to, style }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" className="icon-btn" aria-label="뒤로 가기" style={style} onClick={() => (to ? navigate(to) : navigate(-1))}>
+      <Icon name="back" strokeWidth={2.2} />
+    </button>
   );
 }
 
@@ -101,6 +110,11 @@ export function AdminHeader({ title, right, children }) {
         <img src="/images/logo.svg" alt="" width={36} height={36} style={{ borderRadius: 10 }} />
         <span className="display" style={{ fontSize: 18 }}>{SERVICE_NAME}</span>
         <Badge tone="yellow" small>관리자</Badge>
+        {/* 관리자 화면에 들어온 입구(마이페이지)로 돌아가는 버튼. marginLeft: 'auto' 가 남는 공간을 왼쪽에 몰아 줘서 오른쪽 끝에 붙어요. */}
+        <Link to="/my" className="row gap-4" style={{ marginLeft: 'auto', height: 34, padding: '0 12px', borderRadius: 999, background: 'var(--soft)', color: 'var(--blue-ink)', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+          <Icon name="user" size={16} strokeWidth={2} />
+          마이페이지
+        </Link>
       </div>
       <div className="row between" style={{ alignItems: 'baseline' }}>
         <h1 className="display" style={{ fontSize: 24 }}>{title}</h1>

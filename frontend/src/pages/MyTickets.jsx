@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
-import { Badge, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
+import { BackButton, Badge, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { ticketApi } from '../api/index.js';
 import { TICKET_STATUS, TICKET_TYPE, formatDate, formatPrice } from '../api/labels.js';
@@ -74,7 +74,10 @@ export default function MyTickets() {
       <div className="screen-body">
         <div className="stack gap-12" style={{ padding: '18px 16px 10px' }}>
           <div className="row between">
-            <h1 className="h1">내 입장권</h1>
+            <div className="title-with-back">
+              <BackButton to="/" />
+              <h1 className="h1">내 입장권</h1>
+            </div>
             <Link to="/my" className="bold" style={{ fontSize: 13, textDecoration: 'none' }}>결제 내역</Link>
           </div>
           <div className="row gap-8">

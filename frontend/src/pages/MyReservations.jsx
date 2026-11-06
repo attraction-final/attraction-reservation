@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
-import { Badge, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
+import { BackButton, Badge, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
 import ReservationCancelSheet from '../components/ReservationCancelSheet.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { reservationApi } from '../api/index.js';
@@ -20,7 +20,10 @@ export default function MyReservations() {
       <div className="screen-body">
         <div className="card stack gap-12" style={{ borderRadius: '0 0 26px 26px', padding: '18px 16px 12px' }}>
           <div className="row between">
-            <h1 className="h1">내 예약</h1>
+            <div className="title-with-back">
+              <BackButton to="/" />
+              <h1 className="h1">내 예약</h1>
+            </div>
             <Link to="/route" className="badge tone-pink" style={{ textDecoration: 'none', padding: '8px 12px', fontSize: 13 }}>루트 추천</Link>
           </div>
           <div className="segment" role="tablist">

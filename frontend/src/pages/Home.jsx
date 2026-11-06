@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import Icon, { StarIcon } from '../components/Icon.jsx';
+import Icon from '../components/Icon.jsx';
 import { Badge, TabBar } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { attractionApi, parkApi, reservationApi, ticketApi } from '../api/index.js';
@@ -35,16 +35,18 @@ export default function Home() {
           <img src="/images/park.jpg" alt="성, 롤러코스터, 대관람차, 회전목마가 보이는 테마파크 전경" style={{ objectPosition: '40% center' }} />
           <div className="row between" style={{ position: 'absolute', top: 14, left: 16, right: 16 }}>
             <div className="pill-white row gap-8" style={{ padding: '6px 14px 6px 8px' }}>
-              <span className="icon-circle" style={{ width: 28, height: 28, background: 'var(--yellow)' }}><StarIcon /></span>
+              {/* 관리자 화면(주문 · 환불 등)과 같은 대관람차 로고를 써요 */}
+              <img src="/images/logo.svg" alt="" width={30} height={30} style={{ borderRadius: 9 }} />
               <span className="display" style={{ fontSize: 20 }}>{SERVICE_NAME}</span>
             </div>
             {user ? (
-              <Link to="/my" className="pill-white row" style={{ marginRight: 8, height: 40, padding: '0 16px', fontSize: 14, fontWeight: 700, color: 'var(--blue-ink)', textDecoration: 'none' }}>
-                {user.nickname}님
+              <Link to="/my" className="pill-white row" style={{ height: 42, padding: '0 16px', fontSize: 14, fontWeight: 700, color: 'var(--blue-ink)', textDecoration: 'none' }}>
+                {/* 글꼴이 달라서(놀이동선=Jua, 이 글자=Noto Sans KR) 같은 가운데 정렬이어도 글자가 2px쯤 낮아 보여요. 살짝 올려서 맞춰요. */}
+                <span style={{ position: 'relative', top: -1 }}>{user.nickname}님</span>
               </Link>
             ) : (
-              <Link to="/login" className="pill-white row" style={{ marginRight: 8, height: 40, padding: '0 16px', fontSize: 14, fontWeight: 700, color: 'var(--blue-ink)', textDecoration: 'none' }}>
-                로그인
+              <Link to="/login" className="pill-white row" style={{ height: 42, padding: '0 16px', fontSize: 14, fontWeight: 700, color: 'var(--blue-ink)', textDecoration: 'none' }}>
+                <span style={{ position: 'relative', top: -2 }}>로그인</span>
               </Link>
             )}
           </div>

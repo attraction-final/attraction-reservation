@@ -65,7 +65,13 @@ export default function Checkout() {
 
       // ③ 사용자가 결제창을 닫았거나 결제가 실패하면 res.code 에 오류 코드가 들어와요.
       if (res?.code != null) {
-        throw new Error(res.message || '결제가 취소되었거나 실패했어요.');
+        // 결제사가 보내 준 원래 메시지(예: "[W002] 사용자 취소")는 개발자용이라
+        // 손님에게는 쉬운 안내 문구만 보여 주고, 자세한 내용은 콘솔에만 남겨요.
+        console.warn('[결제 실패]', res.code, res.message);
+        const friendly = '결제가 완료되지 않았어요. 다시 시도해 주세요.';
+        // import.meta.env.DEV: npm run dev 로 띄웠을 때만 true, 배포(build)하면 false 예요.
+        // 그래서 개발 중에는 오류 코드까지 같이 보이고, 배포 화면에서는 안 보여요.
+        throw new Error(import.meta.env.DEV && res.message ? `${friendly} (${res.message})` : friendly);
       }
 
       // ④ 서버에 승인 요청 → 서버가 포트원에 금액을 다시 확인하고 주문을 "결제 완료"로 바꿔요.

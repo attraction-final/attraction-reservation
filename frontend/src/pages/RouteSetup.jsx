@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import { BackHeader, Empty, Loading } from '../components/ui.jsx';
@@ -26,13 +26,6 @@ export default function RouteSetup() {
   const [picked, setPicked] = useState([]); // 고른 어트랙션 id 목록
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  // 처음엔 예약 가능한 앞쪽 3개를 골라 둬요.
-  useEffect(() => {
-    if (rides.data && picked.length === 0) {
-      setPicked(rides.data.filter((a) => a.status === 'OPERATING' && !a.soldOut).slice(0, 3).map((a) => a.id));
-    }
-  }, [rides.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!user) {
     return (

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
-import { Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
+import { BackButton, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
 import { attractionApi } from '../api/index.js';
 import { ATTRACTION_STATUS } from '../api/labels.js';
 
@@ -74,8 +74,11 @@ export default function Attractions() {
     <div className="screen">
       <div className="screen-body">
         <div className="card stack gap-12" style={{ padding: '18px 16px 12px', borderRadius: '0 0 26px 26px' }}>
-          <div className="row between" style={{ alignItems: 'baseline' }}>
-            <h1 className="h1">어트랙션</h1>
+          <div className="row between">
+            <div className="title-with-back">
+              <BackButton to="/" />
+              <h1 className="h1">어트랙션</h1>
+            </div>
             <span className="small muted">총 {total}개</span>
           </div>
           <div className="search">

@@ -141,7 +141,7 @@ export default function AdminOrders() {
             </div>
             <button type="submit" className="btn btn-sm btn-dark">검색</button>
           </form>
-          <div className="row gap-8" style={{ overflowX: 'auto' }}>
+          <div className="row gap-8" style={{ overflowX: 'auto', paddingBottom: 8 }}>
             {FILTERS.map((f) => (
               <button key={f.code || 'all'} type="button" className={`chip${status === f.code ? ' on' : ''}`} onClick={() => setStatus(f.code)}
                 style={{ height: 34, padding: '0 12px', fontSize: 12, flexShrink: 0 }}>

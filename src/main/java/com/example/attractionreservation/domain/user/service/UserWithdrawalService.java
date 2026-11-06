@@ -2,6 +2,8 @@ package com.example.attractionreservation.domain.user.service;
 
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
+import com.example.attractionreservation.domain.refund.entity.enums.RefundStatus;
+import com.example.attractionreservation.domain.refund.repository.RefundRepository;
 import com.example.attractionreservation.domain.reservation.entity.Reservation;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
@@ -31,6 +33,17 @@ public class UserWithdrawalService {
     private final TicketRepository ticketRepository;
     private final ReservationRepository reservationRepository;
     private final AttractionSlotRepository attractionSlotRepository;
+    private final RefundRepository refundRepository;
+
+    // 환불 완료 전에는 탈퇴를 보류한다. FAILED는 재시도 대기, DEAD는 수동 확인 대상이므로 포함한다.
+    private static final List<RefundStatus> WITHDRAWAL_BLOCKING_REFUND_STATUSES =
+            List.of(
+                    RefundStatus.REQUESTED,
+                    RefundStatus.PROCESSING,
+                    RefundStatus.PG_PENDING,
+                    RefundStatus.FAILED,
+                    RefundStatus.DEAD
+            );
 
     @Transactional
     public void withdraw(Long userId) {
@@ -63,6 +76,19 @@ public class UserWithdrawalService {
             throw new BusinessException(
                     ErrorCode.USER_WITHDRAWAL_UNUSED_TICKET
             );
+        }
+
+        // 환불 요청 시 티켓이 이미 REFUNDED로 바뀌므로 UNUSED 검사만으로는 미완료 환불을 알 수 없다.
+        // 티켓 상태·이용일 대신 해당 회원의 실제 환불 상태를 기준으로 확인한다.
+        boolean hasIncompleteRefund =
+                refundRepository.existsByPayment_Order_User_IdAndStatusIn(
+                        userId,
+                        WITHDRAWAL_BLOCKING_REFUND_STATUSES
+                );
+
+        // 예약 취소·정원 복구·회원 탈퇴를 시작하기 전에 거부하여 기존 데이터를 유지한다.
+        if (hasIncompleteRefund) {
+            throw new BusinessException(ErrorCode.USER_WITHDRAWAL_INCOMPLETE_REFUND);
         }
 
         // 이용 예정 예약의 후보 ID를 예약 ID 오름차순으로 조회한다.

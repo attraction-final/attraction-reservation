@@ -4,6 +4,7 @@ import com.example.attractionreservation.TestcontainersConfiguration;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.payment.entity.Payment;
+import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
@@ -14,10 +15,15 @@ import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
+import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.aop.framework.Advised;
+import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,6 +60,9 @@ class RefundServiceConcurrencyTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
 
     private Long userId;
     private String pgId;
@@ -153,6 +163,84 @@ class RefundServiceConcurrencyTest {
         assertThat(result.rejectedCount()).isEqualTo(THREAD_COUNT - 1);
         assertThat(findRefundedQuantity()).isEqualTo(3L);
         assertThat(countRefundedTickets()).isEqualTo(3L);
+    }
+
+    @ParameterizedTest(name = "후행 요청 관리자 여부: {0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("소유자 ID 조회 후 다른 환불이 커밋돼도 최신 점유 수량으로 사용자·관리자 부분 환불을 거부한다")
+    void createPartialRefund_ownerReadBeforeOtherCommit_usesLatestRefundQuantity(boolean adminRequest)
+            throws Exception {
+        // given
+        List<Long> requestedTickets = List.of(ticketIds.get(0), ticketIds.get(1));
+        CountDownLatch ownerIdRead = new CountDownLatch(1);
+        CountDownLatch resumeRequest = new CountDownLatch(1);
+        AtomicReference<Thread> delayedThread = new AtomicReference<>();
+
+        // 실제 소유자 ID SELECT 직후 후행 요청만 멈춘다. 조회 결과는 변경하지 않는다.
+        // REPEATABLE_READ라면 이 조회가 이후 수량 조회에도 영향을 주는 snapshot을 만들 수 있다.
+        var advisor = new DefaultPointcutAdvisor((MethodInterceptor) invocation -> {
+            Object result = invocation.proceed();
+            if (Thread.currentThread() == delayedThread.get()
+                    && invocation.getMethod().getName().equals("findUserIdByPgId")) {
+                ownerIdRead.countDown();
+                if (!resumeRequest.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("후행 환불 재개 신호를 받지 못했습니다.");
+                }
+            }
+            return result;
+        });
+        Advised repositoryProxy = (Advised) paymentRepository;
+        repositoryProxy.addAdvisor(0, advisor);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<ErrorCode> delayedRequest = executor.submit(() -> {
+                delayedThread.set(Thread.currentThread());
+                try {
+                    if (adminRequest) {
+                        refundService.createAdminPartialRefund(pgId, requestedTickets, "관리자 환불", Instant.now());
+                    } else {
+                        refundService.createRefund(userId, pgId, requestedTickets, "단순 변심", Instant.now());
+                    }
+                    return null;
+                } catch (BusinessException exception) {
+                    return exception.getErrorCode();
+                }
+            });
+            assertThat(ownerIdRead.await(10, TimeUnit.SECONDS))
+                    .as("후행 요청의 실제 소유자 ID 조회 완료").isTrue();
+
+            // when: 후행 요청의 사전 조회와 수량 검사 사이에 같은 티켓 두 장의 환불을 커밋한다.
+            // 이 스레드에는 외부 트랜잭션이 없으므로 서비스 반환 시 요청 저장이 커밋된다.
+            Long firstRefundId = refundService.createRefund(
+                    userId, pgId, requestedTickets, "먼저 처리한 환불", Instant.now());
+            assertThat(firstRefundId).isNotNull();
+            resumeRequest.countDown();
+            ErrorCode rejectedCode = delayedRequest.get(10, TimeUnit.SECONDS);
+
+            // then: 최신 점유 수량 2장을 반영해 수량 단계에서 거부해야 한다.
+            // 과거 수량을 읽고 Ticket.refund()까지 진행한 TICKET_NOT_REFUNDABLE도 실패로 판정한다.
+            assertThat(rejectedCode).isEqualTo(ErrorCode.REFUND_INVALID_QUANTITY);
+            assertThat(findRefundedQuantity()).isEqualTo(2L);
+            assertThat(countRefundedTickets()).isEqualTo(2L);
+            transactionTemplate.executeWithoutResult(transaction -> {
+                Long refundCount = entityManager.createQuery(
+                                "SELECT COUNT(r) FROM Refund r WHERE r.payment.pgId = :pgId", Long.class)
+                        .setParameter("pgId", pgId).getSingleResult();
+                assertThat(refundCount).isEqualTo(1L);
+                assertThat(entityManager.find(Ticket.class, ticketIds.get(2)).getStatus())
+                        .isEqualTo(TicketStatus.UNUSED);
+            });
+        } finally {
+            resumeRequest.countDown();
+            executor.shutdownNow();
+            try {
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("후행 작업 종료 후 fixture 정리").isTrue();
+            } finally {
+                repositoryProxy.removeAdvisor(advisor);
+            }
+        }
     }
 
     // 같은 요청을 동시에 보내고, 성공·환불 수량 오류(REFUND_INVALID_QUANTITY)·그 밖의 오류를 센다.

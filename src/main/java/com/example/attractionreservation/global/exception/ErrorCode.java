@@ -44,6 +44,7 @@ public enum ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     USER_NOT_WITHDRAWABLE(HttpStatus.FORBIDDEN, "현재 회원 상태에서는 탈퇴할 수 없습니다."),
     USER_WITHDRAWAL_UNUSED_TICKET(HttpStatus.CONFLICT, "미사용 입장권이 있어 탈퇴할 수 없습니다. 환불 후 다시 시도해주세요."),
+    USER_WITHDRAWAL_INCOMPLETE_REFUND(HttpStatus.CONFLICT, "완료되지 않은 환불이 있어 탈퇴할 수 없습니다."),
     CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "유저를 찾을 수 없습니다."),
     USER_STATUS_SAME(HttpStatus.CONFLICT, "현재 회원 상태와 동일합니다."),
@@ -153,6 +154,7 @@ public enum ErrorCode {
     REFUND_INVALID_TICKET(HttpStatus.BAD_REQUEST, "해당 주문의 티켓이 아닙니다."),
     REFUND_DUPLICATE_TICKET(HttpStatus.BAD_REQUEST, "같은 티켓을 중복해서 환불할 수 없습니다."),
     REFUND_DEADLINE_PASSED(HttpStatus.CONFLICT, "입장일 전날까지만 환불할 수 있습니다."),
+    REFUND_USER_WITHDRAW(HttpStatus.CONFLICT, "탈퇴한 회원의 결제는 환불을 요청할 수 없습니다."),
     REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다."),
 
     //jev ai / chatbot

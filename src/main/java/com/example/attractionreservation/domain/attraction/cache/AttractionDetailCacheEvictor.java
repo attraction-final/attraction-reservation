@@ -42,9 +42,11 @@ public class AttractionDetailCacheEvictor {
     private void evictNow(Long attractionId) {
         String key = KEY_PREFIX + attractionId;
         try {
-            Boolean deleted = stringRedisTemplate.delete(key);
+            stringRedisTemplate.delete(key);
         } catch (RuntimeException e) {
-            log.warn("어트랙션 상세 캐시 삭제 실패: key={}", key, e);
+            // [로그 수정] event= 형식, 표준 키 attractionId, 연동 대상 target, 예외 객체는 마지막 인자
+            log.warn("event=ATTRACTION_DETAIL_CACHE_EVICTION_FAILED attractionId={} target=redis",
+                    attractionId, e);
         }
     }
 }

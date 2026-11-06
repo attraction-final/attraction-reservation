@@ -57,7 +57,7 @@ public class AttractionSlotService {
         Long slotId = savedSlot.getId();
         LocalDateTime savedStartsAt = savedSlot.getStartsAt();
         Integer capacity = savedSlot.getCapacity();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} adminId={} startsAt={} capacity={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} userId={} startsAt={} capacity={}",
                 slotId, attractionId, adminId, savedStartsAt, capacity));
 
         return CreateAttractionSlotResponse.from(savedSlot);
@@ -136,7 +136,7 @@ public class AttractionSlotService {
         slot.changeTime(newStartsAt); // 변경 감지(dirty checking)로 커밋 시 UPDATE
 
         // [로그 수정] 커밋 뒤에 남긴다.
-        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} adminId={} previousStartsAt={} currentStartsAt={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} userId={} previousStartsAt={} currentStartsAt={}",
                 slotId, attractionId, adminId, previousStartsAt, newStartsAt));
 
         return UpdateAttractionSlotTimeResponse.from(slot);
@@ -185,7 +185,7 @@ public class AttractionSlotService {
         Integer currentCapacity = slot.getCapacity();
         Integer reservedCount = slot.getReservedCount();
         String currentStatus = slot.getStatus().name();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} attractionId={} adminId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} attractionId={} userId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
                 slotId, attractionId, adminId, previousCapacity, currentCapacity, reservedCount, currentStatus));
 
         return UpdateAttractionSlotCapacityResponse.from(slot);
@@ -217,7 +217,7 @@ public class AttractionSlotService {
         Long attractionId = slot.getAttraction().getId();
         String previousStatusName = previousStatus.name();
         String currentStatusName = newStatus.name();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} attractionId={} adminId={} previousStatus={} currentStatus={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} attractionId={} userId={} previousStatus={} currentStatus={}",
                 slotId, attractionId, adminId, previousStatusName, currentStatusName));
 
         return UpdateAttractionSlotStatusResponse.of(slot, previousStatus);
@@ -237,7 +237,7 @@ public class AttractionSlotService {
         // [로그 수정] 커밋 뒤에 남긴다. 지연 로딩 값(getAttraction)은 람다 밖에서 미리 꺼낸다.
         Long attractionId = slot.getAttraction().getId();
         LocalDateTime startsAt = slot.getStartsAt();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} adminId={} startsAt={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} userId={} startsAt={}",
                 slotId, attractionId, adminId, startsAt));
 
     }

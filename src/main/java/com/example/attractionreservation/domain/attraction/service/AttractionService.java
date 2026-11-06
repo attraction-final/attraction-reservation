@@ -69,7 +69,7 @@ public class AttractionService {
         // [로그 수정] 커밋 뒤에 남긴다. 로그에 쓸 값은 람다 밖에서 미리 꺼낸다.
         Long attractionId = savedAttraction.getId();
         Integer durationMinutes = savedAttraction.getDurationMinutes();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_CREATED attractionId={} userId={} durationMinutes={}",
                 attractionId, adminId, durationMinutes));
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
@@ -208,7 +208,7 @@ public class AttractionService {
 
         // [로그 수정] 커밋 뒤에 남긴다.
         Integer currentDurationMinutes = attraction.getDurationMinutes();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_UPDATED attractionId={} userId={} previousDurationMinutes={} currentDurationMinutes={}",
                 attractionId, adminId, previousDurationMinutes, currentDurationMinutes));
 
         return SearchAttractionResponse.from(attraction);
@@ -242,7 +242,7 @@ public class AttractionService {
         // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
         String previousStatusName = previousStatus.name();
         String currentStatusName = newStatus.name();
-        AfterCommit.run(() -> log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
+        AfterCommit.run(() -> log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} userId={} previousStatus={} currentStatus={}",
                 attractionId, adminId, previousStatusName, currentStatusName));
 
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
@@ -269,7 +269,7 @@ public class AttractionService {
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
         // [로그 수정] 커밋 뒤에 남긴다.
-        AfterCommit.run(() -> log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId));
+        AfterCommit.run(() -> log.info("event=ATTRACTION_DELETED attractionId={} userId={}", attractionId, adminId));
     }
 
     // 예약 - 잠금 전용 조회 메서드

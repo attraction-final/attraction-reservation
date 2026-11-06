@@ -1,0 +1,4 @@
+select count(r1_0.id) from reservations r1_0 where r1_0.user_id=?
+
+JDBC bindings:
+setLong [1, 101]

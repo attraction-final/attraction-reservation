@@ -99,6 +99,9 @@ class ReservationListIndexIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private MySQLContainer mysql;
+
     @MockitoBean
     private UserService userService;
 
@@ -130,7 +133,7 @@ class ReservationListIndexIntegrationTest {
     }
 
     @Test
-    @DisplayName("내 예약 목록의 실제 SQL과 바인딩 값으로 회원·상태 조건별 실행 계획을 수집한다")
+    @DisplayName("내 예약 목록 실행 계획과 인덱스 크기·예약 쓰기 비용을 수집한다")
     void findReservationAll_recordsIndexBaselineAndExecutionPlans() throws Exception {
         // given
         Path output = Path.of("build", "reports", "reservation-list-index",
@@ -146,6 +149,9 @@ class ReservationListIndexIntegrationTest {
         // when
         recordScenario(output, "user-only", null, SLOT_COUNT);
         recordScenario(output, "user-reserved", ReservationStatus.RESERVED, SLOT_COUNT / STATUSES.length);
+        // 원본 예약 테이블은 유지하고, 동일 데이터의 복제 테이블에서 인덱스 유지 비용을 비교한다.
+        new ReservationIndexMaintenanceMeasurement(jdbc, transactionManager, mysql)
+                .record(output.resolve("maintenance"), REPETITIONS);
 
         // then
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM reservations", Long.class))

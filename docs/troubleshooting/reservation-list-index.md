@@ -2,10 +2,10 @@
 
 > **KAN-130 · 내 예약 목록 실행 계획 분석 및 인덱스 최적화**
 >
-> 현재 단계: **인덱스 변경 전 측정과 증거 보존 완료. 인덱스 후보 적용·개선 후 측정은 아직 진행하지 않음.**
+> 현재 단계: **복합 인덱스 적용, 조회 계획 비교, 저장 공간·쓰기 비용 측정 완료. 관련 기존 테스트 전체 회귀 검증은 남아 있음.**
 >
-> 기존 인덱스는 회원별 검색에 사용되고 있다. 다만 목록 정렬과 상태 필터를 위해 추가 처리가 발생했다.
-> 이 문서는 이후 인덱스 후보 비교와 회귀 검증 결과를 이어서 기록한다.
+> 새 인덱스 적용 후 두 목록의 Sort가 없어졌고, 예약 인덱스 조회량은 500건에서 10건으로 줄었다.
+> 예약 10만 건에서 인덱스 크기는 약 4.52MiB로 추정됐으며, 합성 상태 UPDATE batch의 중앙값 증가는 약 40.28ms/1,000건이었다.
 
 ## 1. 목적과 범위
 
@@ -181,24 +181,51 @@ LIMIT ?, ?
 
 중앙값은 각 쿼리의 5개 완료 시간을 정렬한 세 번째 값이다. 통계적 유의성이나 운영 성능을 입증하는 결과는 아니다.
 
-## 5. 현재 판단과 다음 실험
+## 5. 인덱스 적용과 조회 계획 비교
 
 **측정으로 확인한 사실:** 기존 인덱스로 회원 검색이 가능하지만, 첫 페이지 10건을 반환하기 위해 해당 회원의 예약 500건을 읽고 정렬했다. 상태 검색도 500건을 읽은 뒤 필터링했다.
 
-**다음 검토 대상:** 회원 조건·상태 필터·기본 정렬을 함께 지원하는 복합 인덱스 후보를 비교할 수 있다. 아직 후보를 확정하거나 엔티티·migration·DB 인덱스를 변경하지 않았다.
+사용자가 Reservation의 `@Table.indexes`에 다음 일반 복합 인덱스를 정의했다. 기존 활성 예약 UNIQUE 제약은 유지했다.
 
-이 수치만으로 운영 장애나 반드시 개선해야 하는 응답 지연이 있다고 결론 내리지 않는다. 추가 인덱스의 조회 이득과 저장 공간·쓰기 유지 비용을 함께 평가한다. 효과가 작거나 부작용이 크면 추가하지 않는 선택도 가능하다.
+```text
+이름: idx_reservations_user_status_id
+컬럼 순서: user_id, reservation_status, id
+```
 
-다음 측정에서는 같은 데이터 분포·조건·워밍업·반복 횟수를 유지하고 다음을 비교한다.
+회원 조건을 앞에 두고, 상태 필터와 기본 정렬에 사용하는 컬럼을 뒤에 두는 후보를 실험했다. [V4 migration](../../src/main/resources/db/migration/V4__add_reservation_user_status_id_index.sql)으로 실제 DB에 같은 인덱스를 생성했다.
 
-- 선택 인덱스와 별도 Sort 존재 여부
-- 예약 인덱스 조회 행 수와 상태 Filter 입력·출력 행 수
-- 슬롯·어트랙션 join 처리량
-- 목록·count 각각의 반복 실행 시간
-- 응답과 전체 건수 유지 여부
-- 인덱스 크기와 쓰기 비용 검토
+```sql
+CREATE INDEX idx_reservations_user_status_id
+    ON reservations (user_id, reservation_status, id);
+```
 
-실제 스키마 변경을 반영할 때는 [프로젝트 Flyway 규칙](../database/migration.md)에 따라 엔티티와 새 migration을 함께 보완한다. 기존 V1·V2·V3는 수정하지 않는다. 새 번호는 작업 시점의 최신 dev를 다시 확인한다.
+`ddl-auto=validate`는 엔티티의 `@Index`를 DB에 생성하지 않는다. 이번 테스트 DB의 실제 인덱스 생성은 Flyway V4가 수행했으며, 이력의 `success=true`와 실행 계획의 인덱스 사용을 확인했다. 기존 V1·V2·V3는 변경하지 않았다.
+
+### 개선 직후 재측정
+
+실행 시작: **2026-11-07 00:41:41 KST**, XML timestamp `2026-11-06T15:41:41.991Z`.
+
+```text
+tests=1, failures=0, errors=0, skipped=0
+```
+
+- 회원별 목록: 새 인덱스의 역방향 조회 사용, 예약 조회 노드 `rows=10 loops=1`, Sort 없음
+- 회원·RESERVED 목록: 새 인덱스에서 회원·상태 조건을 함께 사용, 예약 조회 노드 `rows=10 loops=1`, Sort 없음
+- 회원별 count: 새 인덱스의 Covering index lookup으로 500건 집계
+- 회원·RESERVED count: 새 인덱스의 Covering index lookup으로 해당 상태 125건 집계
+
+상태 조건이 있는 계획에는 Filter 노드가 남아 있지만, 인덱스 조회 단계부터 `user_id=101, reservation_status='RESERVED'`를 사용한다. 개선 전처럼 500건을 읽고 상태를 추리는 구조와 구분한다. 슬롯·어트랙션의 PK 조회는 목록당 각각 10회였다.
+
+5회 완료 시간의 중앙값 비교:
+
+```text
+회원별 목록:           1.230ms → 0.165ms
+회원·RESERVED 목록:    1.130ms → 0.129ms
+회원별 count:          0.104ms → 0.0983ms
+회원·RESERVED count:   0.912ms → 0.0534ms
+```
+
+회원별 count는 개선 전에도 Covering index lookup으로 처리되어 시간 차이가 작았다. 이 비교는 합성 데이터·warm-cache에서의 두 실행 결과이며 운영 응답 속도 개선율로 일반화하지 않는다.
 
 ## 6. 개선 전 증거 보존
 
@@ -219,23 +246,136 @@ build/reports/reservation-list-index/run-1793976577515-de982905-b659-41fd-aa15-9
 
 폴더에는 실제 SQL·바인딩 값, 테이블 DDL, EXPLAIN, 워밍업 계획, 쿼리별 반복 계획이 포함된다. 개선 후 자료는 별도 폴더에 저장하고 `before`를 덮어쓰지 않는다.
 
-## 7. 진행 상태와 개선 후 기록 공간
+## 7. 인덱스 크기와 쓰기 유지 비용
+
+실행 시작: **2026-11-07 01:14:07 KST**, XML timestamp `2026-11-06T16:14:07.167Z`.
+
+```text
+tests=1, failures=0, errors=0, skipped=0
+```
+
+기존 측정 테스트에 [쓰기 비용 측정 도우미](../../src/test/java/com/example/attractionreservation/domain/reservation/service/ReservationIndexMaintenanceMeasurement.java)를 연결했다. 독립된 새 테스트 여러 개가 아니라, 한 테스트 실행 안에서 조회 계획과 유지 비용을 이어서 수집한다.
+
+### 비교 구성
+
+- 원본 예약 테이블은 그대로 유지하고 같은 초기 데이터 10만 건을 복제 테이블 두 개에 구성
+- 후보 인덱스만 유무를 다르게 하고 나머지 인덱스 정의가 일치하는지 검증
+- `CREATE TABLE LIKE`가 복제하지 않는 FK는 양쪽에 명시적으로 재생성
+- 기존 UNIQUE와 Generated Column 유지
+- 신규 슬롯을 미리 준비하여 INSERT의 활성 예약 중복 방지 제약과 충돌하지 않게 구성
+- 1회 워밍업 후 5회 측정, 반복마다 인덱스 유무의 실행 순서를 교대
+- 예약 1,000건 RESERVED INSERT와 기존 RESERVED 1,000건의 CANCELLED UPDATE를 각각 측정
+- UPDATE에는 취소 사유·취소 시각·updated_at 변경 포함
+- 각 batch는 별도 트랜잭션이며 시간에 JDBC batch 및 트랜잭션 시작·커밋을 포함
+- fixture·DDL·통계 갱신·검증 조회 시간은 측정 구간에서 제외
+
+각 반복은 서로 다른 ID·슬롯·UPDATE 대상을 사용한다. 행 수는 양쪽 모두 동일하게 100,000건에서 106,000건까지 증가하며, 데이터를 삭제·원복하는 시간은 측정하지 않는다.
+
+### 인덱스 크기
+
+`ANALYZE TABLE` 이후 `mysql.innodb_index_stats`의 `stat_name=size`에 기록된 페이지 수와 `@@innodb_page_size`로 계산했다. 해당 통계 조회에는 테스트 컨테이너의 root 계정을 사용했고, 접속 정보는 결과에 기록하지 않았다.
+
+```text
+예약 100,000건 기준
+새 인덱스: 289 pages × 16,384 bytes
+추정 크기: 4,734,976 bytes = 4.515625 MiB (약 4.52MiB)
+```
+
+106,000건과 상태 변경 이후에는 287 pages, 4,702,208 bytes로 기록됐다. 행 수만으로 인덱스 크기가 선형 증가한다고 단정하지 않으며, 이 수치를 정확한 파일 실사용량으로 취급하지 않는다. 페이지 구성과 통계에 기반한 추정치다.
+
+### 쓰기 시간
+
+워밍업을 제외한 5회 측정의 중앙값이며, 단위는 **1,000건 batch + 커밋의 ms**다.
+
+```text
+INSERT
+인덱스 없음: 50.7905ms
+인덱스 있음: 51.7038ms
+중앙값 차이: +0.9133ms
+
+상태 UPDATE
+인덱스 없음: 176.0352ms
+인덱스 있음: 216.3117ms
+중앙값 차이: +40.2765ms
+```
+
+INSERT의 인덱스 있는 조건에는 120.0087ms 측정값도 포함되어 변동이 있었다. 중앙값만으로 원자료의 변동을 숨기지 않도록 [전체 반복 CSV](evidence/kan-130/maintenance-run/maintenance/trials.csv)를 보존했다.
+
+UPDATE 시간 증가는 상태 컬럼이 포함된 새 인덱스의 유지 비용이 증가하는 방향과 맞지만, 측정된 차이를 순수 인덱스 비용으로 확정하지 않는다. 캐시·페이지 배치·백그라운드 I/O 등도 영향을 줄 수 있다.
+
+검증한 결과:
+
+- INSERT 대상 1,000건이 RESERVED로 저장됨
+- UPDATE 대상 1,000건이 CANCELLED이며 취소 사유·시각과 Generated Column 값이 기대대로 반영됨
+- 두 복제 테이블의 최종 행 수와 상태 분포 일치
+- 원본 예약 테이블 100,000건 유지
+
+업무 Service, 슬롯 인원 복구, HTTP, 동시 잠금 경합을 포함하는 쓰기 부하 테스트는 아니다. 이 batch 시간을 실제 예약 생성·취소 요청의 응답 시간으로 해석하지 않는다.
+
+## 8. 개선 후 증거 보존
+
+### 최초 인덱스 적용 후 조회 비교
+
+원본 폴더:
+
+```text
+build/reports/reservation-list-index/run-1793979732215-094b94a0-45ac-4697-914c-5fefda7c9c24/
+```
+
+결과 39개와 테스트 XML 1개를 `evidence/kan-130/after/`에 보존했고 원본·보존본 SHA256 일치를 확인했다.
+
+- [해시 목록](evidence/kan-130/after/SHA256SUMS.txt)
+- [V4 적용 이력](evidence/kan-130/after/flyway-history.txt)
+- [회원별 목록 계획](evidence/kan-130/after/user-only-content-analyze-1.txt)
+- [회원·RESERVED 목록 계획](evidence/kan-130/after/user-reserved-content-analyze-1.txt)
+- [테스트 XML](evidence/kan-130/after/test-results.xml)
+
+### 유지 비용 측정 실행
+
+원본 폴더:
+
+```text
+build/reports/reservation-list-index/run-1793981676370-03768366-55ca-4ca5-ad13-558bc2bc1915/
+```
+
+중첩 `maintenance/`를 포함한 결과 46개와 테스트 XML 1개, 총 **47개 파일**을 `evidence/kan-130/maintenance-run/`에 보존했다. 원본·보존본 SHA256 일치를 확인하고 해시 목록을 별도로 추가했다. 기존 `before/`와 `after/`는 덮어쓰지 않았다.
+
+- [해시 목록](evidence/kan-130/maintenance-run/SHA256SUMS.txt)
+- [초기 인덱스 크기](evidence/kan-130/maintenance-run/maintenance/sizes-at-100000-rows.txt)
+- [쓰기 후 크기](evidence/kan-130/maintenance-run/maintenance/sizes-after-writes.txt)
+- [쓰기 측정 전체 CSV](evidence/kan-130/maintenance-run/maintenance/trials.csv)
+- [중앙값 요약](evidence/kan-130/maintenance-run/maintenance/summary.txt)
+- [측정 방법과 한계](evidence/kan-130/maintenance-run/maintenance/method.txt)
+- [테스트 XML](evidence/kan-130/maintenance-run/test-results.xml)
+
+## 9. 현재 판단과 남은 검증
+
+이번 실험 조건에서는 목록의 정렬·조회 행 수와 상태 조건 count에 개선이 확인됐다. 추가 저장 공간과 상태 UPDATE 비용도 관찰됐다. **현재 변경에는 후보 인덱스를 유지하고 기존 테스트 회귀 검증과 PR 검토를 진행**한다.
+
+이는 운영 환경의 읽기·쓰기 비율이나 허용 지연을 확정한 최종 운영 검증이 아니다. 이번 단일 스레드 합성 실험으로 운영 p95, 처리량, 동시 예약·취소 성능을 보장하지 않는다. 부하 테스트에서는 실제 요청 비율과 데이터 편중도 별도로 확인한다.
+
+진행 상태:
 
 - [x] KAN-126 fetch join 반영 코드에서 시작
 - [x] 실제 MySQL·Flyway 스키마의 측정 테스트 작성
 - [x] 합성 예약 10만 건의 데이터 분포·인덱스·SQL 기록
 - [x] 회원 조건 2종 × 목록·count 각각 5회 측정
 - [x] 개선 전 자료·테스트 XML·해시 보존
-- [ ] 인덱스 후보 선택과 적용 이유 기록
-- [ ] 동일 조건의 개선 후 측정
-- [ ] 조회 결과·기존 테스트 회귀 확인
-- [ ] 쓰기·저장 공간 비용과 채택 여부 판단
+- [x] 인덱스 후보 선택과 엔티티·V4 반영
+- [x] 동일 조건의 개선 후 측정
+- [x] 측정 테스트의 응답·소유자·정렬·페이지 검증 통과
+- [x] 인덱스 크기·쓰기 비용 측정과 근거 기록
+- [x] 개선 후·유지 비용 측정의 증거 보존
+- [ ] 관련 기존 예약 테스트 전체 회귀 확인
+- [ ] FlywayMigrationIntegrationTest 결과 확인
+- [ ] PR CI·리뷰 및 최종 채택 확인
 
 ```text
-후보 인덱스: 미정
-적용 파일·migration: 없음
-개선 후 조회 행 수·정렬·시간: 미측정
-최종 채택 여부: 미정
+후보 인덱스: idx_reservations_user_status_id (user_id, reservation_status, id)
+적용: Reservation.java의 @Index, V4__add_reservation_user_status_id_index.sql
+계획: 두 목록 Sort 제거, 예약 인덱스 조회량 500 → 10
+현재 판단: 후보 유지, 기존 테스트·PR 검증 진행
+운영 부하 검증: 후속 작업
 ```
 
 실행 명령:
@@ -243,5 +383,13 @@ build/reports/reservation-list-index/run-1793976577515-de982905-b659-41fd-aa15-9
 ```bash
 ./gradlew test --tests "*ReservationListIndexIntegrationTest" --rerun-tasks
 ```
+
+다음 회귀 검증 명령:
+
+```bash
+./gradlew test --tests "*Reservation*" --tests "*FlywayMigrationIntegrationTest" --rerun-tasks
+```
+
+위 회귀 명령의 결과는 아직 확인하지 않았다. Hibernate validate만으로 인덱스 정의까지 검증되는 것은 아니므로, 인덱스 이름·컬럼 순서는 엔티티·V4·실제 인덱스 자료도 함께 확인한다.
 
 테스트는 사용자가 실행했고, 에이전트는 결과 XML·실행 계획을 읽어 확인했다. 문서 작성 과정에서 DB 쿼리·빌드·테스트를 실행하지 않았으며 프로덕션 코드를 변경하지 않았다.

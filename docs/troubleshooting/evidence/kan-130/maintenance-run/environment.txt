@@ -1,0 +1,16 @@
+issue=KAN-130
+users=200
+reservations=100000
+reservationsPerUser=500
+slots=500
+days=10
+statuses=[RESERVED, COMPLETED, CANCELLED, NO_SHOW]
+statusDistribution=25% each per user
+targetUserId=101
+page=0
+size=10
+sort=status DESC,id DESC
+repetitions=5
+cacheMode=warm; one EXPLAIN ANALYZE warmup before each query's repetitions
+scope=synthetic SQL/index experiment; not production distribution or HTTP load test
+[{mysqlVersion=8.4.11, databaseName=test, isolationLevel=REPEATABLE-READ, optimizerSwitch=index_merge=on,index_merge_union=on,index_merge_sort_union=on,index_merge_intersection=on,engine_condition_pushdown=on,index_condition_pushdown=on,mrr=on,mrr_cost_based=on,block_nested_loop=on,batched_key_access=off,materialization=on,semijoin=on,loosescan=on,firstmatch=on,duplicateweedout=on,subquery_materialization_cost_based=on,use_index_extensions=on,condition_fanout_filter=on,derived_merge=on,use_invisible_indexes=off,skip_scan=on,hash_join=on,subquery_to_derived=off,prefer_ordering_index=on,hypergraph_optimizer=off,derived_condition_pushdown=on,hash_set_operations=on}]

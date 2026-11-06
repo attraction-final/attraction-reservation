@@ -11,8 +11,6 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

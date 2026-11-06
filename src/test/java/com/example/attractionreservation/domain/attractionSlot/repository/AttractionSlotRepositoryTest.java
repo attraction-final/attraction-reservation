@@ -253,4 +253,38 @@ class AttractionSlotRepositoryTest {
         // then
         assertThat(result).isEmpty(); // 롤러코스터는 예약 가능한 슬롯 없음, 바이킹은 요청 안 함
     }
+
+    // ===== findStartTimesByAttractionIdBetween (슬롯 자동 생성용) =====
+
+    @Test
+    @DisplayName("기간 안의 시작 시각을 취소된 슬롯까지 포함해 돌려준다")
+    void findStartTimesByAttractionIdBetween_IncludesCancelled() {
+        // given: 바이킹 슬롯은 다른 어트랙션이라 나오면 안 된다
+        attractionSlotRepository.saveAndFlush(AttractionSlot.create(viking, DAY.withHour(14), 10));
+
+        // when: DAY 0시 ~ 다음 날 0시 (다음 날 0시 슬롯은 제외)
+        List<LocalDateTime> result = attractionSlotRepository.findStartTimesByAttractionIdBetween(
+                rollerCoaster.getId(), DAY, DAY.plusDays(1));
+
+        // then: 11:00(OPEN), 13:00(CANCELLED)
+        assertThat(result).containsExactlyInAnyOrder(DAY.withHour(11), DAY.withHour(13));
+    }
+
+    // ===== AttractionRepository.findAllActiveIds (슬롯 자동 생성 대상) =====
+
+    @Test
+    @DisplayName("삭제되지 않은 어트랙션 ID만 돌려준다")
+    void findAllActiveIds_ExcludesDeleted() {
+        // given
+        viking.deleted();
+        attractionRepository.saveAndFlush(viking);
+
+        // when
+        List<Long> result = attractionRepository.findAllActiveIds();
+
+        // then: 다른 테스트 데이터가 있을 수 있어 포함 여부만 본다
+        assertThat(result)
+                .contains(rollerCoaster.getId())
+                .doesNotContain(viking.getId());
+    }
 }

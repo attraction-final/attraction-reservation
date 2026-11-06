@@ -1,19 +1,19 @@
 -- 어트랙션 Q&A 탑승 정보: 키 제한과 운영 시간
 -- 목적: Q&A 답변의 숫자를 Jev가 아니라 DB 값으로 만든다.
 -- 선행 조건: attractions 테이블에 아래 2번의 어트랙션 10개가 같은 이름으로 등록되어 있어야 한다.
--- 적용 순서: 탑승 정보 필드가 들어간 애플리케이션을 배포한 뒤 2번을 적용한다.
---            1번 컬럼 추가는 Flyway 마이그레이션 V3(KAN-128)가 배포 때 적용하므로 직접 실행하지 않는다.
---            직접 실행하면 V3가 Duplicate column name으로 실패해 배포가 롤백된다.
+-- 적용 순서: 탑승 정보 필드가 들어간 애플리케이션을 배포하기 전에 적용한다.
+--            운영은 ddl-auto=validate라 컬럼이 없으면 애플리케이션이 기동되지 않는다.
+-- MySQL DDL은 일반 트랜잭션 롤백으로 되돌릴 수 없다. 1번은 컬럼이 없는 스키마에 한 번만 적용한다.
 -- 2번은 같은 값으로 덮어쓰는 UPDATE라 여러 번 실행해도 결과가 같다.
 
--- 1. 탑승 정보 컬럼 추가 (실행하지 않는다. src/main/resources/db/migration/V3__add_attraction_ride_info_columns.sql)
+-- 1. 탑승 정보 컬럼 추가
 --    전부 NULL을 허용한다. NULL은 "제한 없음"이 아니라 "등록된 정보 없음"이다.
--- ALTER TABLE attractions
---     ADD COLUMN min_height_cm      INT  NULL,   -- 혼자 탈 수 있는 최소 키
---     ADD COLUMN max_height_cm      INT  NULL,   -- 탈 수 있는 최대 키
---     ADD COLUMN guardian_height_cm INT  NULL,   -- 이 키 이하는 보호자와 함께 타야 한다
---     ADD COLUMN open_time          TIME NULL,   -- 운영 시작 시간
---     ADD COLUMN close_time         TIME NULL    -- 운영 종료 시간
+ALTER TABLE attractions
+    ADD COLUMN min_height_cm      INT  NULL,   -- 혼자 탈 수 있는 최소 키
+    ADD COLUMN max_height_cm      INT  NULL,   -- 탈 수 있는 최대 키
+    ADD COLUMN guardian_height_cm INT  NULL,   -- 이 키 이하는 보호자와 함께 타야 한다
+    ADD COLUMN open_time          TIME NULL,   -- 운영 시작 시간
+    ADD COLUMN close_time         TIME NULL;   -- 운영 종료 시간
 
 -- 2. 어트랙션별 탑승 정보 입력
 --    id 대신 이름으로 찾는다. (DB마다 어트랙션 id가 다를 수 있음)

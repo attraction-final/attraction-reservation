@@ -34,3 +34,10 @@ payment:
   refund:
     scheduler:
       enabled: false
+
+# 테스트 DB에 슬롯이 자동으로 생기면 슬롯 개수를 세는 테스트가 깨지므로 끈다.
+attraction:
+  slot:
+    generation:
+      scheduler:
+        enabled: false

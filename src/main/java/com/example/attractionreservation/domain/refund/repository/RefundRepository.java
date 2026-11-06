@@ -92,4 +92,11 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
     """)
     long sumRefundAmountByPaymentIdAndStatus(@Param("paymentId") Long paymentId,
                                              @Param("status") RefundStatus status);
+
+
+    // 결제 → 주문 → 회원을 따라가 해당 회원에게 지정한 상태의 환불이 있는지 확인한다.
+    // 탈퇴 제한에 사용할 미완료 상태 목록은 호출하는 Service에서 전달한다.
+    // Spring Data JPA가 메서드 이름을 해석해 조회를 생성하므로 별도 @Query는 필요 없다.
+    boolean existsByPayment_Order_User_IdAndStatusIn(@Param("userId") Long userId,
+                                                     @Param("statuses") Collection<RefundStatus> statuses);
 }

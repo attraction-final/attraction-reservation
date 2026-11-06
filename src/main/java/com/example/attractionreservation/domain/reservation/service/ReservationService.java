@@ -45,10 +45,6 @@ public class ReservationService {
     @Transactional
     public CreateReservationResponse createReservation(Long userId, CreateReservationRequest request) {
 
-        /* 현재시간, 오늘날짜, 현재시각 */
-        LocalDateTime now = KstTime.now();
-        LocalDate today = now.toLocalDate();
-
         // 회원이 활성 상태인지 확인
         User user = userService.findByUserId(userId);
         if (user.getStatus() != UserStatus.ACTIVE) {
@@ -68,17 +64,20 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.TICKET_RESERVATION_NOT_ALLOWED_STATUS);
         }
 
-        // 티켓 입장 날짜
-        if (!ticket.getValidDate().equals(today)) {
-            throw new BusinessException(ErrorCode.TICKET_ENTRY_DATE_MISMATCH);
-        }
-
         // 티켓 날짜와 슬롯 날짜 검증
         AttractionSlot attractionSlot = attractionSlotService.findSlot(request.slotId());
         Attraction attraction = attractionSlotService.findAttractionByIdForUpdate(
                 attractionSlot.getAttraction().getId()
         );
 
+        /* 현재시간, 오늘날짜, 현재시각 */
+        LocalDateTime now = KstTime.now();
+        LocalDate today = now.toLocalDate();
+
+        // 티켓 입장 날짜
+        if (!ticket.getValidDate().equals(today)) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_DATE_MISMATCH);
+        }
 
         /* 슬롯 시작, 종료 시간 */
         LocalDateTime slotStartsAt = attractionSlot.getStartsAt();

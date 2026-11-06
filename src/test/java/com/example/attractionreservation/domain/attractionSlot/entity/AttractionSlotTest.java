@@ -84,6 +84,28 @@ public class AttractionSlotTest {
     }
 
     @Test
+    @DisplayName("잔여 정원이 있는 수동 마감 슬롯은 매진과 구분되는 예약 불가 사유를 반환한다")
+    void unavailableReason_manuallyClosedWithRemainingCapacity() {
+        // given
+        AttractionSlot slot = createSlot(10, 5, SlotStatus.OPEN);
+        slot.changeStatus(SlotStatus.CLOSED);
+
+        // when
+        UnavailableReason reason =
+                slot.findUnavailableReason(true, DAY.atTime(13, 0));
+
+        // then
+        assertThat(slot.getRemainingCount()).isEqualTo(5);
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.CLOSED);
+        assertThat(slot.isAutoClosed()).isFalse();
+        assertThat(reason)
+                .isNotNull()
+                .isNotEqualTo(UnavailableReason.FULL)
+                .extracting(UnavailableReason::name)
+                .isEqualTo("MANUALLY_CLOSED");
+    }
+
+    @Test
     @DisplayName("종료 판단: 종료 시각과 같거나 지나면 종료")
     void isEnded() {
         AttractionSlot slot = createSlot(20, 0, SlotStatus.OPEN);

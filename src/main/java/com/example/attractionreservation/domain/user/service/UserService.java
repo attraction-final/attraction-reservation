@@ -221,6 +221,7 @@ public class UserService {
 
         return false;
     }
+
     // 예약에서 사용하는 회원 조회
     public User findByUserId(Long userId) {
         return userRepository.findByIdForUpdate(userId)

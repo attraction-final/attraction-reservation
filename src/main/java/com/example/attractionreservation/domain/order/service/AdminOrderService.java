@@ -94,7 +94,7 @@ public class AdminOrderService {
         // 트랜잭션이 확정된 경우에만 완료 로그를 기록한다.
         AfterCommit.run(() -> log.info(
                 "event=ADMIN_ORDER_CREATED "
-                        + "adminId={} userId={} orderId={} totalAmount={} status={}",
+                        + "userId={} targetUserId={} orderId={} totalAmount={} status={}",
                 adminId,
                 request.userId(),
                 response.orderId(),
@@ -124,7 +124,7 @@ public class AdminOrderService {
 
         AfterCommit.run(() -> log.info(
                 "event=ADMIN_ORDER_CANCELLED "
-                        + "adminId={} userId={} orderId={} status={}",
+                        + "userId={} targetUserId={} orderId={} status={}",
                 adminId,
                 targetUserId,
                 response.orderId(),

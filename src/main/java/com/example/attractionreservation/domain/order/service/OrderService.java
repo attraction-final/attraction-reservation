@@ -246,7 +246,7 @@ public class OrderService {
 
                 log.debug(
                         "event=ORDER_AUTO_CANCEL_REJECTED "
-                                + "userId={} orderId={} errorCode={}",
+                                + "targetUserId={} orderId={} errorCode={}",
                         userId,
                         orderId,
                         errorCode.name()
@@ -279,7 +279,7 @@ public class OrderService {
         if (firstServerFailure != null) {
             log.error(
                     "event=ORDER_AUTO_CANCEL_FAILED "
-                            + "userId={} orderId={} errorCode={}",
+                            + "targetUserId={} orderId={} errorCode={}",
                     firstFailedUserId,
                     firstFailedOrderId,
                     firstServerFailure.getErrorCode().name(),

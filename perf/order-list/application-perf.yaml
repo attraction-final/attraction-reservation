@@ -47,3 +47,7 @@ ticket:
   expiration:
     scheduler:
       fixed-delay: 24h
+management:
+  server:
+    address: 127.0.0.1
+    port: 18087

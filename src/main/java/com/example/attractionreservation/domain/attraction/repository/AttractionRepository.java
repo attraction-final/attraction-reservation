@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 // JpaRepository: 기본 CRUD + 이름으로 만드는 쿼리(Derived Query)
@@ -31,4 +32,7 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long>, A
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId")
     Optional<Attraction> findByIdForUpdate(@Param("attractionId") Long attractionId);
+
+    //Q&A 분류 대상 조회 선택지 순서가 jev 결과에 영향을 줄 수 있어 id 순으로 고정한다. -> 위치 편향 영향을 최대한? 안받기 위해
+    List<Attraction> findAllByDeletedAtIsNullOrderByIdAsc();
 }

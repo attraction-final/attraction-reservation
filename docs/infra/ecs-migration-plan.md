@@ -61,23 +61,42 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 | 파일 | 내용 |
 |---|---|
-| `deploy/ecs/fluent-bit/` (새 디렉터리) | Dockerfile, 설정, 파서. Fargate의 FireLens는 사용자 설정을 이미지 안 파일로만 받으므로 작은 이미지를 만든다. multiline(`^ts=`), Loki 출력, 레이블 `app`, `env` |
-| `deploy/ecs/alloy/` (새 디렉터리) | Dockerfile, `config.alloy`. 메트릭 전용. 대상 `localhost:8081`, `instance` 레이블은 ECS 메타데이터(`ECS_CONTAINER_METADATA_URI_V4`)의 task ID. 주입 방식은 구현할 때 검증한다 |
-| `deploy/ecs/api-task-definition.json` (새 파일) | arm64, 크기 가안 1 vCPU / 2GB, `stopTimeout: 30`, `secrets` 10개, 앱 컨테이너 메모리 상한, 포트 8080·8081 |
-| `deploy/ecs/worker-task-definition.json` (새 파일) | api와 같고 프로필만 `prod`, 컨테이너 헬스체크(`/actuator/health/liveness`). 이미지에 확인 도구(curl 등)가 있는지 점검 |
+| `deploy/ecs/fluent-bit/` | `aws-for-fluent-bit:3.5.4` + `extra.conf`, `parsers.conf`. Fargate의 FireLens는 사용자 설정을 이미지 안 파일로만 받는다. `app-firelens-*` 태그(app 컨테이너)만 Loki로 보내고, multiline(`^ts=`)으로 스택 트레이스를 묶고, FireLens가 붙이는 컨테이너 정보를 지워 logfmt 한 줄만 보낸다. 레이블 `app`, `env`, `service`(`api`·`worker`) |
+| `deploy/ecs/alloy/` | `grafana/alloy:v1.21.3` + `config.alloy`. 메트릭 전용. 대상 `localhost:8081`. `instance` 레이블은 `remote.http`로 `$ECS_CONTAINER_METADATA_URI_V4/task`를 읽어 TaskARN 마지막 부분(task ID)을 쓴다. `service`(`api`·`worker`)도 붙인다 |
+| `deploy/ecs/api-task-definition.json` | arm64, 1 vCPU / 2GB(가안), 프로필 `prod,api`, 포트 8080·8081 |
+| `deploy/ecs/worker-task-definition.json` | api와 같고 프로필 `prod`, 포트 없음, 컨테이너 헬스체크 `curl -fs localhost:8081/actuator/health/liveness` (앱 이미지에 curl 있음) |
 
-- task 크기는 사이드카 메모리까지 합쳐 정한다. JVM은 `MaxRAMPercentage=75`이므로 앱 컨테이너에 메모리 상한을 따로 둔다.
+컨테이너 구성 (두 task definition 공통)
+
+| 컨테이너 | 메모리 상한 | essential | 비고 |
+|---|---|---|---|
+| `app` | 1400MB | O | `stopTimeout: 30`, `secrets` 10개(`env/*`), 로그 드라이버 `awsfirelens`, `log-router`가 뜬 뒤 시작 |
+| `log-router` | 128MB | O | 멈추면 앱 로그가 사라지므로 task를 함께 내린다. 종료는 app보다 늦다(의존 관계 역순) |
+| `alloy` | 256MB | X | 메트릭이 끊겨도 서비스는 유지한다. 6단계 알림(`up` 없음)으로 감지 |
+
+- 사이드카 자신의 로그는 CloudWatch Logs `/ecs/attraction-reservation`으로 보낸다. 로그 경로(Fluent Bit)가 고장 나면 Loki로는 원인을 볼 수 없기 때문이다. 앱 로그는 보내지 않는다.
 - stdout에는 logfmt만 나가야 한다는 규칙은 그대로 적용된다(`JAVA_TOOL_OPTIONS` 미사용 유지).
+- 환경마다 다른 값은 자리 표시자로 두고 5단계 CD가 채워 등록한다.
 
-검증
-- [ ] 로컬에서 사이드카 이미지 빌드 성공
-- [ ] Fluent Bit 설정으로 스택 트레이스가 한 로그로 묶이는지 확인
+| 자리 표시자 | 값 |
+|---|---|
+| `<APP_IMAGE>`, `<FLUENT_BIT_IMAGE>`, `<ALLOY_IMAGE>` | ECR 이미지 주소:태그 |
+| `<EXECUTION_ROLE_ARN>`, `<TASK_ROLE_ARN>` | 3단계에서 만드는 역할 |
+| `<SSM_PARAMETER_ARN_PREFIX>` | `arn:aws:ssm:<리전>:<계정>:parameter/attraction-reservation/prod` |
+| `<LOKI_HOST>`, `<LOKI_PORT>` | SSM `LOKI_URL`에서 나눈 값 (Fluent Bit Loki 출력은 URL이 아니라 host·port를 받는다) |
+| `<AWS_REGION>` | 사이드카 로그 그룹 리전 |
+
+검증 (2026-11-07 완료)
+- [x] 사이드카 이미지 빌드 성공 (로컬, `linux/arm64`)
+- [x] task definition 2개가 ECS `RegisterTaskDefinition` 입력 스키마에 맞음 (botocore 검증, 등록은 하지 않음)
+- [x] Fluent Bit: fluentd 로그 드라이버(FireLens와 같은 경로) → 로컬 Loki에서 스택 트레이스가 한 건으로 묶이고, app 외 태그는 보내지지 않고, 줄이 logfmt 원문 그대로임
+- [x] Alloy: 가짜 메타데이터·actuator로 실행 → Prometheus에 `instance=<task ID>`, `app`, `env` 레이블로 수집됨
 
 ### 3단계: AWS 리소스 생성
 
-1. ECS 클러스터 `attraction-reservation` (Fargate)
+1. ECS 클러스터 `attraction-reservation` (Fargate), 사이드카 로그 그룹 `/ecs/attraction-reservation` (보존 7일)
 2. IAM
-   - Task 실행 역할: ECR pull, SSM `env/*` 읽기와 KMS 복호화
+   - Task 실행 역할: ECR pull, SSM `env/*`·`PROMETHEUS_URL` 읽기와 KMS 복호화, 사이드카 로그용 `logs:CreateLogStream`·`logs:PutLogEvents`
    - Task 역할: ECS Exec용 `ssmmessages:*`
 3. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 8081 readiness, 등록 해제 지연 60초
 4. task SG: 기존 app SG 재사용 (RDS 3306, Redis 6379, Loki 3100, Prometheus 9090, ALB → 8080·8081 규칙 유지)

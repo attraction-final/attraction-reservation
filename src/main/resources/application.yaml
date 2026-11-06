@@ -36,6 +36,16 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  # Jev 질문 분류. api-key는 여기 적지 않고 환경변수 SPRING_AI_TYPESAFE_APIKEY로만 주입한다.
+  # 키가 없으면 앱은 뜨고 Q&A만 503으로 응답한다. 값을 비우거나 ${...}로 적으면 기동에 실패한다.
+  ai:
+    typesafe:
+      model: "jev-1.13.0"
+      timeout: 2s
+      retry:
+        max-retries: 1
+        total-timeout: 5s
+
 # 로그 한 줄을 logfmt로 출력한다. 규칙은 docs/logging/logging.md 참고
 # 모든 프로필에서 같은 패턴을 쓴다.
 logging:

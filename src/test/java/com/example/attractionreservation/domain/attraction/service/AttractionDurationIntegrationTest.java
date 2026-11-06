@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.attraction.service;
 
 import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
+import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
@@ -9,12 +10,17 @@ import com.example.attractionreservation.domain.reservation.service.ReservationU
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -38,6 +44,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
@@ -118,12 +125,7 @@ class AttractionDurationIntegrationTest {
                 null, "함께 변경 요청한 설명", null, 20, null);
 
         // when
-        Throwable failure;
-        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
-            time.when(KstTime::now).thenReturn(NOW);
-            failure = catchThrowable(() -> attractionService.updateAttraction(
-                    ADMIN_ID, fixture.attractionId(), request));
-        }
+        Throwable failure = catchThrowable(() -> updateAtFixedTime(request));
 
         // then
         // 서비스 트랜잭션이 끝난 뒤 새 트랜잭션에서 조회해 응답이 아닌 실제 저장 결과를 비교한다.
@@ -131,9 +133,117 @@ class AttractionDurationIntegrationTest {
         assertSoftly(softly -> {
             softly.assertThat(failure).as("운영 예정 슬롯이 있으면 소요 시간 변경 거부")
                     .isInstanceOf(BusinessException.class);
+            if (failure instanceof BusinessException exception) {
+                softly.assertThat(exception.getErrorCode())
+                        .isEqualTo(ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED);
+            }
             softly.assertThat(after).as("소요 시간·함께 요청한 설명·기존 슬롯 모두 변경되지 않음")
                     .isEqualTo(before);
         });
+    }
+
+    @ParameterizedTest(name = "미래 슬롯 상태: {0}")
+    @EnumSource(value = SlotStatus.class, names = {"CLOSED", "SUSPENDED"})
+    @DisplayName("미래 슬롯이 수동 마감이나 운영 중단이어도 취소된 슬롯이 아니면 소요 시간 변경을 거부한다")
+    void updateAttraction_futureClosedOrSuspendedSlot_rejectsDurationChange(SlotStatus status) {
+        // given
+        transactionTemplate.executeWithoutResult(transaction ->
+                entityManager.find(AttractionSlot.class, fixture.slotId()).changeStatus(status));
+        State before = readState();
+        UpdateAttractionRequest request = new UpdateAttractionRequest(null, null, null, 20, null);
+
+        // when & then
+        assertThatThrownBy(() -> updateAtFixedTime(request))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED));
+        assertThat(readState()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("이미 시작했지만 종료되지 않은 슬롯이 있으면 소요 시간 변경을 거부한다")
+    void updateAttraction_ongoingSlot_rejectsDurationChange() {
+        // given
+        // 09:55~10:05 슬롯이므로 기준 시각 10:00에는 진행 중이다.
+        moveSlotTo(NOW.minusMinutes(5));
+        State before = readState();
+        UpdateAttractionRequest request = new UpdateAttractionRequest(null, null, null, 20, null);
+
+        // when & then
+        assertThatThrownBy(() -> updateAtFixedTime(request))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED));
+        assertThat(readState()).isEqualTo(before);
+    }
+
+    @ParameterizedTest(name = "슬롯 시작: 현재 시각 대비 {0}분")
+    @ValueSource(ints = {-10, -11})
+    @DisplayName("슬롯 종료 정각이거나 이미 종료된 슬롯만 있으면 소요 시간 변경을 허용하고 기존 슬롯은 유지한다")
+    void updateAttraction_slotEndedAtOrBeforeNow_allowsDurationChange(int minutesFromNow) {
+        // given
+        moveSlotTo(NOW.plusMinutes(minutesFromNow));
+        State before = readState();
+        UpdateAttractionRequest request = new UpdateAttractionRequest(null, "변경 설명", null, 20, null);
+
+        // when
+        SearchAttractionResponse response = updateAtFixedTime(request);
+
+        // then
+        assertThat(response.durationMinutes()).isEqualTo(20);
+        assertThat(readState()).isEqualTo(new State(20, "변경 설명",
+                before.startsAt(), before.endsAt(), before.reservedCount(), before.status()));
+    }
+
+    @Test
+    @DisplayName("미래 슬롯이 취소 상태이면 소요 시간 변경을 허용하고 취소된 슬롯의 시간은 유지한다")
+    void updateAttraction_onlyCancelledFutureSlot_allowsDurationChange() {
+        // given
+        transactionTemplate.executeWithoutResult(transaction ->
+                entityManager.find(AttractionSlot.class, fixture.slotId()).cancel());
+        State before = readState();
+        UpdateAttractionRequest request = new UpdateAttractionRequest(null, "변경 설명", null, 20, null);
+
+        // when
+        SearchAttractionResponse response = updateAtFixedTime(request);
+
+        // then
+        assertThat(response.durationMinutes()).isEqualTo(20);
+        assertThat(readState()).isEqualTo(new State(20, "변경 설명",
+                before.startsAt(), before.endsAt(), before.reservedCount(), SlotStatus.CANCELLED));
+    }
+
+    @ParameterizedTest(name = "요청한 소요 시간: {0}")
+    @NullSource
+    @ValueSource(ints = {10})
+    @DisplayName("미래 슬롯이 있어도 소요 시간을 생략하거나 같은 값으로 요청하면 설명 수정을 허용한다")
+    void updateAttraction_durationOmittedOrUnchanged_allowsDescriptionChange(Integer durationMinutes) {
+        // given
+        State before = readState();
+        UpdateAttractionRequest request = new UpdateAttractionRequest(
+                null, "변경 설명", null, durationMinutes, null);
+
+        // when
+        SearchAttractionResponse response = updateAtFixedTime(request);
+
+        // then
+        assertThat(response.durationMinutes()).isEqualTo(10);
+        assertThat(response.description()).isEqualTo("변경 설명");
+        assertThat(readState()).isEqualTo(new State(10, "변경 설명",
+                before.startsAt(), before.endsAt(), before.reservedCount(), before.status()));
+    }
+
+    private SearchAttractionResponse updateAtFixedTime(UpdateAttractionRequest request) {
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+            return attractionService.updateAttraction(ADMIN_ID, fixture.attractionId(), request);
+        }
+    }
+
+    // 경계값 fixture 구성용이다. 실제 관리자 슬롯 시각 수정 Service를 호출하는 테스트는 아니다.
+    private void moveSlotTo(LocalDateTime startsAt) {
+        transactionTemplate.executeWithoutResult(transaction ->
+                entityManager.find(AttractionSlot.class, fixture.slotId()).changeTime(startsAt));
     }
 
     private State readState() {

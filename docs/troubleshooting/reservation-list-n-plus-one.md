@@ -2,16 +2,16 @@
 
 > **KAN-126 · 내 예약 목록의 연관 엔티티 조회 비용 측정 및 개선**
 >
-> 현재 단계: **개선 전 재현과 지표 보존 완료. 프로덕션 코드 개선·개선 후 측정은 아직 수행하지 않음.**
+> 현재 단계: **fetch join 적용 후 동일 조건 재측정 통과. 추가 필터·페이지 회귀 검증은 남아 있음.**
 >
-> 실제 Service의 DTO 변환까지 실행한 결과, 10건 조회는 SELECT 22개, 50건 조회는 SELECT 102개였다.
+> 실제 Service의 DTO 변환까지 실행한 결과, SELECT 수는 10건 조회에서 22개 → 2개, 50건 조회에서 102개 → 2개로 줄었다.
 > 이 문서는 이후 개선 구현, 동일 조건의 재측정, 회귀 결과를 이어서 업데이트한다.
 
 ## 1. 문제와 작업 범위
 
 내 예약 목록은 예약 ID와 상태뿐 아니라 슬롯 시각과 어트랙션 이름도 반환한다.
 
-현재 조회 흐름:
+개선 전 조회 흐름:
 
 ```text
 ReservationService.findReservationAll()
@@ -22,7 +22,7 @@ ReservationService.findReservationAll()
 → 각 슬롯의 attraction.name 접근
 ```
 
-목록 쿼리에서 연관 엔티티를 함께 로딩하지 않으므로, DTO 변환 단계에 추가 SELECT가 발생하는지 실제로 측정했다. 단순히 Querydsl을 사용하거나 일반 join을 작성하는 것만으로 연관 엔티티가 함께 초기화되는 것은 아니다.
+개선 전 목록 쿼리는 연관 엔티티를 함께 로딩하지 않아, DTO 변환 단계에 추가 SELECT가 발생하는지 실제로 측정했다. 단순히 Querydsl을 사용하거나 일반 join을 작성하는 것만으로 연관 엔티티가 함께 초기화되는 것은 아니다.
 
 관련 코드:
 
@@ -156,34 +156,84 @@ SHA256
 
 보존본에는 최초 실패 내용과 Standard output이 포함된다. 개선 후 결과로 덮어쓰지 않는다. 이후 측정 결과는 별도 파일로 저장하고 아래 내용을 업데이트한다.
 
-## 6. 다음 개선과 재측정 계획
+## 6. 개선 구현과 재측정 결과
 
 - [x] 실제 MySQL과 Service의 DTO 변환까지 포함한 재현 테스트 작성
 - [x] 서로 다른 연관 엔티티를 사용하는 데이터로 SQL 증가 확인
 - [x] 개선 전 XML·지표 보존
-- [ ] 목록 쿼리에 필요한 슬롯·어트랙션 로딩 전략 검토 및 적용
-- [ ] 기존 count 쿼리와 API 응답 계약 유지 확인
-- [ ] 동일 데이터·페이지 크기·정렬·캐시 조건으로 재측정
-- [ ] 추가 연관 조회가 건수에 비례하지 않는지 확인
+- [x] 목록 쿼리에 필요한 슬롯·어트랙션 fetch join 적용
+- [x] 기존 count 쿼리 유지 및 현재 fixture의 API 응답 검증 통과
+- [x] 동일 데이터·페이지 크기·정렬·캐시 조건으로 재측정
+- [x] 추가 연관 조회가 건수에 비례하지 않는지 확인
 - [ ] 상태·날짜 필터 및 다른 페이지를 포함한 회귀 검증
 - [ ] 관련 기존 테스트 실행 결과 기록
 
-후보는 필요한 to-one 관계의 fetch join 또는 DTO projection이다. 아직 방식을 확정하거나 프로덕션 코드를 수정하지 않았다. 관계를 무조건 모두 fetch하거나 count 쿼리에 fetch join을 일괄 적용하지 않는다.
+### 선택한 방식과 변경 범위
 
-### 개선 구현 기록 — 추후 업데이트
+사용자가 `ReservationCustomRepositoryImpl.findReservationAllByCondition()`의 content 쿼리에 다음 두 fetch join을 적용했다.
 
-```text
-선택한 방식: 미정
-변경 파일·메서드: 미정
-선택 이유·대안 비교: 미기록
+```java
+.selectFrom(reservation)
+.join(reservation.attractionSlot, attractionSlot)
+.fetchJoin()
+.join(attractionSlot.attraction, attraction)
+.fetchJoin()
 ```
 
-### 개선 후 측정 — 아직 실행하지 않음
+각 `.fetchJoin()`은 바로 앞의 join에 적용한다. 슬롯과 어트랙션을 목록 조회 시 함께 로딩하여 DTO 변환 중 추가 SELECT가 필요하지 않도록 했다.
+
+기존 Service의 엔티티 → DTO 변환을 유지하면서 필요한 to-one 관계만 함께 로딩하는 방식을 선택했다. DTO projection도 대안이지만 이번 작업에는 적용하지 않았다. 컬렉션 fetch join은 추가하지 않았다.
+
+소유자·상태·날짜 조건, 정렬, offset·limit 및 count 쿼리는 기존 코드 그대로 유지했다. 관리자 목록과 상세 조회는 이번 수정 범위에 포함하지 않았다.
+
+### 개선 후 실제 결과
+
+테스트 시작 시각은 **2026-11-06 19:55:47 KST**이며, XML timestamp는 `2026-11-06T10:55:47.340Z`다.
 
 ```text
-10건: statementCount / queryExecutionCount / entityFetchCount / durationMs 미측정
-50건: statementCount / queryExecutionCount / entityFetchCount / durationMs 미측정
-응답·필터·정렬·페이지 회귀 결과: 미검증
+tests=1, failures=0, errors=0, skipped=0
+
+10건 조회:
+statementCount=2
+queryExecutionCount=2
+entityFetchCount=0
+durationMs=300.041
+
+50건 조회:
+statementCount=2
+queryExecutionCount=2
+entityFetchCount=0
+durationMs=39.235
+```
+
+원본 측정 로그:
+
+```text
+event=RESERVATION_LIST_QUERY_MEASURED pageSize=10 count=10 totalElements=50 statementCount=2 queryExecutionCount=2 entityFetchCount=0 durationMs=300.041
+event=RESERVATION_LIST_QUERY_MEASURED pageSize=50 count=50 totalElements=50 statementCount=2 queryExecutionCount=2 entityFetchCount=0 durationMs=39.235
+```
+
+### 전후 비교와 확인 범위
+
+- 10건 조회: SELECT **22개 → 2개**, 추가 엔티티 fetch **20개 → 0개**
+- 50건 조회: SELECT **102개 → 2개**, 추가 엔티티 fetch **100개 → 0개**
+- 두 경우 모두 목록 1개 + count 1개로, 조회 건수에 비례하던 추가 SELECT를 제거했다.
+- 현재 fixture의 응답 필드, 예약 ID 순서, 타인 예약 제외, 전체 건수, 페이지 정보 검증도 통과했다.
+
+이번 결과는 RESERVED·지정 날짜·첫 페이지에서 크기 10/50을 비교한 것이다. 다른 상태·날짜 조합, 빈 결과, 두 번째 이후 페이지와 관련 기존 테스트 전체의 통과까지 확인한 것은 아니다. 이 항목들은 후속 회귀 검증으로 남긴다.
+
+단일 실행 시간은 참고 자료로만 보존한다. 워밍업과 실행 순서를 통제하지 않았으므로 `450.097 → 300.041ms`, `414.030 → 39.235ms`를 서비스 응답 속도 개선율로 해석하지 않는다.
+
+### 개선 후 증거 보존
+
+- [개선 후 원본 XML 보존본](evidence/kan-126/after-reservation-list.xml)
+- 원래 경로: `build/test-results/test/TEST-com.example.attractionreservation.domain.reservation.service.ReservationListQueryIntegrationTest.xml`
+- 복사 시 원본과 보존본의 SHA256 일치 확인
+- 개선 전 XML은 그대로 보존
+
+```text
+SHA256
+6C0DA9C58BBF5701340A7F64DA069693D78781CBE3C86AFDCDECC6E3DB6FDB48
 ```
 
 실행 명령:

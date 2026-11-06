@@ -159,6 +159,44 @@ public class CandidateSelectorTest {
     }
 
     @Test
+    @DisplayName("잔여 정원이 있는 수동 마감 슬롯만 있으면 매진과 구분되는 사유로 추천에서 제외한다")
+    void select_ManuallyClosedWithRemainingCapacity_ExcludedWithManualClosureReason() {
+        // given
+        AttractionView attraction = operating(1L, "A", 5);
+        SlotView manuallyClosedSlot = slot(1L, "14:00", "14:10", SlotState.CLOSED, 10, 5);
+
+        // when
+        CandidateSelection selection = selectOne(attraction, List.of(manuallyClosedSlot), NOW);
+
+        // then
+        assertEquals(5, manuallyClosedSlot.remainingCapacity());
+        // 기존 도우미에서 추천 후보가 없고 제외 항목이 한 건인지도 확인한다.
+        ExclusionReason reason = onlyReason(selection);
+        // 새 enum 추가 전에도 컴파일해 현재 SLOT_FULL 반환 문제를 재현한다.
+        assertEquals("SLOT_MANUALLY_CLOSED", reason.name());
+    }
+
+    @Test
+    @DisplayName("수동 마감 슬롯과 예약 가능한 슬롯이 함께 있으면 예약 가능한 슬롯만 추천 후보로 유지한다")
+    void select_ManuallyClosedAndOpenSlots_KeepsOnlyReservableSlot() {
+        // given
+        AttractionView attraction = operating(1L, "A", 5);
+        SlotView manuallyClosedSlot = slot(1L, "14:00", "14:10", SlotState.CLOSED, 10, 5);
+        SlotView reservableSlot = slot(2L, "15:00", "15:10", SlotState.OPEN, 10, 5);
+
+        // when
+        CandidateSelection selection = selectOne(
+                attraction, List.of(manuallyClosedSlot, reservableSlot), NOW);
+
+        // then
+        assertTrue(selection.exclusions().isEmpty());
+        assertEquals(1, selection.candidates().size());
+        CandidateAttraction candidate = selection.candidates().get(0);
+        assertEquals(attraction.attractionId(), candidate.attractionId());
+        assertEquals(List.of(new CandidateSlot(2L, at("15:00"), at("15:10"))), candidate.slots());
+    }
+
+    @Test
     @DisplayName("예약 마감(시작 30분 전)이 지난 슬롯만 있으면 RESERVATION_CLOSED")
     void select_DeadLinePassed_Excluded() {
         //given

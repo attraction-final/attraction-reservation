@@ -70,7 +70,7 @@ public class PaymentService {
         paymentRepository.save(found);
 
         String pgId = found.getPgId();
-        AfterCommit.run(() -> log.info("event=PAYMENT_CANCELLED pgId={} orderId={} userId={}", pgId, orderId, userId));
+        AfterCommit.run(() -> log.info("event=PAYMENT_CANCELLED pgId={} orderId={} targetUserId={}", pgId, orderId, userId));
     }
 
     @Transactional

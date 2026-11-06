@@ -143,7 +143,9 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
         List<Reservation> content = queryFactory
                 .selectFrom(reservation)
                 .join(reservation.attractionSlot, attractionSlot)
+                .fetchJoin()
                 .join(attractionSlot.attraction, attraction)
+                .fetchJoin()
                 .where(
                         userIdEq(userId),
                         attractionIdEq(attractionId),

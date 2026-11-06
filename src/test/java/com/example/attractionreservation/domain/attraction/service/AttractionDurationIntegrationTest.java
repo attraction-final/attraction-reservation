@@ -4,8 +4,11 @@ import com.example.attractionreservation.domain.attraction.cache.AttractionDetai
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionRequest;
 import com.example.attractionreservation.domain.attraction.dto.SearchAttractionResponse;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
+import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
+import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
 import com.example.attractionreservation.domain.reservation.service.ReservationUpcomingReservationReader;
 import com.example.attractionreservation.global.config.JpaConfig;
 import com.example.attractionreservation.global.config.QuerydslConfig;
@@ -54,7 +57,7 @@ import static org.mockito.Mockito.mockStatic;
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({JpaConfig.class, QuerydslConfig.class, AttractionService.class,
+@Import({JpaConfig.class, QuerydslConfig.class, AttractionService.class, AttractionSlotService.class,
         ReservationUpcomingReservationReader.class, AttractionDurationIntegrationTest.MySqlConfig.class})
 class AttractionDurationIntegrationTest {
 
@@ -64,6 +67,9 @@ class AttractionDurationIntegrationTest {
 
     @Autowired
     private AttractionService attractionService;
+
+    @Autowired
+    private AttractionSlotService attractionSlotService;
 
     // Redis 캐시 삭제만 제외하고 DB 검증과 수정 트랜잭션은 실제로 수행한다.
     @MockitoBean
@@ -108,8 +114,9 @@ class AttractionDurationIntegrationTest {
             return;
         }
         transactionTemplate.executeWithoutResult(transaction -> {
-            entityManager.remove(entityManager.find(AttractionSlot.class, fixture.slotId()));
-            entityManager.flush();
+            // 슬롯이 없거나 새 슬롯을 생성한 경우도 이번 어트랙션의 데이터만 정리한다.
+            entityManager.createQuery("DELETE FROM AttractionSlot s WHERE s.attraction.id = :attractionId")
+                    .setParameter("attractionId", fixture.attractionId()).executeUpdate();
             entityManager.remove(entityManager.find(Attraction.class, fixture.attractionId()));
         });
     }
@@ -231,6 +238,65 @@ class AttractionDurationIntegrationTest {
         assertThat(response.description()).isEqualTo("변경 설명");
         assertThat(readState()).isEqualTo(new State(10, "변경 설명",
                 before.startsAt(), before.endsAt(), before.reservedCount(), before.status()));
+    }
+
+    @Test
+    @DisplayName("슬롯이 하나도 없으면 소요 시간 변경을 허용한다")
+    void updateAttraction_noSlots_allowsDurationChange() {
+        // given
+        transactionTemplate.executeWithoutResult(transaction ->
+                entityManager.remove(entityManager.find(AttractionSlot.class, fixture.slotId())));
+        UpdateAttractionRequest request = new UpdateAttractionRequest(null, "변경 설명", null, 20, null);
+
+        // when
+        SearchAttractionResponse response = updateAtFixedTime(request);
+
+        // then
+        assertThat(response.durationMinutes()).isEqualTo(20);
+        transactionTemplate.executeWithoutResult(transaction -> {
+            Attraction saved = entityManager.find(Attraction.class, fixture.attractionId());
+            assertThat(saved.getDurationMinutes()).isEqualTo(20);
+            assertThat(saved.getDescription()).isEqualTo("변경 설명");
+            Long slotCount = entityManager.createQuery(
+                            "SELECT COUNT(s) FROM AttractionSlot s WHERE s.attraction.id = :attractionId", Long.class)
+                    .setParameter("attractionId", fixture.attractionId()).getSingleResult();
+            assertThat(slotCount).isZero();
+        });
+    }
+
+    @Test
+    @DisplayName("소요 시간 변경 후 실제 슬롯 등록 시 새 소요 시간을 적용하고 과거 슬롯 시간은 유지한다")
+    void createAttractionSlot_afterDurationChange_usesNewDurationAndPreservesPastSlot() {
+        // given
+        moveSlotTo(SLOT_START.minusDays(1));
+        State before = readState();
+        UpdateAttractionRequest updateRequest = new UpdateAttractionRequest(null, null, null, 20, null);
+        CreateAttractionSlotRequest createRequest = new CreateAttractionSlotRequest(SLOT_START, 10);
+
+        // when
+        CreateAttractionSlotResponse response;
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+            attractionService.updateAttraction(ADMIN_ID, fixture.attractionId(), updateRequest);
+            // 엔티티 생성 메서드만 호출하지 않고 실제 슬롯 Service의 검증·저장까지 실행한다.
+            response = attractionSlotService.createAttractionSlot(
+                    ADMIN_ID, fixture.attractionId(), createRequest);
+        }
+
+        // then
+        assertThat(response.slotId()).isNotEqualTo(fixture.slotId());
+        assertThat(response.startsAt()).isEqualTo(SLOT_START);
+        assertThat(response.endsAt()).isEqualTo(SLOT_START.plusMinutes(20));
+        assertThat(readState()).isEqualTo(new State(20, before.description(),
+                before.startsAt(), before.endsAt(), before.reservedCount(), before.status()));
+        transactionTemplate.executeWithoutResult(transaction -> {
+            AttractionSlot created = entityManager.find(AttractionSlot.class, response.slotId());
+            assertThat(created.getAttraction().getId()).isEqualTo(fixture.attractionId());
+            assertThat(created.getStartsAt()).isEqualTo(SLOT_START);
+            assertThat(created.getEndsAt()).isEqualTo(SLOT_START.plusMinutes(20));
+            assertThat(created.getReservedCount()).isZero();
+            assertThat(created.getStatus()).isEqualTo(SlotStatus.OPEN);
+        });
     }
 
     private SearchAttractionResponse updateAtFixedTime(UpdateAttractionRequest request) {

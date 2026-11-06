@@ -37,4 +37,7 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long>, A
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId")
     Optional<Attraction> findByIdForUpdate(@Param("attractionId") Long attractionId);
+
+    //Q&A 분류 대상 조회 선택지 순서가 jev 결과에 영향을 줄 수 있어 id 순으로 고정한다. -> 위치 편향 영향을 최대한? 안받기 위해
+    List<Attraction> findAllByDeletedAtIsNullOrderByIdAsc();
 }

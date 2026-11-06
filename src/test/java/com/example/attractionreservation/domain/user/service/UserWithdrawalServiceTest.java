@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.user.service;
 
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationCancelReason;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
+import com.example.attractionreservation.domain.refund.repository.RefundRepository;
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
@@ -51,6 +52,9 @@ class UserWithdrawalServiceTest {
     @Mock
     private AttractionSlotRepository attractionSlotRepository;
 
+    @Mock
+    private RefundRepository refundRepository;
+
     private UserWithdrawalService service;
 
     @BeforeEach
@@ -59,7 +63,8 @@ class UserWithdrawalServiceTest {
                 userRepository,
                 ticketRepository,
                 reservationRepository,
-                attractionSlotRepository
+                attractionSlotRepository,
+                refundRepository
         );
     }
 

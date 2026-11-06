@@ -23,16 +23,16 @@ function todayString() {
 
 // 백엔드에는 사진 정보가 없어서, 이름이 같으면 public/images 사진을 쓰고 없으면 공원 사진을 써요.
 const IMAGE_BY_NAME = {
-  'T 익스프레스': '/images/t-express.jpg',
+  '모니모 러쉬': '/images/monimo-rush.jpg',
   '롤링 엑스 트레인': '/images/rolling-x-train.jpg',
   '아마존 익스프레스': '/images/amazon-express.jpg',
   '썬더폴스': '/images/thunder-falls.jpg',
-  '사파리 월드': '/images/safari-world.jpg',
-  '슈팅 고스트': '/images/shooting-ghost.jpg',
-  '회전 디스크': '/images/disk.jpg',
-  '윈드밀': '/images/windmill.jpg',
-  '해적선 회전배': '/images/pirate-boat.jpg',
   '범퍼카': '/images/bumper-car.jpg',
+  '우주전투기': '/images/space-fighter.jpg',
+  '콜럼버스 대탐험': '/images/columbus.jpg',
+  '렛츠 트위스트': '/images/lets-twist.jpg',
+  '더블 락스핀': '/images/double-rock-spin.jpg',
+  '허리케인': '/images/hurricane.jpg', // AI 생성 이미지
 };
 const imageOf = (name) => IMAGE_BY_NAME[name] || '/images/park.jpg';
 

@@ -14,44 +14,7 @@
   },
   "schemaVersion": 39,
   "templating": {
-    "list": [
-      {
-        "name": "rds",
-        "label": "RDS",
-        "type": "custom",
-        "query": "attraction-final-db",
-        "hide": 0,
-        "current": {
-          "text": "attraction-final-db",
-          "value": "attraction-final-db"
-        },
-        "options": [
-          {
-            "text": "attraction-final-db",
-            "value": "attraction-final-db",
-            "selected": true
-          }
-        ]
-      },
-      {
-        "name": "cache",
-        "label": "ElastiCache",
-        "type": "custom",
-        "query": "attraction-final-cache-001",
-        "hide": 0,
-        "current": {
-          "text": "attraction-final-cache-001",
-          "value": "attraction-final-cache-001"
-        },
-        "options": [
-          {
-            "text": "attraction-final-cache-001",
-            "value": "attraction-final-cache-001",
-            "selected": true
-          }
-        ]
-      }
-    ]
+    "list": []
   },
   "panels": [
     {
@@ -132,7 +95,7 @@
           "metricName": "CPUUtilization",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -212,7 +175,7 @@
           "metricName": "CPUCreditBalance",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -275,7 +238,7 @@
           "metricName": "DatabaseConnections",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -338,7 +301,7 @@
           "metricName": "FreeableMemory",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -363,7 +326,7 @@
           "metricName": "SwapUsage",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -427,7 +390,7 @@
           "metricName": "ReadIOPS",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -452,7 +415,7 @@
           "metricName": "WriteIOPS",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -516,7 +479,7 @@
           "metricName": "ReadLatency",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -541,7 +504,7 @@
           "metricName": "WriteLatency",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -621,7 +584,7 @@
           "metricName": "BurstBalance",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -685,7 +648,7 @@
           "metricName": "DiskQueueDepth",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -748,7 +711,7 @@
           "metricName": "FreeStorageSpace",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Minimum",
@@ -841,7 +804,7 @@
           "metricName": "CPUUtilization",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -866,7 +829,7 @@
           "metricName": "EngineCPUUtilization",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -946,7 +909,7 @@
           "metricName": "DatabaseMemoryUsagePercentage",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1023,7 +986,7 @@
           "metricName": "CacheHits",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1048,7 +1011,7 @@
           "metricName": "CacheMisses",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1121,7 +1084,7 @@
           "metricName": "CurrConnections",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1146,7 +1109,7 @@
           "metricName": "NewConnections",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1210,7 +1173,7 @@
           "metricName": "CurrItems",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1235,7 +1198,7 @@
           "metricName": "Evictions",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1315,7 +1278,7 @@
           "metricName": "CPUCreditBalance",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1379,7 +1342,7 @@
           "metricName": "NetworkBytesIn",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1404,7 +1367,7 @@
           "metricName": "NetworkBytesOut",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1468,7 +1431,7 @@
           "metricName": "ProcessedCommands",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",

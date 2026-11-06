@@ -32,11 +32,27 @@ public record SlotGenerationPolicy(
         if (capacity < 1) {
             throw new IllegalArgumentException("capacity 는 1 이상이어야 합니다: " + capacity);
         }
-        if (firstStartTime == null || lastStartTime == null || firstStartTime.isAfter(lastStartTime)) {
-            throw new IllegalArgumentException("firstStartTime 은 lastStartTime 보다 늦을 수 없습니다.");
+
+        // ① 값이 비어 있는지 먼저 따로 확인한다. (원인이 "값 없음"인지 "순서 틀림"인지 메시지로 구분)
+        if (firstStartTime == null || lastStartTime == null) {
+            throw new IllegalArgumentException("firstStartTime 과 lastStartTime 은 반드시 설정해야 합니다.");
         }
+        if (firstStartTime.isAfter(lastStartTime)) {
+            throw new IllegalArgumentException(
+                    "firstStartTime(" + firstStartTime + ") 은 lastStartTime(" + lastStartTime + ") 보다 늦을 수 없습니다.");
+        }
+
+        // ③ 시각을 글자로 적지 않고 상수를 그대로 써서, 상수가 바뀌어도 메시지가 틀리지 않게 한다.
         if (firstStartTime.isBefore(AttractionSlot.PARK_OPEN_TIME)) {
-            throw new IllegalArgumentException("firstStartTime 은 개장 시각(10:00) 이후여야 합니다: " + firstStartTime);
+            throw new IllegalArgumentException(
+                    "firstStartTime 은 개장 시각(" + AttractionSlot.PARK_OPEN_TIME + ") 이후여야 합니다: " + firstStartTime);
+        }
+
+        // ② 폐장 시각에 시작하거나 그 뒤에 시작하는 슬롯은 탑승 시간이 1분만 돼도 폐장을 넘는다.
+        //    그대로 두면 에러 없이 슬롯이 덜 만들어지므로 서버 시작 시점에 막는다.
+        if (!lastStartTime.isBefore(AttractionSlot.PARK_CLOSE_TIME)) {
+            throw new IllegalArgumentException(
+                    "lastStartTime 은 폐장 시각(" + AttractionSlot.PARK_CLOSE_TIME + ") 보다 빨라야 합니다: " + lastStartTime);
         }
     }
 }

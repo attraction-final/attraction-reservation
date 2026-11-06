@@ -1,0 +1,34 @@
+# Grafana가 기동할 때 Prometheus, Loki, CloudWatch 데이터소스를 등록한다.
+# 로그의 traceId를 누르면 같은 traceId의 로그 전체를 조회한다. (요청 하나를 따라가는 용도)
+# provisioning 파일은 $를 환경변수로 해석하므로 Grafana 변수는 $$로 쓴다.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        - name: traceId
+          matcherRegex: "traceId=(\\w+)"
+          datasourceUid: loki
+          url: '{app="attraction-reservation"} | logfmt | traceId="$${__value.raw}"'
+
+  # RDS, ElastiCache 지표. 모니터링 인스턴스 역할(monitoring-ec2-role)로 인증한다.
+  # 컨테이너에서 인스턴스 역할을 받으려면 인스턴스의 IMDS hop limit이 2여야 한다.
+  - name: CloudWatch
+    uid: cloudwatch
+    type: cloudwatch
+    jsonData:
+      authType: default
+      defaultRegion: ap-northeast-2

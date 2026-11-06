@@ -13,6 +13,9 @@ import com.example.attractionreservation.domain.refund.repository.RefundItemRepo
 import com.example.attractionreservation.domain.refund.repository.RefundRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
+import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.AfterCommit;
@@ -20,6 +23,7 @@ import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -45,6 +49,7 @@ public class RefundService {
     private final RefundItemRepository refundItemRepository;
     private final PaymentRepository paymentRepository;
     private final TicketService ticketService;
+    private final UserRepository userRepository;
 
     /**
      * 결제 완료된 주문의 선택한 티켓을 환불 요청한다(부분 환불). PG 취소는 하지 않고 REQUESTED로 저장한다.
@@ -63,7 +68,8 @@ public class RefundService {
      *                           환불 가능 수량을 넘으면 {@code REFUND_INVALID_QUANTITY},
      *                           미사용 티켓이 아니면 {@code TICKET_NOT_REFUNDABLE}
      */
-    @Transactional
+    // 소유자 ID 사전 조회 이후 잠금을 기다려도 환불 수량은 최신 커밋 결과로 조회한다.
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createRefund(Long userId, String pgId, List<Long> ticketIds, String reason, Instant requestedAt) {
         if (ticketIds == null || ticketIds.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
@@ -90,7 +96,7 @@ public class RefundService {
      *                           입장일 당일 이후(KST)면 {@code REFUND_DEADLINE_PASSED},
      *                           환불할 미사용 티켓이 하나도 없으면 {@code REFUND_INVALID_QUANTITY}
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createFullRefund(Long userId, String pgId, String reason, Instant requestedAt) {
         Payment payment = getRefundablePayment(userId, pgId, requestedAt);
         List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
@@ -110,9 +116,10 @@ public class RefundService {
     }
 
     // 관리자 전체 환불
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createAdminFullRefund(String pgId, String reason, Instant requestedAt) {
         Payment payment = getPaymentWithLock(pgId);
+        validateRefundableOwner(payment.getOrder().getUser());
         validateRefundablePaymentStatus(payment);
 
         List<Ticket> tickets = ticketService.findUnusedTicketsForUpdate(orderItemIds(payment));
@@ -124,7 +131,7 @@ public class RefundService {
     }
 
     // 관리자 부분 환불
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long createAdminPartialRefund(String pgId, List<Long> ticketIds, String reason, Instant requestedAt) {
         if (ticketIds == null || ticketIds.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE);
@@ -136,6 +143,7 @@ public class RefundService {
         }
 
         Payment payment = getPaymentWithLock(pgId);
+        validateRefundableOwner(payment.getOrder().getUser());
         validateRefundablePaymentStatus(payment);
 
         List<Ticket> tickets = ticketService.findRefundTicketsForUpdate(orderItemIds(payment), uniqueTicketIds);
@@ -151,6 +159,9 @@ public class RefundService {
         if (!payment.getOrder().getUser().getId().equals(userId)) {
             throw new BusinessException(ErrorCode.PAYMENT_NOT_FOUND);
         }
+
+        // 본인 결제로 확인된 뒤 탈퇴 상태를 검사한다.
+        validateRefundableOwner(payment.getOrder().getUser());
 
         // 환불 가능한 결제 상태를 검사한다.
         validateRefundablePaymentStatus(payment);
@@ -208,6 +219,8 @@ public class RefundService {
     }
 
     private Payment getPaymentWithLock(String pgId) {
+        // 사용자·관리자 환불 요청 모두 회원 → 결제 → 티켓 순서로 잠금을 획득한다.
+        lockPaymentOwner(pgId);
         return paymentRepository.findWithLockByPgId(pgId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
@@ -215,6 +228,27 @@ public class RefundService {
     private void validateRefundablePaymentStatus(Payment payment) {
         if (payment.getStatus() != PaymentStatus.PAID && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
             throw new BusinessException(ErrorCode.REFUND_NOT_REFUNDABLE_PAYMENT);
+        }
+    }
+
+    // 탈퇴와 같은 결제 소유자의 회원 행을 잠가 두 작업이 동시에 진행되지 않도록 한다.
+    private void lockPaymentOwner(String pgId) {
+        // 잠금 대상을 찾기 위해 소유자 ID만 조회한다. Payment·User 엔티티는 미리 로딩하지 않는다.
+        // 이 조회는 요청자의 소유권 검증을 대신하지 않으므로 기존 환불 권한 검사는 유지한다.
+        Long userId = paymentRepository.findUserIdByPgId(pgId).orElseThrow(
+                () -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND)
+        );
+
+        // 잠금은 이 메서드 종료가 아니라 호출한 환불 요청 트랜잭션이 끝날 때 해제된다.
+        userRepository.findByIdForUpdate(userId).orElseThrow(
+                () -> new BusinessException(ErrorCode.USER_NOT_FOUND)
+        );
+    }
+
+    // 이미 잠근 결제 소유자가 탈퇴 상태인지 확인한다.
+    private void validateRefundableOwner(User user) {
+        if (user.getStatus() == UserStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.REFUND_USER_WITHDRAW);
         }
     }
 }

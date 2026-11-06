@@ -1,0 +1,17 @@
+# 애플리케이션 메트릭은 앱 인스턴스의 Alloy가 remote_write로 보낸다. (deploy/alloy/config.alloy)
+# ASG 인스턴스는 IP가 바뀌므로 여기서 직접 수집하지 않는다.
+# 여기서는 모니터링 스택 자신의 상태만 수집한다.
+# 이 파일을 바꾸면 CD(deploy-monitoring)가 Prometheus를 재시작해 반영한다.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]

@@ -16,6 +16,7 @@ import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -78,6 +79,9 @@ class RefundServiceTest {
 
     @Mock
     private TicketService ticketService;
+
+    @Mock
+    private UserRepository userRepository;
 
     @InjectMocks
     private RefundService refundService;
@@ -293,11 +297,33 @@ class RefundServiceTest {
         verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
     }
 
+    @ParameterizedTest(name = "전체 환불 여부: {0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("일반 사용자가 탈퇴한 타인의 결제를 환불 요청하면 탈퇴 상태를 노출하지 않고 없는 결제로 처리한다")
+    void createUserRefund_otherOwnerWithdrawn_returnsPaymentNotFound(boolean fullRefund) {
+        // given
+        payment.getOrder().getUser().withdraw(NOW);
+        givenPayment(payment);
+
+        // when & then
+        assertThatThrownBy(() -> {
+            if (fullRefund) {
+                refundService.createFullRefund(OTHER_USER_ID, PG_ID, "단순 변심", NOW);
+            } else {
+                refundService.createRefund(OTHER_USER_ID, PG_ID, List.of(1L), "단순 변심", NOW);
+            }
+        }).isInstanceOfSatisfying(BusinessException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_NOT_FOUND));
+
+        // 소유권 검사에서 거부되므로 티켓 조회·환불 수량 계산·환불 저장은 수행하지 않는다.
+        verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
+    }
+
     @Test
     @DisplayName("존재하지 않는 결제는 환불할 수 없다.")
     void createRefund_paymentNotFound_Fail() {
         //given
-        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.empty());
+        given(paymentRepository.findUserIdByPgId(PG_ID)).willReturn(Optional.empty());
         List<Long> ticketIds = List.of(1L);
 
         //when & then
@@ -755,7 +781,7 @@ class RefundServiceTest {
     @DisplayName("관리자 전체·부분 환불 모두 존재하지 않는 결제를 거부한다")
     void createAdminRefunds_PaymentNotFound_RejectsRequests() {
         // given
-        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.empty());
+        given(paymentRepository.findUserIdByPgId(PG_ID)).willReturn(Optional.empty());
 
         // when & then
         assertThatThrownBy(() -> refundService.createAdminFullRefund(PG_ID, "관리자 환불", NOW))
@@ -768,6 +794,10 @@ class RefundServiceTest {
     }
 
     private void givenPayment(Payment found) {
+        // 소유자 ID 조회 → 회원 잠금 → 결제 잠금의 실제 서비스 흐름에 맞춘다.
+        User owner = found.getOrder().getUser();
+        given(paymentRepository.findUserIdByPgId(PG_ID)).willReturn(Optional.of(owner.getId()));
+        given(userRepository.findByIdForUpdate(owner.getId())).willReturn(Optional.of(owner));
         given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(found));
     }
 

@@ -1,0 +1,62 @@
+# 모니터링 인스턴스에서 Prometheus, Loki, Grafana를 실행한다.
+# user-data(monitoring/user-data.sh)가 이 디렉터리를 /opt/monitoring 에 받아 실행한다.
+#
+# 앱 인스턴스의 Alloy가 로그는 Loki(3100)로, 메트릭은 Prometheus remote_write(9090)로 보낸다.
+# 두 포트는 보안 그룹에서 앱 인스턴스에만 연다.
+# Grafana는 인스턴스 안에서만 열고(127.0.0.1) SSM 포트 포워딩으로 접속한다.
+#
+# 인스턴스가 준비할 값 (.env)
+#   GRAFANA_ADMIN_PASSWORD   Parameter Store에서 읽는다.
+#
+#   docker compose up -d
+
+name: monitoring
+
+# 디스크가 차지 않게 컨테이너 로그를 순환한다.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    mem_limit: 1g
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-remote-write-receiver   # Alloy push 수신에 필수
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /data/prometheus:/prometheus
+    ports: ["9090:9090"]
+    logging: *logging
+
+  loki:
+    image: grafana/loki:3.7.9
+    restart: unless-stopped
+    mem_limit: 1g
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/config.yml:ro
+      - /data/loki:/loki
+    ports: ["3100:3100"]
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - /data/grafana:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    logging: *logging

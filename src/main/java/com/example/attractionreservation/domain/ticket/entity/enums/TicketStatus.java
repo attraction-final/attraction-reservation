@@ -4,7 +4,7 @@ public enum TicketStatus {
     UNUSED {
         @Override
         public boolean canTransitTo(TicketStatus nextStatus) {
-            return nextStatus != USED;
+            return nextStatus == IN_USE || nextStatus == REFUNDED || nextStatus == EXPIRED;
         }
     },
     IN_USE {

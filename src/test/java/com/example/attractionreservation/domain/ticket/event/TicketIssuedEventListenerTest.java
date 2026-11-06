@@ -76,7 +76,7 @@ class TicketIssuedEventListenerTest {
         assertThat(appender.list).singleElement().satisfies(logEvent -> {
             assertThat(logEvent.getLevel()).isEqualTo(Level.INFO);
             assertThat(logEvent.getFormattedMessage())
-                    .isEqualTo("event=TICKETS_ISSUED orderId=20 userId=10 count=3");
+                    .isEqualTo("event=TICKETS_ISSUED orderId=20 targetUserId=10 count=3");
             assertThat(logEvent.getThrowableProxy()).isNull();
         });
     }

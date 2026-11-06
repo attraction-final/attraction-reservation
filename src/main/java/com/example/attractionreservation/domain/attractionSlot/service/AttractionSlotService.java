@@ -11,8 +11,6 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,14 +53,12 @@ public class AttractionSlotService {
         AttractionSlot savedSlot = attractionSlotRepository.save(
                 AttractionSlot.create(attraction, startsAt, request.capacity()));
 
-        // 추가
+        // [로그 수정] 커밋 뒤에 남긴다. 로그에 쓸 값은 람다 밖에서 미리 꺼낸다.
         Long slotId = savedSlot.getId();
-        LocalDateTime startsAtLog = savedSlot.getStartsAt();
-        Integer capacityLog = savedSlot.getCapacity();
-        AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} userId={} startsAt={} capacity={}",
-                    slotId, attractionId, adminId, startsAtLog, capacityLog)
-        );
+        LocalDateTime savedStartsAt = savedSlot.getStartsAt();
+        Integer capacity = savedSlot.getCapacity();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} adminId={} startsAt={} capacity={}",
+                slotId, attractionId, adminId, savedStartsAt, capacity));
 
         return CreateAttractionSlotResponse.from(savedSlot);
     }
@@ -139,12 +135,9 @@ public class AttractionSlotService {
         LocalDateTime previousStartsAt = slot.getStartsAt(); // 추가: 바꾸기 전 시각 보관
         slot.changeTime(newStartsAt); // 변경 감지(dirty checking)로 커밋 시 UPDATE
 
-        // 추가
-        // 변경 전·후 시작 시각을 사용해 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다
-        AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} userId={} previousStartsAt={} currentStartsAt={}",
-                    slotId, attractionId, adminId, previousStartsAt, newStartsAt)
-        );
+        // [로그 수정] 커밋 뒤에 남긴다.
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} adminId={} previousStartsAt={} currentStartsAt={}",
+                slotId, attractionId, adminId, previousStartsAt, newStartsAt));
 
         return UpdateAttractionSlotTimeResponse.from(slot);
     }
@@ -185,15 +178,15 @@ public class AttractionSlotService {
         Integer previousCapacity = slot.getCapacity(); // 추가: 바꾸기 전 정원 보관
         slot.changeCapacity(request.capacity()); // 잔여 정원에 맞춰 OPEN/CLOSED 자동 조정
 
-        // 추가 (정원이 바뀌면 OPEN/CLOSED가 자동으로 바뀔 수 있어서 상태도 남김)
-        // 정원 변경 후 인원·상태를 미리 보관하여 commit 후 해당 변경 결과를 기록한다.
+        // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
+        // (정원이 바뀌면 OPEN/CLOSED가 자동으로 바뀔 수 있어서 상태도 남김)
+        // attractionId는 다른 슬롯 로그와 맞추기 위한 제안 (필수 아님)
+        Long attractionId = slot.getAttraction().getId();
         Integer currentCapacity = slot.getCapacity();
         Integer reservedCount = slot.getReservedCount();
-        SlotStatus currentStatus = slot.getStatus();
-        AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} userId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
-                    slotId, adminId, previousCapacity, currentCapacity, reservedCount, currentStatus)
-        );
+        String currentStatus = slot.getStatus().name();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} attractionId={} adminId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
+                slotId, attractionId, adminId, previousCapacity, currentCapacity, reservedCount, currentStatus));
 
         return UpdateAttractionSlotCapacityResponse.from(slot);
     }
@@ -219,12 +212,13 @@ public class AttractionSlotService {
 
         slot.changeStatus(newStatus);
 
-        // 추가
-        // 변경 전·후 상태를 사용해 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다.
-        AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} userId={} previousStatus={} currentStatus={}",
-                    slotId, adminId, previousStatus, newStatus)
-        );
+        // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
+        // attractionId는 다른 슬롯 로그와 맞추기 위한 제안 (필수 아님)
+        Long attractionId = slot.getAttraction().getId();
+        String previousStatusName = previousStatus.name();
+        String currentStatusName = newStatus.name();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} attractionId={} adminId={} previousStatus={} currentStatus={}",
+                slotId, attractionId, adminId, previousStatusName, currentStatusName));
 
         return UpdateAttractionSlotStatusResponse.of(slot, previousStatus);
     }
@@ -240,13 +234,11 @@ public class AttractionSlotService {
         }
         slot.cancel(); // 실제로 지우지 않고 상태만 CANCELLED (소프트 삭제)
 
-        // 삭제 시점의 대상과 시작 시각을 보관하고, commit된 경우에만 취소 완료 로그를 남긴다.
+        // [로그 수정] 커밋 뒤에 남긴다. 지연 로딩 값(getAttraction)은 람다 밖에서 미리 꺼낸다.
         Long attractionId = slot.getAttraction().getId();
-        LocalDateTime currentStartsAt = slot.getStartsAt();
-        AfterCommit.run(() ->
-            log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} userId={} startsAt={}",
-                    slotId, attractionId, adminId, currentStartsAt)
-        );
+        LocalDateTime startsAt = slot.getStartsAt();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} adminId={} startsAt={}",
+                slotId, attractionId, adminId, startsAt));
 
     }
 

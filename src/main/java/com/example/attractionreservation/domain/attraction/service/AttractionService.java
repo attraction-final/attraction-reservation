@@ -66,14 +66,11 @@ public class AttractionService {
             throw e;
         }
 
-        // 등록 시점의 ID와 소요 시간을 미리 보관하여 callback에서 엔티티를 다시 읽지 않도록 한다.
+        // [로그 수정] 커밋 뒤에 남긴다. 로그에 쓸 값은 람다 밖에서 미리 꺼낸다.
         Long attractionId = savedAttraction.getId();
         Integer durationMinutes = savedAttraction.getDurationMinutes();
-        // 등록 트랜잭션이 commit된 경우에만 완료 로그를 남긴다.
-        AfterCommit.run(() ->
-                log.info("event=ATTRACTION_CREATED attractionId={} userId={} durationMinutes={}",
-                        attractionId, adminId, durationMinutes)
-        );
+        AfterCommit.run(() -> log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
+                attractionId, adminId, durationMinutes));
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
     }
@@ -209,14 +206,10 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 변경 시점의 값을 미리 보관하여 callback에서 엔티티를 다시 읽지 않도록 한다.
+        // [로그 수정] 커밋 뒤에 남긴다.
         Integer currentDurationMinutes = attraction.getDurationMinutes();
-        // 람다를 commit 후 실행할 작업으로 등록한다. rollback되면 수정 완료 로그는 남기지 않는다.
-        AfterCommit.run(() ->
-                log.info("event=ATTRACTION_UPDATED attractionId={} userId={} previousDurationMinutes={} currentDurationMinutes={}",
-                        attractionId, adminId, previousDurationMinutes, currentDurationMinutes)
-        );
-
+        AfterCommit.run(() -> log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
+                attractionId, adminId, previousDurationMinutes, currentDurationMinutes));
 
         return SearchAttractionResponse.from(attraction);
     }
@@ -246,11 +239,11 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 미리 보관한 변경 전·후 상태로 commit 후 기록하고, rollback되면 완료 로그를 남기지 않는다.
-        AfterCommit.run(() ->
-        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} userId={} previousStatus={} currentStatus={}",
-                attractionId, adminId, previousStatus, newStatus)
-        );
+        // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
+        String previousStatusName = previousStatus.name();
+        String currentStatusName = newStatus.name();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
+                attractionId, adminId, previousStatusName, currentStatusName));
 
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
     }
@@ -275,10 +268,8 @@ public class AttractionService {
 
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 삭제 트랜잭션이 commit된 경우에만 완료 로그를 남기고, rollback되면 기록하지 않는다.
-        AfterCommit.run(() ->
-            log.info("event=ATTRACTION_DELETED attractionId={} userId={}", attractionId, adminId)
-        );
+        // [로그 수정] 커밋 뒤에 남긴다.
+        AfterCommit.run(() -> log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId));
     }
 
     // 예약 - 잠금 전용 조회 메서드

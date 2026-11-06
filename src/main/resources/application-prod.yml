@@ -26,6 +26,9 @@ management:
   endpoint:
     health:
       # 쿠버네티스가 아니면 꺼져 있으므로 직접 켠다.
-      # 로드밸런서는 DB·Redis 상태와 무관한 /actuator/health/readiness를 본다.
       probes:
         enabled: true
+        # readiness를 서비스 포트에도 /readyz로 노출한다. (/livez도 함께 생기지만 열지 않는다)
+        # 로드밸런서는 8080 /readyz를 봐서, 서비스 포트가 요청을 받지 못하면 인스턴스를 빼게 한다.
+        # 관리 포트의 readiness는 서비스 포트 상태를 확인하지 않는다.
+        add-additional-paths: true

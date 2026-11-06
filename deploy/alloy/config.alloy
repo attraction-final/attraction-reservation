@@ -1,12 +1,15 @@
 // 애플리케이션 컨테이너의 stdout을 Loki로, actuator 메트릭을 Prometheus로 보낸다.
 // 로그 형식은 docs/logging/logging.md 참고
 //
-// 로그 레이블은 값 종류가 적은 app, env만 붙인다. 나머지 값은 조회할 때 | logfmt로 꺼낸다.
-// 메트릭은 같은 시계열이 인스턴스끼리 겹치지 않도록 instance(EC2 인스턴스 ID)를 함께 붙인다.
+// 로그 레이블은 값 종류가 적은 app, env, instance만 붙인다. 나머지 값은 조회할 때 | logfmt로 꺼낸다.
+// instance(EC2 인스턴스 ID)는 로그·메트릭 모두에 붙인다.
+//   로그: 인스턴스별로 Loki 스트림을 나눠, 한 인스턴스의 전송이 늦어져도 다른 인스턴스 로그 때문에 거부되지 않게 한다.
+//   메트릭: 같은 시계열이 인스턴스끼리 겹치지 않게 한다.
 
 // compose의 app 서비스 컨테이너만 수집한다. (Alloy 자신의 로그는 제외)
+// Docker API는 소켓을 직접 마운트하지 않고 읽기 전용 프록시(docker-proxy)로 접근한다. (deploy/compose.yml)
 discovery.docker "app" {
-  host = "unix:///var/run/docker.sock"
+  host = "tcp://docker-proxy:2375"
 
   filter {
     name   = "label"
@@ -15,11 +18,12 @@ discovery.docker "app" {
 }
 
 loki.source.docker "app" {
-  host       = "unix:///var/run/docker.sock"
+  host       = "tcp://docker-proxy:2375"
   targets    = discovery.docker.app.targets
   labels     = {
-    app = "attraction-reservation",
-    env = sys.env("APP_ENV"),
+    app      = "attraction-reservation",
+    env      = sys.env("APP_ENV"),
+    instance = sys.env("INSTANCE_ID"),
   }
   forward_to = [loki.process.multiline.receiver]
 }

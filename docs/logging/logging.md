@@ -209,11 +209,16 @@ implementation 'io.micrometer:micrometer-tracing-bridge-brave'
 | 구분 | 키 | 이유 |
 | --- | --- | --- |
 | 레이블로 사용 | `app`, `env` (+ 필요 시 `level`) | 값 종류가 적어 스트림 수가 작게 유지됨 |
-| 레이블 금지 | `userId`, `targetUserId`, `orderId`, `traceId`, `uri`, `event` 등 | 값이 많아 스트림이 폭증하고 Loki 성능이 저하됨 |
+| 레이블로 사용 | `instance` (EC2 인스턴스 ID) | 인스턴스별로 스트림을 나눠, 한 인스턴스의 전송이 늦어져도 다른 인스턴스 로그 때문에 거부(`too far behind`)되지 않게 한다. 값은 배포마다 바뀌지만 동시에 떠 있는 인스턴스 수만큼만 생긴다 |
+| 레이블 금지 | `userId`, `orderId`, `traceId`, `uri`, `event` 등 | 값이 많아 스트림이 폭증하고 Loki 성능이 저하됨 |
 
 **수집기 설정**
 
-- 수집기는 Grafana Alloy를 사용한다. (Promtail은 지원 종료 수순)
+- 수집기는 Grafana Alloy를 사용한다. (Promtail은 지원 종료 수순) 설정은 `deploy/alloy/config.alloy`에 둔다.
+- 애플리케이션은 로그를 stdout으로만 출력하고 파일로 쓰지 않는다. Alloy는 Docker API(`loki.source.docker`)로 compose의 `app` 서비스 컨테이너 stdout만 수집한다.
+- Alloy는 Docker 소켓을 직접 마운트하지 않고, 읽기 전용 프록시(`docker-proxy`)로 Docker API에 접근한다. 소켓은 `:ro`로 마운트해도 API 쓰기를 막지 못한다.
+- stdout에는 logfmt 로그만 나가게 한다. JVM이 직접 찍는 줄(`JAVA_TOOL_OPTIONS`의 `Picked up ...` 등)이 섞이지 않도록 JVM 옵션은 실행 명령에 직접 넘긴다.
+- 컨테이너 로그는 Docker `json-file` 드라이버의 `max-size`, `max-file`로 순환해 디스크가 차지 않게 한다.
 - 스택 트레이스가 한 로그로 묶이도록 multiline 설정에서 "`ts=`로 시작하는 줄이 새 로그의 시작"으로 지정한다. (첫 줄 정규식 예: `^ts=`)
 
 **조회 예시 (LogQL)**

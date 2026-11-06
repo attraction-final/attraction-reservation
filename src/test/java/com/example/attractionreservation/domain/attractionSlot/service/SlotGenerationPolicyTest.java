@@ -8,6 +8,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.time.LocalTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SlotGenerationPolicyTest {
@@ -31,13 +32,21 @@ class SlotGenerationPolicyTest {
         assertThat(policy.capacity()).isEqualTo(CAPACITY);
     }
 
+    // [Sonar: Add at least one assertion] 객체만 만들고 끝내지 않고 "예외가 안 난다"를 검증한다.
     @Test
     @DisplayName("경계값(1일·365일, 첫=마지막 시각, 21:59)은 허용된다")
     void boundaryValuesAreAllowed() {
-        new SlotGenerationPolicy(1, FIRST, LAST, 1, 1);
-        new SlotGenerationPolicy(365, FIRST, LAST, INTERVAL, CAPACITY);
-        new SlotGenerationPolicy(DAYS, LocalTime.of(12, 0), LocalTime.of(12, 0), INTERVAL, CAPACITY);
-        new SlotGenerationPolicy(DAYS, FIRST, LocalTime.of(21, 59), INTERVAL, CAPACITY);
+        LocalTime noon = LocalTime.of(12, 0);
+        LocalTime justBeforeClose = LocalTime.of(21, 59);
+
+        assertThatCode(() -> new SlotGenerationPolicy(1, FIRST, LAST, 1, 1))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> new SlotGenerationPolicy(365, FIRST, LAST, INTERVAL, CAPACITY))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> new SlotGenerationPolicy(DAYS, noon, noon, INTERVAL, CAPACITY))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> new SlotGenerationPolicy(DAYS, FIRST, justBeforeClose, INTERVAL, CAPACITY))
+                .doesNotThrowAnyException();
     }
 
     @ParameterizedTest
@@ -83,11 +92,15 @@ class SlotGenerationPolicyTest {
                 .hasMessageContaining("반드시 설정");
     }
 
+    // [Sonar: only one invocation possibly throwing] LocalTime.of(...) 도 예외를 던질 수 있으므로
+    // 람다 밖에서 미리 만들고, 람다 안에는 검사 대상(생성자) 하나만 남긴다.
     @Test
     @DisplayName("firstStartTime 이 lastStartTime 보다 늦으면 실패한다")
     void firstAfterLast() {
-        assertThatThrownBy(() -> new SlotGenerationPolicy(
-                DAYS, LocalTime.of(15, 0), LocalTime.of(14, 0), INTERVAL, CAPACITY))
+        LocalTime first = LocalTime.of(15, 0);
+        LocalTime last = LocalTime.of(14, 0);
+
+        assertThatThrownBy(() -> new SlotGenerationPolicy(DAYS, first, last, INTERVAL, CAPACITY))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("늦을 수 없습니다");
     }
@@ -95,8 +108,9 @@ class SlotGenerationPolicyTest {
     @Test
     @DisplayName("firstStartTime 이 개장(10:00) 전이면 실패한다")
     void firstBeforeOpen() {
-        assertThatThrownBy(() -> new SlotGenerationPolicy(
-                DAYS, LocalTime.of(9, 59), LAST, INTERVAL, CAPACITY))
+        LocalTime beforeOpen = LocalTime.of(9, 59);
+
+        assertThatThrownBy(() -> new SlotGenerationPolicy(DAYS, beforeOpen, LAST, INTERVAL, CAPACITY))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("개장 시각");
     }
@@ -104,9 +118,10 @@ class SlotGenerationPolicyTest {
     @ParameterizedTest
     @ValueSource(strings = {"22:00", "23:00"})
     @DisplayName("lastStartTime 이 폐장(22:00) 이상이면 실패한다")
-    void lastAtOrAfterClose(String last) {
-        assertThatThrownBy(() -> new SlotGenerationPolicy(
-                DAYS, FIRST, LocalTime.parse(last), INTERVAL, CAPACITY))
+    void lastAtOrAfterClose(String lastText) {
+        LocalTime last = LocalTime.parse(lastText);
+
+        assertThatThrownBy(() -> new SlotGenerationPolicy(DAYS, FIRST, last, INTERVAL, CAPACITY))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("폐장 시각");
     }

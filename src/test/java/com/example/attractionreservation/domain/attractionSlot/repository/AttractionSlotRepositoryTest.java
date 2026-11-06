@@ -283,7 +283,8 @@ class AttractionSlotRepositoryTest {
         List<Long> result = attractionRepository.findAllActiveIds();
 
         // then: 다른 테스트 데이터가 있을 수 있어 포함 여부만 본다
-        assertThat(result).contains(rollerCoaster.getId());
-        assertThat(result).doesNotContain(viking.getId());
+        assertThat(result)
+                .contains(rollerCoaster.getId())
+                .doesNotContain(viking.getId());
     }
 }

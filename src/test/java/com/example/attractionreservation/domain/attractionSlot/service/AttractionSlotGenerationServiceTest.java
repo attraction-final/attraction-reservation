@@ -233,7 +233,7 @@ class AttractionSlotGenerationServiceTest {
         // then: 10:00, 10:30, ... 12:30 → 6개, 마지막은 12:32에 끝남
         List<AttractionSlot> slots = savedSlots();
         assertThat(created).isEqualTo(6);
-        assertThat(slots).allSatisfy(slot ->
+        assertThat(slots).isNotEmpty().allSatisfy(slot ->
                 assertThat(slot.getEndsAt()).isBeforeOrEqualTo(DAY.atTime(13, 0)));
     }
 }

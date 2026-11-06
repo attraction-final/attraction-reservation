@@ -108,15 +108,12 @@ public class AttractionSlotGenerationService {
             LocalDateTime startsAt = day.atStartOfDay().plusMinutes(minute);
             LocalDateTime endsAt = AttractionSlot.calculateEndsAt(startsAt, durationMinutes);
 
-            // 이미 시작했거나 지난 시각은 만들지 않는다. (관리자 등록 규칙과 같다)
-            if (!startsAt.isAfter(now)) {
-                continue;
+            // 아직 시작 전이고(관리자 등록 규칙과 같다), 폐장 전에 끝나는(BR-SLT-03) 슬롯만 만든다.
+            boolean notStartedYet = startsAt.isAfter(now);
+            boolean withinOperatingHours = AttractionSlot.isWithinOperatingHours(startsAt, endsAt);
+            if (notStartedYet && withinOperatingHours) {
+                slots.add(AttractionSlot.create(attraction, startsAt, policy.capacity()));
             }
-            // 폐장 시각을 넘기면 만들지 않는다. (BR-SLT-03)
-            if (!AttractionSlot.isWithinOperatingHours(startsAt, endsAt)) {
-                continue;
-            }
-            slots.add(AttractionSlot.create(attraction, startsAt, policy.capacity()));
         }
         return slots;
     }

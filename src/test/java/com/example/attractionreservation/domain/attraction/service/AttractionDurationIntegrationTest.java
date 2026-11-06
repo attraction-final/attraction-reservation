@@ -7,6 +7,7 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotRequest;
 import com.example.attractionreservation.domain.attractionSlot.dto.CreateAttractionSlotResponse;
+import com.example.attractionreservation.domain.attractionSlot.dto.UpdateAttractionSlotTimeRequest;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -395,6 +396,97 @@ class AttractionDurationIntegrationTest {
             } finally {
                 repositoryProxy.removeAdvisor(advisor);
             }
+        }
+    }
+
+    @ParameterizedTest(name = "슬롯 시각 수정 선행 여부: {0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("슬롯 시각 수정과 소요 시간 변경이 겹치면 두 순서 모두 소요 시간 변경을 거부하고 기존 길이로 슬롯을 수정한다")
+    void updateSlotTime_overlapsDurationChange_preservesOriginalDuration(boolean slotTimeFirst)
+            throws Exception {
+        // given
+        // 기존 미래 슬롯이 있으므로 어느 작업이 먼저여도 소요 시간 변경은 허용되지 않는다.
+        State before = readState();
+        CountDownLatch firstAttractionLocked = new CountDownLatch(1);
+        CountDownLatch allowFirstContinue = new CountDownLatch(1);
+        CountDownLatch secondLockRequested = new CountDownLatch(1);
+        AtomicReference<Thread> firstThread = new AtomicReference<>();
+        AtomicReference<Thread> secondThread = new AtomicReference<>();
+
+        var advisor = new DefaultPointcutAdvisor((MethodInterceptor) invocation -> {
+            boolean attractionLock = invocation.getMethod().getName().equals("findActiveByIdForUpdate");
+            if (attractionLock && Thread.currentThread() == secondThread.get()) {
+                secondLockRequested.countDown();
+            }
+            Object result = invocation.proceed();
+            // 조회 결과는 실제 DB 값이며 선행 작업의 어트랙션 잠금 획득 직후에만 멈춘다.
+            if (attractionLock && Thread.currentThread() == firstThread.get()) {
+                firstAttractionLocked.countDown();
+                awaitSignal(allowFirstContinue, "선행 수정 작업 재개");
+            }
+            return result;
+        });
+        Advised repositoryProxy = (Advised) attractionRepository;
+        repositoryProxy.addAdvisor(0, advisor);
+        var executor = Executors.newFixedThreadPool(2);
+
+        try {
+            // when
+            var firstFuture = executor.submit(() -> {
+                firstThread.set(Thread.currentThread());
+                return executeSlotTimeOrDurationChange(slotTimeFirst);
+            });
+            awaitSignal(firstAttractionLocked, "선행 수정 작업의 어트랙션 잠금 획득");
+            var secondFuture = executor.submit(() -> {
+                secondThread.set(Thread.currentThread());
+                return executeSlotTimeOrDurationChange(!slotTimeFirst);
+            });
+            awaitSignal(secondLockRequested, "후행 수정 작업의 어트랙션 잠금 요청");
+            assertThatThrownBy(() -> secondFuture.get(500, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            allowFirstContinue.countDown();
+            ErrorCode firstError = firstFuture.get(10, TimeUnit.SECONDS);
+            ErrorCode secondError = secondFuture.get(10, TimeUnit.SECONDS);
+
+            // then: 잠금 시간 초과·데드락은 업무상 거부로 인정하지 않고 Future.get에서 실패시킨다.
+            assertThat(firstError).isEqualTo(slotTimeFirst
+                    ? null : ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED);
+            assertThat(secondError).isEqualTo(slotTimeFirst
+                    ? ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED : null);
+            assertThat(readState()).isEqualTo(new State(10, before.description(),
+                    SLOT_START.plusHours(2), SLOT_START.plusHours(2).plusMinutes(10),
+                    before.reservedCount(), before.status()));
+            transactionTemplate.executeWithoutResult(transaction -> {
+                Long slotCount = entityManager.createQuery(
+                                "SELECT COUNT(s) FROM AttractionSlot s WHERE s.attraction.id = :attractionId", Long.class)
+                        .setParameter("attractionId", fixture.attractionId()).getSingleResult();
+                assertThat(slotCount).isEqualTo(1L);
+            });
+        } finally {
+            allowFirstContinue.countDown();
+            executor.shutdownNow();
+            try {
+                assertThat(executor.awaitTermination(10, TimeUnit.SECONDS))
+                        .as("동시 작업 종료 후 fixture 정리").isTrue();
+            } finally {
+                repositoryProxy.removeAdvisor(advisor);
+            }
+        }
+    }
+
+    private ErrorCode executeSlotTimeOrDurationChange(boolean changeSlotTime) {
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+            if (changeSlotTime) {
+                attractionSlotService.updateAttractionSlotTime(ADMIN_ID, fixture.slotId(),
+                        new UpdateAttractionSlotTimeRequest(SLOT_START.plusHours(2)));
+            } else {
+                attractionService.updateAttraction(ADMIN_ID, fixture.attractionId(),
+                        new UpdateAttractionRequest(null, "동시 수정 설명", null, 20, null));
+            }
+            return null;
+        } catch (BusinessException exception) {
+            return exception.getErrorCode();
         }
     }
 

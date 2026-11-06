@@ -63,4 +63,13 @@ public interface AttractionSlotRepository
     Optional<AttractionSlot> findByIdForUpdate(
             @Param("slotId") Long slotId
     );
+
+    // 해당 어트랙션에서 지정한 상태를 제외하고, 종료 시각이 기준 시각보다 이후인 슬롯의 존재 여부를 조회한다.
+    // CANCELLED를 제외 상태로 전달하면 예약 유무와 관계없이 운영 예정·진행 중 슬롯을 확인할 수 있다.
+    // EndsAtAfter는 > 조건이므로 종료 정각은 제한 대상에서 제외한다.
+    boolean existsByAttraction_IdAndStatusNotAndEndsAtAfter(
+            @Param("attractionId") Long attractionId,
+            @Param("excludedStatus") SlotStatus excludedStatus,
+            @Param("now") LocalDateTime now
+    );
 }

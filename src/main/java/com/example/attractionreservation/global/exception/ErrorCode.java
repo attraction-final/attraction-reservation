@@ -24,6 +24,7 @@ public enum ErrorCode {
     ATTRACTION_STATUS_SAME(HttpStatus.BAD_REQUEST, "현재 상태와 같습니다."),
     ATTRACTION_HAS_UPCOMING_RESERVATIONS(HttpStatus.CONFLICT, "이용 예정 예약이 있어 처리할 수 없습니다. 예약을 먼저 처리해 주세요."),
     ATTRACTION_NOT_OPERATING(HttpStatus.CONFLICT, "현재 운영 중인 어트랙션이 아닙니다."),
+    ATTRACTION_DURATION_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "운영 예정이거나 진행 중인 슬롯이 있어 소요 시간을 변경할 수 없습니다."),
 
     // attractionSlot
     SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "슬롯을 찾을 수 없습니다."),
@@ -44,6 +45,7 @@ public enum ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     USER_NOT_WITHDRAWABLE(HttpStatus.FORBIDDEN, "현재 회원 상태에서는 탈퇴할 수 없습니다."),
     USER_WITHDRAWAL_UNUSED_TICKET(HttpStatus.CONFLICT, "미사용 입장권이 있어 탈퇴할 수 없습니다. 환불 후 다시 시도해주세요."),
+    USER_WITHDRAWAL_INCOMPLETE_REFUND(HttpStatus.CONFLICT, "완료되지 않은 환불이 있어 탈퇴할 수 없습니다."),
     CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "유저를 찾을 수 없습니다."),
     USER_STATUS_SAME(HttpStatus.CONFLICT, "현재 회원 상태와 동일합니다."),
@@ -153,7 +155,11 @@ public enum ErrorCode {
     REFUND_INVALID_TICKET(HttpStatus.BAD_REQUEST, "해당 주문의 티켓이 아닙니다."),
     REFUND_DUPLICATE_TICKET(HttpStatus.BAD_REQUEST, "같은 티켓을 중복해서 환불할 수 없습니다."),
     REFUND_DEADLINE_PASSED(HttpStatus.CONFLICT, "입장일 전날까지만 환불할 수 있습니다."),
-    REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다.");
+    REFUND_USER_WITHDRAW(HttpStatus.CONFLICT, "탈퇴한 회원의 결제는 환불을 요청할 수 없습니다."),
+    REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다."),
+
+    //jev ai / chatbot
+    ATTRACTION_QUESTION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "지금은 어트랙션 질문에 답할 수 없습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;
     private final String message;

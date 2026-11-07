@@ -61,7 +61,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 | 파일 | 내용 |
 |---|---|
-| `deploy/ecs/fluent-bit/` | `aws-for-fluent-bit:3.5.4` + `extra.conf`, `parsers.conf`. Fargate의 FireLens는 사용자 설정을 이미지 안 파일로만 받는다. `app-firelens-*` 태그(app 컨테이너)만 Loki로 보내고, multiline(`^ts=`)으로 스택 트레이스를 묶고, FireLens가 붙이는 컨테이너 정보를 지워 logfmt 한 줄만 보낸다. 레이블 `app`, `env`, `service`(`api`·`worker`) |
+| `deploy/ecs/fluent-bit/` | `aws-for-fluent-bit:3.5.4` + `extra.conf`, `parsers.conf`. Fargate의 FireLens는 사용자 설정을 이미지 안 파일로만 받는다. `app-firelens-*` 태그(app 컨테이너)만 Loki로 보내고, multiline(`^ts=`)으로 스택 트레이스를 묶고, FireLens가 붙이는 컨테이너 정보를 지워 logfmt 한 줄만 보낸다. 레이블 `app`, `env`, `service`(`api`·`worker`), `instance`(태그 `app-firelens-<task ID>`에서 꺼낸 task ID. 메트릭의 `instance`와 같은 값) |
 | `deploy/ecs/alloy/` | `grafana/alloy:v1.21.3` + `config.alloy`. 메트릭 전용. 대상 `localhost:8081`. `instance` 레이블은 `remote.http`로 `$ECS_CONTAINER_METADATA_URI_V4/task`를 읽어 TaskARN 마지막 부분(task ID)을 쓴다. `service`(`api`·`worker`)도 붙인다 |
 | `deploy/ecs/api-task-definition.json` | arm64, 1 vCPU / 2GB(가안), 프로필 `prod,api`, 포트 8080·8081 |
 | `deploy/ecs/worker-task-definition.json` | api와 같고 프로필 `prod`, 포트 없음, 컨테이너 헬스체크 `curl -fs localhost:8081/actuator/health/liveness` (앱 이미지에 curl 있음) |

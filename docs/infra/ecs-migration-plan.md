@@ -125,7 +125,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
    - 실행 역할 `attraction-ecs-execution-role`: `AmazonECSTaskExecutionRolePolicy`(ECR pull, 로그) + 인라인 `ssm:GetParameters`(`env/*`, `PROMETHEUS_URL`). `alias/aws/ssm`은 AWS 관리형 키라 `kms:Decrypt`를 따로 주지 않는다
    - task 역할 `attraction-ecs-task-role`: ECS Exec용 `ssmmessages:*`
 4. ECS 클러스터 `attraction-reservation` (Fargate)
-5. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초. ALB 리스너에는 연결하지 않는다(4단계에서 연결)
+5. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초. ECS 서비스는 ALB에 연결된 TG만 받으므로, HTTPS 리스너에 헤더 조건 규칙(우선순위 20, `X-Ecs-Preview: <임의 값>` → 이 TG)을 추가한다. 사용자 요청은 이 헤더가 없어 기본 규칙(`attraction-final`)으로 가고, 헤더를 붙인 확인용 요청만 ECS로 간다. 값은 저장소에 남기지 않는다. 4단계에서 기본 규칙을 가중치 forward로 바꿀 때 이 규칙을 지운다
    - dev의 `application-prod.yml`(`probes.add-additional-paths`)은 서비스 포트에 `/readyz`를 열고 로드밸런서가 이를 보게 한다. 관리 포트(8081)의 readiness는 서비스 포트가 요청을 받는지 확인하지 않기 때문이다. 기존 TG `attraction-final`은 이 변경이 운영에 나가지 않아 아직 8081 readiness를 본다
 6. Route 53 프라이빗 호스팅 영역 `attraction.internal`(`Z0261876YAS37FHXGKQ4`)을 VPC에 연결하고 A 레코드 `loki.attraction.internal` → `10.0.130.10`(TTL 60초)을 만든다. VPC `enableDnsSupport`·`enableDnsHostnames`가 켜져 있고 DHCP 옵션이 `AmazonProvidedDNS`라 task에서 이름이 풀린다. 모니터링 EC2를 바꾸면 이 레코드만 고친다
 7. task definition 2개 등록: 자리 표시자를 위 값으로 채워 등록한다. 저장소 파일은 그대로 두고, 렌더링 자동화는 5단계 CD에서 한다
@@ -142,19 +142,20 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 이 단계의 운영 영향
 - api task가 기동하며 운영 DB에 Flyway V3를 적용한다. NULL 허용 컬럼 추가라 기존 ASG 버전과 호환되고, 되돌리지 않는다.
 - api는 스케줄러 OFF, worker는 0개라 스케줄러 쓰기는 없다.
-- ALB 리스너를 바꾸지 않으므로 사용자 트래픽은 들어가지 않는다.
+- ALB에는 헤더 조건 규칙만 추가하고 기본 규칙은 바꾸지 않으므로 사용자 트래픽은 들어가지 않는다.
 - 비용: Fargate arm64 1 vCPU / 2GB task 1개(하루 약 1달러)가 4단계 완료까지 ASG와 함께 돈다.
 
-검증
-- [ ] api task가 RUNNING이고 `attraction-app-ecs`에서 healthy
-- [ ] Loki `{app="attraction-reservation", service="api"}`에서 logfmt 원문 조회, `instance`가 task ID, 스택 트레이스가 한 건으로 묶임
-- [ ] Prometheus에 `instance=<task ID>`, `service="api"` 메트릭 수집
-- [ ] api task에 스케줄러 실행 메트릭이 없음 (`api` 프로필 적용)
-- [ ] `flyway_schema_history`에 V3 성공 기록, 슬롯 0건 그대로
-- [ ] 사이드카 로그가 CloudWatch `/ecs/attraction-reservation`에 남고 오류가 없음
-- [ ] task 안에서 `loki.attraction.internal`이 `10.0.130.10`으로 풀림 (ECS Exec). Route 53 `TestDNSAnswer`는 프라이빗 영역을 지원하지 않아 VPC 안에서 확인한다
-- [ ] ECS Exec로 app 컨테이너 접속
-- [ ] ALB 리스너 규칙이 바뀌지 않음 (사용자 트래픽 없음)
+검증 (2026-11-08, task `6cc6c2f5…`, 이미지 `b9682e47`)
+- [x] api task가 RUNNING이고 `attraction-app-ecs`에서 healthy
+- [x] Loki `{app="attraction-reservation", service="api"}`에서 logfmt 원문 조회, `instance`가 task ID. 기동 로그 54줄이 모두 `ts=`로 시작하고 여러 줄 로그가 한 건으로 묶임 (스택 트레이스 묶음은 2단계 로컬 검증으로 대신함)
+- [x] Prometheus에 `instance=<task ID>`, `service="api"` 메트릭 수집 (`up`=1)
+- [x] api task에 스케줄러 실행 메트릭이 없음 (`api` 프로필 적용). 같은 조회(`tasks_scheduled.*`)가 기존 EC2에서는 30개를 돌려줌
+- [x] Flyway V3 성공: 앱 로그 `Successfully applied 1 migration … now at version v3` (0.243초)
+- [x] DB 직접 확인: `flyway_schema_history` V3 `success=1`(2026-11-07 19:06:06 UTC, 243ms), `attractions`에 V3 컬럼 5개(NULL 허용) 추가, 어트랙션·슬롯 0건 그대로
+- [x] 사이드카 로그가 CloudWatch `/ecs/attraction-reservation`에 남고 오류가 없음
+- [x] task 안에서 `loki.attraction.internal`이 `10.0.130.10`으로 풀림 (ECS Exec). Route 53 `TestDNSAnswer`는 프라이빗 영역을 지원하지 않아 VPC 안에서 확인한다
+- [x] ECS Exec로 app 컨테이너 접속
+- [x] ALB 기본 규칙과 Grafana 규칙이 바뀌지 않음 (사용자 트래픽 없음), 헤더를 붙인 요청은 ALB를 거쳐 ECS에서 응답
 
 롤백
 - 서비스를 desired 0으로 내리거나 삭제한다. 클러스터·TG·역할은 남겨도 사용자 트래픽에 영향이 없다.

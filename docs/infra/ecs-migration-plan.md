@@ -102,26 +102,60 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
   - 운영 DB에 어트랙션·슬롯 데이터가 없음(0건). 초기 데이터(`docs/sql/kan-123-…`) 적용은 이 전환과 별개로 정한다
 - [x] 4단계에서 기존 버전(ASG)과 새 버전(ECS)이 함께 트래픽을 받으므로, 기존 버전이 새 스키마에서도 동작하는지: V3가 NULL 허용 컬럼 추가뿐이라 호환됨
 - [x] dev에서 추가된 스케줄러가 api 프로필에서 꺼지는지: `AttractionSlotGenerationScheduler`를 `application-api.yml`에 추가하고 `SchedulerProfileTest`로 검증. 끄지 않으면 api task가 뜰 때마다 슬롯 생성이 돌고(`attraction_slots`에 UNIQUE 제약 없음) task 수만큼 중복 실행된다
-- [ ] 새로 필요한 환경변수가 SSM `env/`에 있는지: `SPRING_AI_TYPESAFE_APIKEY`(Jev 연동)가 없다. 없어도 앱은 뜨고 어트랙션 Q&A만 503을 응답한다(운영에는 아직 Q&A 기능이 없음). 전환과 함께 Q&A를 열려면 SSM 파라미터와 task definition `secrets`에 추가한다
+- [x] 새로 필요한 환경변수가 SSM `env/`에 있는지: `SPRING_AI_TYPESAFE_APIKEY`(Jev 연동)가 없다. 없어도 앱은 뜨고 어트랙션 Q&A만 503을 응답한다(운영에는 아직 Q&A 기능이 없음). 전환과 함께 Q&A를 열려면 SSM 파라미터와 task definition `secrets`에 추가한다
 
-1. ECS 클러스터 `attraction-reservation` (Fargate), 사이드카 로그 그룹 `/ecs/attraction-reservation` (보존 7일)
-2. IAM
-   - Task 실행 역할: ECR pull, SSM `env/*`·`PROMETHEUS_URL` 읽기와 KMS 복호화, 사이드카 로그용 `logs:CreateLogStream`·`logs:PutLogEvents`
-   - Task 역할: ECS Exec용 `ssmmessages:*`
-3. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초
+- [x] Q&A(`SPRING_AI_TYPESAFE_APIKEY`)는 전환과 함께 열지 않는다(2026-11-07 결정). `secrets`는 10개 그대로 간다
+
+시작 조건
+- 슬롯 생성 스케줄러를 끄는 수정(PR #238)이 dev에 머지되어 있다.
+- dev 최신 앱 이미지가 ECR `attraction-reservation:<커밋 SHA>`에 있다. CD는 main에서만 돌므로 이번에는 로컬에서 arm64로 빌드해 올린다(CD와 같은 태그 규칙). Dockerfile에 `RUN`이 있어 로컬 Docker에 arm64 에뮬레이션(`tonistiigi/binfmt --install arm64`)이 필요하다.
+
+사용하는 기존 리소스
+| 항목 | 값 |
+|---|---|
+| VPC / 서브넷 | `vpc-0283cebcecbda88c5` / private `subnet-0be2496d3931e4dc6`, `subnet-008fc962259300add` (ASG와 같음) |
+| task SG | app SG `sg-0dfee6a3408712b64` 재사용 (ALB SG에서 8080·8081 허용, RDS·Redis·Loki·Prometheus 규칙 유지) |
+| SSM | `env/` 10개(SecureString 4개는 `alias/aws/ssm`), `LOKI_URL`(`10.0.130.10:3100`), `PROMETHEUS_URL` |
+
+순서
+1. ECR 저장소 `attraction-reservation-fluent-bit`, `attraction-reservation-alloy` 생성, 사이드카 이미지를 arm64로 빌드해 push (태그: 커밋 SHA)
+2. 사이드카 로그 그룹 `/ecs/attraction-reservation` (보존 7일)
+3. IAM (IAM 쓰기 권한이 있는 계정에서 실행)
+   - ECS 서비스 연결 역할 `AWSServiceRoleForECS` (계정에 아직 없음)
+   - 실행 역할 `attraction-ecs-execution-role`: `AmazonECSTaskExecutionRolePolicy`(ECR pull, 로그) + 인라인 `ssm:GetParameters`(`env/*`, `PROMETHEUS_URL`). `alias/aws/ssm`은 AWS 관리형 키라 `kms:Decrypt`를 따로 주지 않는다
+   - task 역할 `attraction-ecs-task-role`: ECS Exec용 `ssmmessages:*`
+4. ECS 클러스터 `attraction-reservation` (Fargate)
+5. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초. ALB 리스너에는 연결하지 않는다(4단계에서 연결)
    - dev의 `application-prod.yml`(`probes.add-additional-paths`)은 서비스 포트에 `/readyz`를 열고 로드밸런서가 이를 보게 한다. 관리 포트(8081)의 readiness는 서비스 포트가 요청을 받는지 확인하지 않기 때문이다. 기존 TG `attraction-final`은 이 변경이 운영에 나가지 않아 아직 8081 readiness를 본다
-4. task SG: 기존 app SG 재사용 (RDS 3306, Redis 6379, Loki 3100, Prometheus 9090, ALB → 8080·8081 규칙 유지)
-5. 사이드카 이미지 2개를 ECR에 push
-6. 서비스 생성
-   - `api`: desired 1, 새 TG 연결, 서킷 브레이커(rollback) ON, `healthCheckGracePeriodSeconds` 설정
-   - `worker`: **desired 0으로 생성만**
+6. task definition 2개 등록: 자리 표시자를 위 값으로 채워 등록한다. 저장소 파일은 그대로 두고, 렌더링 자동화는 5단계 CD에서 한다
+7. 서비스 생성
+
+| | api | worker |
+|---|---|---|
+| desired | 1 | **0** (생성만) |
+| 네트워크 | private 서브넷 2개, app SG, 퍼블릭 IP 없음 | 같음 |
+| 로드밸런서 | `attraction-app-ecs` ← `app`:8080 | 없음 |
+| 배포 | 최소 100% / 최대 200%, 서킷 브레이커(rollback) | 최소 0% / 최대 100%, 서킷 브레이커(rollback) |
+| 기타 | `healthCheckGracePeriodSeconds` 120 (Flyway 포함 기동 시간), ECS Exec 켬 | ECS Exec 켬 |
+
+이 단계의 운영 영향
+- api task가 기동하며 운영 DB에 Flyway V3를 적용한다. NULL 허용 컬럼 추가라 기존 ASG 버전과 호환되고, 되돌리지 않는다.
+- api는 스케줄러 OFF, worker는 0개라 스케줄러 쓰기는 없다.
+- ALB 리스너를 바꾸지 않으므로 사용자 트래픽은 들어가지 않는다.
+- 비용: Fargate arm64 1 vCPU / 2GB task 1개(하루 약 1달러)가 4단계 완료까지 ASG와 함께 돈다.
 
 검증
-- [ ] api task가 RUNNING이고 새 TG에서 healthy
-- [ ] Loki에서 해당 task의 logfmt 로그 조회, 스택 트레이스가 한 건으로 묶임
-- [ ] Prometheus에 task ID를 `instance`로 단 메트릭 수집
-- [ ] 이 시점에는 사용자 트래픽이 들어가지 않음
+- [ ] api task가 RUNNING이고 `attraction-app-ecs`에서 healthy
+- [ ] Loki `{app="attraction-reservation", service="api"}`에서 logfmt 원문 조회, `instance`가 task ID, 스택 트레이스가 한 건으로 묶임
+- [ ] Prometheus에 `instance=<task ID>`, `service="api"` 메트릭 수집
 - [ ] api task에 스케줄러 실행 메트릭이 없음 (`api` 프로필 적용)
+- [ ] `flyway_schema_history`에 V3 성공 기록, 슬롯 0건 그대로
+- [ ] 사이드카 로그가 CloudWatch `/ecs/attraction-reservation`에 남고 오류가 없음
+- [ ] ECS Exec로 app 컨테이너 접속
+- [ ] ALB 리스너 규칙이 바뀌지 않음 (사용자 트래픽 없음)
+
+롤백
+- 서비스를 desired 0으로 내리거나 삭제한다. 클러스터·TG·역할은 남겨도 사용자 트래픽에 영향이 없다.
 
 ### 4단계: 트래픽 전환
 

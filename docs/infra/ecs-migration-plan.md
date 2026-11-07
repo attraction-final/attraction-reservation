@@ -185,7 +185,8 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 검증 (ECS 응답은 헤더 조건 규칙으로 확인)
 - [x] actionlint(shellcheck 포함) 통과, 렌더링·배포 판정 스크립트를 로컬에서 실행 (렌더링 결과가 `:1`과 같음, 빈 변수·남은 자리 표시자에서 실패, 실제 서비스의 완료 배포는 성공·없는 배포는 실패로 판정)
-- [ ] 서킷 브레이커: 운영 이미지 `a262e16`(8080에 `/readyz` 없음)으로 task definition을 등록해 api를 직접 갱신 → 자동 롤백되고, 같은 배포 ID로 판정 스크립트가 실패를 돌려주는지 확인. main에 일부러 깨진 커밋을 넣지 않는다
+- [x] 서킷 브레이커 (2026-11-08): 현재 이미지에 `SERVER_PORT=9999`만 더한 revision(`api:2`, 8080 헬스체크 실패)으로 워크플로의 배포 step을 실제 서비스에 실행 → 15분 만에 `FAILED`(tasks failed to start)로 판정되고 `api:1`로 자동 롤백. 그동안 기존 task는 healthy로 유지(최소 100%). `api:2`는 등록 해제. 운영 이미지 `a262e16`은 api/worker 프로필 분리 전이라 ECS에서 스케줄러가 돌게 되므로 쓰지 않았다. main에 일부러 깨진 커밋을 넣지 않는다
+  - 실패 판정까지 약 15분(task 1개 기준). `ROLLOUT_TIMEOUT_SECONDS`(20분)는 이보다 길다
 - [ ] dev → main 릴리스(새 CD 첫 실행)가 api → worker 순으로 끝나고, 배포 시간 측정
 - [ ] `workflow_dispatch`: 같은 SHA로 재배포해 경로 확인. 이전 SHA로 되돌리는 확인은 다음 main 배포 뒤에 한다
 

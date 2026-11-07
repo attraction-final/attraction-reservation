@@ -257,11 +257,49 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 ### 7단계: 정리
 
-- 삭제: ASG, Launch Template, 기존 TG `attraction-final`, `deploy/compose.yml`, `deploy/user-data.sh`, `deploy/alloy/config.alloy`
-- 문서 갱신
-  - 로깅 규칙 10장(`.claude/rules/logging.md`, `docs/logging/logging.md`): Alloy·docker.sock·json-file 설명을 FireLens·Alloy 사이드카 기준으로
-  - `cd.yml` 상단 주석
-  - [ecs-migration-rationale.md](ecs-migration-rationale.md)의 상태를 "채택"으로 바꾸고 9장 결과 측정 표 채우기
+시작 조건
+- 5·6단계 검증이 끝났다.
+- 전환 뒤 새 CD로 main 배포가 한 번 이상 성공했다(ASG로 롤백할 일이 없다). 실제 사용자가 없으므로 관찰 기간은 두지 않는다.
+
+A. AWS 정리 (롤백 경로 제거)
+
+| 대상 | 방법 |
+|---|---|
+| ASG `attraction-reservation-app` (desired 0) | 삭제 |
+| Launch Template `attraction-reservation-app` | 삭제 |
+| TG `attraction-final` (5단계 이후 리스너 규칙에서 참조하지 않음) | 삭제 |
+| IAM `ec2-role`과 instance profile | 정책을 떼어 낸 뒤 삭제 (IAM 쓰기 권한이 있는 계정에서 실행). 앱 EC2만 쓰고, 붙어 있는 S3 정책은 배포 번들 버킷용이라 앱 코드는 S3를 쓰지 않는다. ECS task 역할에 S3 권한을 옮길 필요가 없다 |
+| `github-actions-role` 인라인 정책 `cd-deploy-asg` | 4단계 PR 머지 직후 지우지 않았으면 삭제 |
+| S3 앱 실행 구성 `attraction-reservation/<SHA>/` | 삭제. `attraction-reservation/monitoring/`은 남긴다 |
+| 저장소 Actions 변수 `ASG_NAME` | 삭제 |
+| ECR 저장소 3개(앱, `-fluent-bit`, `-alloy`) | lifecycle 정책 추가: 최근 30개 이미지만 남긴다. 지금은 정책이 없어 계속 쌓인다. 30개면 `workflow_dispatch` 롤백에 충분하다 |
+
+- app SG `sg-0dfee6a3408712b64`는 ECS task가 계속 쓰므로 남긴다.
+
+B. 저장소 정리 (PR 하나)
+
+| 파일 | 변경 |
+|---|---|
+| `deploy/compose.yml`, `deploy/user-data.sh`, `deploy/alloy/config.alloy` | 삭제 |
+| `.github/workflows/cd.yml` | `deploy-app`에서 S3 실행 구성 확인·업로드 step, 관련 주석, `BUNDLE_PREFIX` 제거. `ARTIFACT_BUCKET`은 `deploy-monitoring`이 계속 쓴다 |
+| `github-actions-role` 인라인 정책 `cd-deploy-bundle-s3` | 모니터링 번들만 올리므로 `attraction-reservation/monitoring/*`로 범위를 좁힌다 |
+| `src/main/resources/application-prod.yml` | `deploy/compose.yml`, `deploy/alloy`를 가리키는 주석 2곳을 ECS 기준으로 |
+| `deploy/monitoring/prometheus.yml` | 1행 주석을 `deploy/ecs/alloy` 기준으로 |
+| `docs/database/migration.md` | "ASG Instance Refresh"를 ECS 롤링 배포로 (새 task를 먼저 띄우고 기존 task를 나중에 내리는 점은 같다) |
+| 로깅 규칙 10장 (`docs/logging/logging.md`, `.claude/rules/logging.md`) | Alloy·docker.sock·docker-proxy·json-file 설명을 FireLens(Fluent Bit)·Alloy 사이드카 기준으로. rules 파일은 git에 올리지 않으므로 로컬에서 맞춘다 |
+| [ecs-migration-rationale.md](ecs-migration-rationale.md) | 상태를 "채택"으로, 9장 결과 측정 표를 4단계 배포 시간·서킷 브레이커 결과로 채운다 |
+| 이 문서 | 7단계 완료 표시와 전체 결과 요약 |
+
+순서
+1. B를 PR로 만든다.
+2. A를 실행한다.
+3. B를 머지한다. (A를 먼저 해도 지금 CD의 S3 업로드는 버킷이 남아 있어 성공하므로 순서가 바뀌어도 깨지지 않는다)
+
+검증
+- [ ] A 후 api·worker 정상, 443 리스너가 기본 규칙(ECS)과 Grafana 규칙만, 삭제한 리소스가 조회되지 않음
+- [ ] ECR lifecycle 정책이 3개 저장소에 적용됨 (`get-lifecycle-policy`)
+- [ ] B 머지 후 다음 main 배포가 S3 업로드 없이 성공, `deploy-monitoring`이 좁힌 권한으로 성공
+- [ ] 저장소에 앱 배포용 `compose.yml`·`user-data.sh`·`docker-proxy`·`Instance Refresh` 언급이 남지 않음 (모니터링 스택 `deploy/monitoring/` 제외)
 
 ## 4. 결정할 것
 

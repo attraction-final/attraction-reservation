@@ -4,11 +4,13 @@ import com.example.attractionreservation.domain.ticket.service.TicketExpirationS
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
+@ConditionalOnProperty(name = "ticket.expiration.scheduler.enabled", havingValue = "true", matchIfMissing = true)
 public class TicketExpirationScheduler {
 
     private final TicketExpirationService ticketExpirationService;

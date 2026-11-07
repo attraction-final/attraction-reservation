@@ -56,7 +56,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 검증
 - [x] 새 테스트와 기존 테스트 통과 (`e0068033`, dev 머지)
-- 현재 EC2 배포 확인은 하지 않는다. EC2 자동 배포는 main의 CI 성공이 있어야 시작되는데, main에 dev 변경분이 많이 쌓여 있어 1단계만 따로 내보낼 수 없다. 실제 동작은 3단계(api의 스케줄러 OFF)와 4단계(worker의 스케줄러 6개 실행)에서 확인한다.
+- 현재 EC2 배포 확인은 하지 않는다. EC2 자동 배포는 main의 CI 성공이 있어야 시작되는데, main에 dev 변경분이 많이 쌓여 있어 1단계만 따로 내보낼 수 없다. 실제 동작은 3단계(api의 스케줄러 OFF)와 5단계(worker의 스케줄러 6개 실행)에서 확인한다.
 
 ### 2단계: 사이드카와 task definition
 
@@ -77,7 +77,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 - 사이드카 자신의 로그는 CloudWatch Logs `/ecs/attraction-reservation`으로 보낸다. 로그 경로(Fluent Bit)가 고장 나면 Loki로는 원인을 볼 수 없기 때문이다. 앱 로그는 보내지 않는다.
 - stdout에는 logfmt만 나가야 한다는 규칙은 그대로 적용된다(`JAVA_TOOL_OPTIONS` 미사용 유지).
-- 환경마다 다른 값은 자리 표시자로 두고 5단계 CD가 채워 등록한다.
+- 환경마다 다른 값은 자리 표시자로 두고 4단계 CD가 채워 등록한다.
 
 | 자리 표시자 | 값 |
 |---|---|
@@ -100,14 +100,14 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
   - 운영 `flyway_schema_history`: V1 baseline, V2 적용(2026-11-04). 새로 적용되는 것은 V3(`attractions` 탑승 정보 컬럼 5개, NULL 허용) 하나
   - 운영 `attractions`에 V3 컬럼이 없음(`docs/sql/kan-117-…` 1단계를 직접 실행하지 않음) → `Duplicate column name` 실패 없음
   - 운영 DB에 어트랙션·슬롯 데이터가 없음(0건). 초기 데이터(`docs/sql/kan-123-…`) 적용은 이 전환과 별개로 정한다
-- [x] 4단계에서 기존 버전(ASG)과 새 버전(ECS)이 함께 트래픽을 받으므로, 기존 버전이 새 스키마에서도 동작하는지: V3가 NULL 허용 컬럼 추가뿐이라 호환됨
+- [x] 전환 전까지 기존 버전(ASG)과 새 버전(ECS)이 함께 트래픽을 받으므로, 기존 버전이 새 스키마에서도 동작하는지: V3가 NULL 허용 컬럼 추가뿐이라 호환됨
 - [x] dev에서 추가된 스케줄러가 api 프로필에서 꺼지는지: `AttractionSlotGenerationScheduler`를 `application-api.yml`에 추가하고 `SchedulerProfileTest`로 검증. 끄지 않으면 api task가 뜰 때마다 슬롯 생성이 돌고(`attraction_slots`에 UNIQUE 제약 없음) task 수만큼 중복 실행된다
 - [x] 새로 필요한 환경변수가 SSM `env/`에 있는지: `SPRING_AI_TYPESAFE_APIKEY`(Jev 연동)가 없다. 없어도 앱은 뜨고 어트랙션 Q&A만 503을 응답한다(운영에는 아직 Q&A 기능이 없음). 전환과 함께 Q&A를 열려면 SSM 파라미터와 task definition `secrets`에 추가한다
 
 - [x] Q&A(`SPRING_AI_TYPESAFE_APIKEY`)는 전환과 함께 열지 않는다(2026-11-07 결정). `secrets`는 10개 그대로 간다
 
 시작 조건
-- 앱 이미지에 슬롯 생성 스케줄러를 끄는 수정(PR #238)이 들어 있다. 리뷰를 기다리지 않고 PR 브랜치 이미지로 진행한다(2026-11-08 결정). 브랜치가 dev 최신 위에 있고 앱 코드 차이는 이 수정뿐이다. 4단계에서 트래픽을 넘기기 전에 머지된 dev SHA 이미지로 바꿔 배포한다
+- 앱 이미지에 슬롯 생성 스케줄러를 끄는 수정(PR #238)이 들어 있다. 리뷰를 기다리지 않고 PR 브랜치 이미지로 진행한다(2026-11-08 결정). 브랜치가 dev 최신 위에 있고 앱 코드 차이는 이 수정뿐이다. 4단계 새 CD의 첫 배포(main SHA)로 교체된다
 - 앱 이미지가 ECR `attraction-reservation:<커밋 SHA>`에 있다. CD는 main에서만 돌므로 이번에는 로컬에서 arm64로 빌드해 올린다(CD와 같은 태그 규칙). Dockerfile에 `RUN`이 있어 로컬 Docker에 arm64 에뮬레이션(`tonistiigi/binfmt --install arm64`)이 필요하다.
 
 사용하는 기존 리소스
@@ -125,10 +125,10 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
    - 실행 역할 `attraction-ecs-execution-role`: `AmazonECSTaskExecutionRolePolicy`(ECR pull, 로그) + 인라인 `ssm:GetParameters`(`env/*`, `PROMETHEUS_URL`). `alias/aws/ssm`은 AWS 관리형 키라 `kms:Decrypt`를 따로 주지 않는다
    - task 역할 `attraction-ecs-task-role`: ECS Exec용 `ssmmessages:*`
 4. ECS 클러스터 `attraction-reservation` (Fargate)
-5. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초. ECS 서비스는 ALB에 연결된 TG만 받으므로, HTTPS 리스너에 헤더 조건 규칙(우선순위 20, `X-Ecs-Preview: <임의 값>` → 이 TG)을 추가한다. 사용자 요청은 이 헤더가 없어 기본 규칙(`attraction-final`)으로 가고, 헤더를 붙인 확인용 요청만 ECS로 간다. 값은 저장소에 남기지 않는다. 4단계에서 기본 규칙을 가중치 forward로 바꿀 때 이 규칙을 지운다
+5. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초. ECS 서비스는 ALB에 연결된 TG만 받으므로, HTTPS 리스너에 헤더 조건 규칙(우선순위 20, `X-Ecs-Preview: <임의 값>` → 이 TG)을 추가한다. 사용자 요청은 이 헤더가 없어 기본 규칙(`attraction-final`)으로 가고, 헤더를 붙인 확인용 요청만 ECS로 간다. 값은 저장소에 남기지 않는다. 4단계 CD 검증에 쓰고, 5단계에서 기본 규칙을 이 TG로 바꾼 뒤 지운다
    - dev의 `application-prod.yml`(`probes.add-additional-paths`)은 서비스 포트에 `/readyz`를 열고 로드밸런서가 이를 보게 한다. 관리 포트(8081)의 readiness는 서비스 포트가 요청을 받는지 확인하지 않기 때문이다. 기존 TG `attraction-final`은 이 변경이 운영에 나가지 않아 아직 8081 readiness를 본다
 6. Route 53 프라이빗 호스팅 영역 `attraction.internal`(`Z0261876YAS37FHXGKQ4`)을 VPC에 연결하고 A 레코드 `loki.attraction.internal` → `10.0.130.10`(TTL 60초)을 만든다. VPC `enableDnsSupport`·`enableDnsHostnames`가 켜져 있고 DHCP 옵션이 `AmazonProvidedDNS`라 task에서 이름이 풀린다. 모니터링 EC2를 바꾸면 이 레코드만 고친다
-7. task definition 2개 등록: 자리 표시자를 위 값으로 채워 등록한다. 저장소 파일은 그대로 두고, 렌더링 자동화는 5단계 CD에서 한다
+7. task definition 2개 등록: 자리 표시자를 위 값으로 채워 등록한다. 저장소 파일은 그대로 두고, 렌더링 자동화는 4단계 CD에서 한다
 8. 서비스 생성
 
 | | api | worker |
@@ -143,7 +143,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - api task가 기동하며 운영 DB에 Flyway V3를 적용한다. NULL 허용 컬럼 추가라 기존 ASG 버전과 호환되고, 되돌리지 않는다.
 - api는 스케줄러 OFF, worker는 0개라 스케줄러 쓰기는 없다.
 - ALB에는 헤더 조건 규칙만 추가하고 기본 규칙은 바꾸지 않으므로 사용자 트래픽은 들어가지 않는다.
-- 비용: Fargate arm64 1 vCPU / 2GB task 1개(하루 약 1달러)가 4단계 완료까지 ASG와 함께 돈다.
+- 비용: Fargate arm64 1 vCPU / 2GB task 1개(하루 약 1달러)가 5단계 완료까지 ASG와 함께 돈다.
 
 검증 (2026-11-08, task `6cc6c2f5…`, 이미지 `b9682e47`)
 - [x] api task가 RUNNING이고 `attraction-app-ecs`에서 healthy
@@ -160,39 +160,48 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 롤백
 - 서비스를 desired 0으로 내리거나 삭제한다. 클러스터·TG·역할은 남겨도 사용자 트래픽에 영향이 없다.
 
-### 4단계: 트래픽 전환
+### 4단계: CD 교체 (`cd.yml`)
 
-1. ALB 443 기본 동작을 가중치 forward로 변경: 기존 TG 100 / 새 TG 0
-2. 10 → 50 → 100 순으로 이동. 단계마다 Loki 오류 로그, Grafana 5xx·지연 시간 확인
-3. 100% 이후 worker desired 1, 곧바로 ASG desired 0
-   - 전환 중 스케줄러는 ASG 인스턴스에서만 실행된다(ECS api는 스케줄러 OFF).
-   - 마지막에 잠깐 겹쳐도 멱등 처리(행 잠금, 상태 재확인, 조건부 UPDATE)로 안전하다.
+이 전환의 목표는 배포 방식(CD)을 바꾸는 것이다. 운영 DB에 어트랙션·슬롯이 없어 실제 사용자 트래픽이 없으므로, 트래픽을 단계적으로 옮기지 않고 CD를 먼저 ECS 배포로 바꿔 검증한 뒤 5단계에서 한 번에 넘긴다(2026-11-08 결정). ECS 서비스가 이미 있고 헤더 조건 규칙으로 ALB를 거친 확인도 할 수 있어 전환 전에 CD를 검증할 수 있다.
 
-검증
-- [ ] 각 가중치 단계에서 5xx 비율과 지연 시간이 전환 전과 같은 수준
-- [ ] 로그인(쿠키, CSRF), 결제 승인, 웹훅 수신 정상
-- [ ] worker로 넘긴 뒤 스케줄러 대시보드에서 worker의 `instance`로만 6개 실행 확인 (슬롯 생성은 worker 기동 시와 매일 00:05)
+시작 조건
+- PR #238이 dev에 머지되어 있다.
+- dev를 main에 올린다. CD는 main의 CI 성공으로 시작하므로 새 CD의 첫 배포가 이 릴리스가 된다.
 
-롤백
-- 가중치를 기존 TG 100으로 되돌린다.
-- worker로 넘긴 뒤라면 ASG desired 1, worker desired 0.
-
-### 5단계: CD 교체 (`cd.yml`)
-
+변경
 - `deploy-app`
   - 앱 이미지 빌드는 그대로 유지
   - task definition 2개를 렌더링·등록 → api 서비스 갱신 → 안정화 대기 → worker 서비스 갱신
+  - 렌더링 값(역할 ARN, SSM ARN 접두사, Loki 주소 `loki.attraction.internal:3100`, 사이드카 이미지)은 워크플로 변수로 둔다. 3단계에서 쓴 로컬 렌더링 스크립트를 워크플로 안으로 옮긴다
   - Instance Refresh, 직접 만든 롤백 단계 제거 (서킷 브레이커가 대신함)
   - `workflow_dispatch` 롤백: 지정한 SHA로 task definition을 만들어 갱신
   - 변경 감지용 `APP_VERSION` 파라미터는 계속 갱신
 - `deploy/ecs/**`가 바뀌면 사이드카 이미지 재빌드
 - 배포 역할 권한: `ecs:RegisterTaskDefinition`, `ecs:UpdateService`, `ecs:DescribeServices`, `ecs:DescribeTaskDefinition`, 두 역할에 대한 `iam:PassRole` 추가. `autoscaling` 권한 제거
 - `deploy-monitoring`은 변경 없음
+- 이 단계가 끝나면 main 배포는 ECS에만 반영된다. 사용자 요청은 5단계 전까지 그대로 ASG(이전 버전)가 받는다.
 
-검증
+검증 (ECS 응답은 헤더 조건 규칙으로 확인)
 - [ ] 정상 커밋 배포가 api → worker 순으로 끝나고, 배포 시간 측정
 - [ ] 일부러 readiness가 실패하는 버전을 배포해 서킷 브레이커 자동 롤백 확인
 - [ ] `workflow_dispatch`로 이전 SHA 롤백 확인
+
+### 5단계: 트래픽 전환
+
+1. ALB 443 기본 규칙을 `attraction-app-ecs`로 바꾼다. 실제 사용자 트래픽이 없어 가중치 단계와 sticky는 두지 않는다
+2. worker desired 1, RUNNING이 되면 ASG min 0 / desired 0
+   - 전환 전까지 스케줄러는 ASG 인스턴스에서만 실행된다(ECS api는 스케줄러 OFF, worker는 0개).
+   - 마지막에 잠깐 겹쳐도 멱등 처리(행 잠금, 상태 재확인, 조건부 UPDATE)로 안전하다. 슬롯 생성은 기동 시와 매일 00:05에 돌고 `attraction_slots`에 UNIQUE 제약이 없으므로 00:05 전후는 피한다.
+   - Launch Template과 기존 TG는 7단계까지 남겨 둔다.
+3. 헤더 조건 규칙(우선순위 20)을 지운다.
+
+검증
+- [ ] 헤더 없는 요청이 ECS에서 응답 (`/readyz` 200)
+- [ ] 로그인(쿠키, CSRF), 결제 승인, 웹훅 수신 정상
+- [ ] worker로 넘긴 뒤 스케줄러 대시보드에서 worker의 `instance`로만 6개 실행 확인 (슬롯 생성은 worker 기동 시와 매일 00:05), 슬롯 중복 없음
+
+롤백
+- 기본 규칙을 `attraction-final`로 되돌리고 ASG min 1 / desired 1. InService가 된 뒤 worker desired 0.
 
 ### 6단계: 알림 (Grafana Alerting)
 

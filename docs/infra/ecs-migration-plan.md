@@ -192,20 +192,33 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 ### 5단계: 트래픽 전환
 
-1. ALB 443 기본 규칙을 `attraction-app-ecs`로 바꾼다. 실제 사용자 트래픽이 없어 가중치 단계와 sticky는 두지 않는다
-2. worker desired 1, RUNNING이 되면 ASG min 0 / desired 0
-   - 전환 전까지 스케줄러는 ASG 인스턴스에서만 실행된다(ECS api는 스케줄러 OFF, worker는 0개).
-   - 마지막에 잠깐 겹쳐도 멱등 처리(행 잠금, 상태 재확인, 조건부 UPDATE)로 안전하다. 슬롯 생성은 기동 시와 매일 00:05에 돌고 `attraction_slots`에 UNIQUE 제약이 없으므로 00:05 전후는 피한다.
-   - Launch Template과 기존 TG는 7단계까지 남겨 둔다.
+시작 조건
+- 4단계가 끝나 새 CD로 main SHA가 api·worker 서비스에 배포되어 있다.
+
+전환 전 상태
+- ASG는 새 CD가 건드리지 않으므로 이전 버전(`a262e16`)으로 남아 있다. 이 버전에는 슬롯 생성 스케줄러가 없고 나머지 5개(10~30초 주기)가 돈다.
+- 슬롯 생성은 기동 시와 매일 00:05(KST)에 "오늘부터 30일 중 빈 날짜"를 채운다. 순서대로 여러 번 돌아도 중복되지 않고 동시에 돌 때만 문제가 되는데, worker에서만 돌게 되므로 ASG와 겹치지 않는다.
+
+순서
+1. ALB 443 기본 규칙을 `attraction-final` → `attraction-app-ecs`로 바꾼다. 실제 사용자 트래픽이 없어 가중치 단계와 sticky는 두지 않는다
+2. ASG min 0 / desired 0 → 인스턴스가 종료된 뒤 worker desired 1, 배포 `COMPLETED`까지 대기
+   - ASG를 먼저 내려 스케줄러가 겹쳐 실행되지 않게 한다. worker가 뜰 때까지 몇 분 동안 스케줄러가 멈추지만, 주기 작업이 다음 실행에서 밀린 일을 처리하고 실제 사용자가 없어 영향이 없다.
+   - Launch Template, 기존 TG, S3 실행 구성은 롤백용으로 7단계까지 남겨 둔다.
 3. 헤더 조건 규칙(우선순위 20)을 지운다.
 
 검증
-- [ ] 헤더 없는 요청이 ECS에서 응답 (`/readyz` 200)
-- [ ] 로그인(쿠키, CSRF), 결제 승인, 웹훅 수신 정상
-- [ ] worker로 넘긴 뒤 스케줄러 대시보드에서 worker의 `instance`로만 6개 실행 확인 (슬롯 생성은 worker 기동 시와 매일 00:05), 슬롯 중복 없음
+- [ ] 헤더 없는 요청이 ECS에서 응답: `/readyz` 200(전환 전에는 ASG가 받아 401), 공개 조회 API, `/auth/csrf`
+- [ ] 443 리스너 규칙이 기본 규칙(`attraction-app-ecs`)과 Grafana 규칙만 남음
+- [ ] 스케줄러 실행 메트릭(`tasks_scheduled_execution_seconds_count`)이 worker의 `instance`에서만 6개 나오고, EC2 `instance` 메트릭은 끊김
+- [ ] Loki에서 api·worker ERROR 0건
+- [ ] 슬롯 수가 전환 전과 같음 (어트랙션 0건이라 0건 유지)
+- 결제 승인·웹훅은 실제 흐름이 없어 이 단계에서 확인하지 않는다. 결제 연동을 실제로 쓰기 시작할 때 확인한다.
 
 롤백
-- 기본 규칙을 `attraction-final`로 되돌리고 ASG min 1 / desired 1. InService가 된 뒤 worker desired 0.
+- ALB 기본 규칙을 `attraction-final`로 되돌리고 worker desired 0 → ASG min 1 / desired 1. 인스턴스는 `APP_VERSION`(main SHA)의 S3 실행 구성으로 뜬다(4단계에서 S3 업로드를 유지한 이유). 이전 버전이 아니라 main SHA로 돌아간다.
+
+전환 뒤
+- 사용자 트래픽은 ECS api 1개, 스케줄러는 worker 1개, EC2 앱 인스턴스는 0대.
 
 ### 6단계: 알림 (Grafana Alerting)
 

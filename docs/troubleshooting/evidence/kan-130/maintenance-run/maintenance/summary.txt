@@ -1,0 +1,5 @@
+unit=ms per 1000 rows including transaction commit
+without insert values=[44.361, 48.069, 50.7905, 51.4474, 54.5113] medianMs=50.790500
+without update values=[163.7959, 171.3746, 176.0352, 184.9094, 196.334] medianMs=176.035200
+with insert values=[44.9565, 49.798, 51.7038, 53.1279, 120.0087] medianMs=51.703800
+with update values=[180.9859, 203.5859, 216.3117, 251.4792, 325.3216] medianMs=216.311700

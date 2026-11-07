@@ -1,0 +1,2 @@
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra	
+1	SIMPLE	r1_0	null	ref	uk_reservations_user_slot_active,idx_reservations_user_status_id	idx_reservations_user_status_id	8	const	500	100.0	Using index	

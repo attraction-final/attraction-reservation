@@ -168,23 +168,26 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - PR #238이 dev에 머지되어 있다.
 - dev를 main에 올린다. CD는 main의 CI 성공으로 시작하므로 새 CD의 첫 배포가 이 릴리스가 된다.
 
-변경
-- `deploy-app`
-  - 앱 이미지 빌드는 그대로 유지
-  - task definition 2개를 렌더링·등록 → api 서비스 갱신 → 안정화 대기 → worker 서비스 갱신
-  - 렌더링 값(역할 ARN, SSM ARN 접두사, Loki 주소 `loki.attraction.internal:3100`, 사이드카 이미지)은 워크플로 변수로 둔다. 3단계에서 쓴 로컬 렌더링 스크립트를 워크플로 안으로 옮긴다
-  - Instance Refresh, 직접 만든 롤백 단계 제거 (서킷 브레이커가 대신함)
-  - `workflow_dispatch` 롤백: 지정한 SHA로 task definition을 만들어 갱신
-  - 변경 감지용 `APP_VERSION` 파라미터는 계속 갱신
-- `deploy/ecs/**`가 바뀌면 사이드카 이미지 재빌드
-- 배포 역할 권한: `ecs:RegisterTaskDefinition`, `ecs:UpdateService`, `ecs:DescribeServices`, `ecs:DescribeTaskDefinition`, 두 역할에 대한 `iam:PassRole` 추가. `autoscaling` 권한 제거
-- `deploy-monitoring`은 변경 없음
+변경 (`cd.yml` `deploy-app`)
+- 앱 이미지 빌드는 그대로 유지
+- 사이드카 이미지: 태그는 `deploy/ecs/fluent-bit`, `deploy/ecs/alloy`를 마지막으로 바꾼 커밋 SHA. ECR에 그 태그가 없을 때만 빌드·push (저장소가 IMMUTABLE이라 같은 태그를 다시 올리지 않는다)
+- task definition 2개 렌더링·등록: 자리 표시자를 sed로 채운다. 채울 값이 비었거나 채우지 못한 자리 표시자가 남으면 등록하지 않는다. 3단계 로컬 렌더링 결과(`:1`)와 같은 JSON이 나오는 것을 확인했다
+- api 서비스 갱신 → 새 배포(deployment ID)의 `rolloutState`가 `COMPLETED`이면 worker 서비스 갱신, `FAILED`이거나 배포가 목록에서 사라지면 실패. 서킷 브레이커가 되돌린 뒤에도 서비스는 안정 상태가 되므로 `services-stable` 대기는 쓰지 않는다
+- 두 서비스가 모두 성공한 뒤에만 `APP_VERSION`을 갱신한다. 실패하면 그대로 두어 다음 배포가 같은 변경을 다시 감지한다. worker만 실패하면 api만 새 버전으로 남고 다음 배포가 다시 맞춘다
+- Instance Refresh 대기·직접 만든 롤백 단계 제거 (서킷 브레이커가 대신함)
+- S3 실행 구성 업로드는 7단계까지 유지: ASG 인스턴스는 기동할 때 `APP_VERSION`의 실행 구성을 받으므로, 없으면 5단계 롤백(ASG desired 1)에서 인스턴스가 뜨지 못한다
+- `workflow_dispatch` 롤백: 지정한 SHA를 checkout해 그 커밋의 템플릿으로 같은 흐름을 탄다. `deploy/ecs/`가 없는 커밋은 배포하지 않는다
+- `deploy-monitoring`, `changes`는 변경 없음
+- GitHub Environment(production) 변수 추가: `ECS_CLUSTER`, `ECS_EXECUTION_ROLE_ARN`, `ECS_TASK_ROLE_ARN`, `LOKI_HOST`, `LOKI_PORT`. 사이드카 저장소 이름은 `ECR_REPOSITORY`에 `-fluent-bit`·`-alloy`를 붙이고, SSM ARN 접두사는 계정과 `SSM_PREFIX`로 만든다. `ASG_NAME`은 7단계에서 지운다
+- 배포 역할 권한: `ecs:RegisterTaskDefinition`, `ecs:DescribeTaskDefinition`, 이 클러스터 서비스의 `ecs:UpdateService`·`ecs:DescribeServices`, 두 역할에 대한 `iam:PassRole`(`ecs-tasks.amazonaws.com`에만), 사이드카 ECR 저장소 push 추가. `autoscaling` 권한 제거
 - 이 단계가 끝나면 main 배포는 ECS에만 반영된다. 사용자 요청은 5단계 전까지 그대로 ASG(이전 버전)가 받는다.
+- `workflow_run`은 dev에 있는 `cd.yml`로 실행되므로, 이 변경이 dev에 머지된 뒤 dev → main 릴리스 전에 main push가 생기면 새 CD는 사이드카 디렉터리가 없어 실패한다. ECS와 `APP_VERSION`은 바뀌지 않는다.
 
 검증 (ECS 응답은 헤더 조건 규칙으로 확인)
-- [ ] 정상 커밋 배포가 api → worker 순으로 끝나고, 배포 시간 측정
-- [ ] 일부러 readiness가 실패하는 버전을 배포해 서킷 브레이커 자동 롤백 확인
-- [ ] `workflow_dispatch`로 이전 SHA 롤백 확인
+- [x] actionlint(shellcheck 포함) 통과, 렌더링·배포 판정 스크립트를 로컬에서 실행 (렌더링 결과가 `:1`과 같음, 빈 변수·남은 자리 표시자에서 실패, 실제 서비스의 완료 배포는 성공·없는 배포는 실패로 판정)
+- [ ] 서킷 브레이커: 운영 이미지 `a262e16`(8080에 `/readyz` 없음)으로 task definition을 등록해 api를 직접 갱신 → 자동 롤백되고, 같은 배포 ID로 판정 스크립트가 실패를 돌려주는지 확인. main에 일부러 깨진 커밋을 넣지 않는다
+- [ ] dev → main 릴리스(새 CD 첫 실행)가 api → worker 순으로 끝나고, 배포 시간 측정
+- [ ] `workflow_dispatch`: 같은 SHA로 재배포해 경로 확인. 이전 SHA로 되돌리는 확인은 다음 main 배포 뒤에 한다
 
 ### 5단계: 트래픽 전환
 

@@ -107,8 +107,8 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - [x] Q&A(`SPRING_AI_TYPESAFE_APIKEY`)는 전환과 함께 열지 않는다(2026-11-07 결정). `secrets`는 10개 그대로 간다
 
 시작 조건
-- 슬롯 생성 스케줄러를 끄는 수정(PR #238)이 dev에 머지되어 있다.
-- dev 최신 앱 이미지가 ECR `attraction-reservation:<커밋 SHA>`에 있다. CD는 main에서만 돌므로 이번에는 로컬에서 arm64로 빌드해 올린다(CD와 같은 태그 규칙). Dockerfile에 `RUN`이 있어 로컬 Docker에 arm64 에뮬레이션(`tonistiigi/binfmt --install arm64`)이 필요하다.
+- 앱 이미지에 슬롯 생성 스케줄러를 끄는 수정(PR #238)이 들어 있다. 리뷰를 기다리지 않고 PR 브랜치 이미지로 진행한다(2026-11-08 결정). 브랜치가 dev 최신 위에 있고 앱 코드 차이는 이 수정뿐이다. 4단계에서 트래픽을 넘기기 전에 머지된 dev SHA 이미지로 바꿔 배포한다
+- 앱 이미지가 ECR `attraction-reservation:<커밋 SHA>`에 있다. CD는 main에서만 돌므로 이번에는 로컬에서 arm64로 빌드해 올린다(CD와 같은 태그 규칙). Dockerfile에 `RUN`이 있어 로컬 Docker에 arm64 에뮬레이션(`tonistiigi/binfmt --install arm64`)이 필요하다.
 
 사용하는 기존 리소스
 | 항목 | 값 |

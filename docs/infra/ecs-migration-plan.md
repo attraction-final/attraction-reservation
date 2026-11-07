@@ -18,7 +18,7 @@
 | 앱 환경변수 | SSM `/attraction-reservation/prod/env/` 아래 10개 (`JWT_SECRET`, `PORTONE_API_SECRET`, `PORTONE_CHANNEL_KEY`, `PORTONE_STORE_ID`, `PORTONE_WEBHOOK_SECRET`, `REDIS_HOST`, `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATA_REDIS_SSL_ENABLED`) |
 | 로그·메트릭 | Alloy가 docker.sock으로 app stdout을 읽어 Loki로, `app:8081`을 스크랩해 Prometheus로 보냄 |
 | 모니터링 | 모니터링 EC2(`10.0.130.10`)에서 Prometheus·Loki·Grafana. **이번 전환 범위 밖** |
-| 스케줄러 | 5개. 4개는 `*.scheduler.enabled` 스위치 있음, `TicketExpirationScheduler`는 없음. 스케줄러 스레드 풀 3 |
+| 스케줄러 | 6개. 운영(ASG)에는 5개, `AttractionSlotGenerationScheduler`(KAN-123, 기동 시 + 매일 00:05)는 dev에만 있다. 모두 `*.scheduler.enabled` 스위치 있음. 스케줄러 스레드 풀 3 |
 
 ## 2. 목표 구성
 
@@ -36,7 +36,8 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 | 프로필 | `prod,api` | `prod` |
 | ALB | 새 TG(ip)에 연결 | 연결하지 않음 |
 | 8080 인바운드 | ALB에서만 | 열지 않음 |
-| 8081 | ALB 헬스체크, 메트릭 | 컨테이너 헬스체크, 메트릭 |
+| 헬스체크 | ALB: 8080 `/readyz` | 컨테이너 헬스체크: 8081 liveness |
+| 8081 | 메트릭 | 메트릭 |
 | 개수 | 1~N | 1 |
 | 배포 | 최소 100% / 최대 200%, 서킷 브레이커 | 최소 0% / 최대 100% (이전 worker와 겹치지 않게), 서킷 브레이커 |
 
@@ -50,12 +51,12 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 |---|---|
 | `TicketExpirationScheduler.java` | `@ConditionalOnProperty(name = "ticket.expiration.scheduler.enabled", havingValue = "true", matchIfMissing = true)` 추가 |
 | `application.yaml` | `ticket.expiration.scheduler.enabled: true` 추가. `spring.task.scheduling.shutdown.await-termination: true`, 대기 시간 20s(`stopTimeout` 30s보다 짧게) 추가 |
-| `application-api.yml` (새 파일) | 스케줄러 5개 `enabled: false` |
-| 스케줄러 프로필 테스트 (새 파일) | `api` 프로필이면 스케줄러 빈이 없고, 기본이면 5개가 모두 등록되는지 검증 |
+| `application-api.yml` (새 파일) | 스케줄러 `enabled: false` (처음 5개, 이후 KAN-123 슬롯 생성 스케줄러 추가로 6개) |
+| 스케줄러 프로필 테스트 (새 파일) | `api` 프로필이면 스케줄러 빈이 없고, 기본이면 모두 등록되는지 검증 |
 
 검증
 - [x] 새 테스트와 기존 테스트 통과 (`e0068033`, dev 머지)
-- 현재 EC2 배포 확인은 하지 않는다. EC2 자동 배포는 main의 CI 성공이 있어야 시작되는데, main에 dev 변경분이 많이 쌓여 있어 1단계만 따로 내보낼 수 없다. 실제 동작은 3단계(api의 스케줄러 OFF)와 4단계(worker의 스케줄러 5개 실행)에서 확인한다.
+- 현재 EC2 배포 확인은 하지 않는다. EC2 자동 배포는 main의 CI 성공이 있어야 시작되는데, main에 dev 변경분이 많이 쌓여 있어 1단계만 따로 내보낼 수 없다. 실제 동작은 3단계(api의 스케줄러 OFF)와 4단계(worker의 스케줄러 6개 실행)에서 확인한다.
 
 ### 2단계: 사이드카와 task definition
 
@@ -70,7 +71,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 | 컨테이너 | 메모리 상한 | essential | 비고 |
 |---|---|---|---|
-| `app` | 1400MB | O | `stopTimeout: 30`, `secrets` 10개(`env/*`), 로그 드라이버 `awsfirelens`, `log-router`가 뜬 뒤 시작 |
+| `app` | 1400MB | O | `stopTimeout: 30`, `secrets` 10개(`env/*`, `SPRING_AI_TYPESAFE_APIKEY`를 넣으면 11개), 로그 드라이버 `awsfirelens`, `log-router`가 뜬 뒤 시작 |
 | `log-router` | 128MB | O | 멈추면 앱 로그가 사라지므로 task를 함께 내린다. 종료는 app보다 늦다(의존 관계 역순) |
 | `alloy` | 256MB | X | 메트릭이 끊겨도 서비스는 유지한다. 6단계 알림(`up` 없음)으로 감지 |
 
@@ -95,15 +96,20 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 ### 3단계: AWS 리소스 생성
 
 사전 확인: api task는 dev 최신 이미지로 뜨므로, 사용자 트래픽이 없어도 기동하면서 운영 DB에 Flyway 마이그레이션을 적용한다. 운영 앱(`APP_VERSION`)과 dev 사이의 변경을 먼저 검토한다.
-- [ ] 적용될 마이그레이션 목록과 운영 DB에 적용할 수 있는지
-- [ ] 4단계에서 기존 버전(ASG)과 새 버전(ECS)이 함께 트래픽을 받으므로, 기존 버전이 새 스키마에서도 동작하는지 (컬럼 삭제·이름 변경 등 호환되지 않는 변경이 있는지)
-- [ ] 새로 필요한 환경변수가 SSM `env/`에 있는지
+- [x] 적용될 마이그레이션 목록과 운영 DB에 적용할 수 있는지 (2026-11-07 확인)
+  - 운영 `flyway_schema_history`: V1 baseline, V2 적용(2026-11-04). 새로 적용되는 것은 V3(`attractions` 탑승 정보 컬럼 5개, NULL 허용) 하나
+  - 운영 `attractions`에 V3 컬럼이 없음(`docs/sql/kan-117-…` 1단계를 직접 실행하지 않음) → `Duplicate column name` 실패 없음
+  - 운영 DB에 어트랙션·슬롯 데이터가 없음(0건). 초기 데이터(`docs/sql/kan-123-…`) 적용은 이 전환과 별개로 정한다
+- [x] 4단계에서 기존 버전(ASG)과 새 버전(ECS)이 함께 트래픽을 받으므로, 기존 버전이 새 스키마에서도 동작하는지: V3가 NULL 허용 컬럼 추가뿐이라 호환됨
+- [x] dev에서 추가된 스케줄러가 api 프로필에서 꺼지는지: `AttractionSlotGenerationScheduler`를 `application-api.yml`에 추가하고 `SchedulerProfileTest`로 검증. 끄지 않으면 api task가 뜰 때마다 슬롯 생성이 돌고(`attraction_slots`에 UNIQUE 제약 없음) task 수만큼 중복 실행된다
+- [ ] 새로 필요한 환경변수가 SSM `env/`에 있는지: `SPRING_AI_TYPESAFE_APIKEY`(Jev 연동)가 없다. 없어도 앱은 뜨고 어트랙션 Q&A만 503을 응답한다(운영에는 아직 Q&A 기능이 없음). 전환과 함께 Q&A를 열려면 SSM 파라미터와 task definition `secrets`에 추가한다
 
 1. ECS 클러스터 `attraction-reservation` (Fargate), 사이드카 로그 그룹 `/ecs/attraction-reservation` (보존 7일)
 2. IAM
    - Task 실행 역할: ECR pull, SSM `env/*`·`PROMETHEUS_URL` 읽기와 KMS 복호화, 사이드카 로그용 `logs:CreateLogStream`·`logs:PutLogEvents`
    - Task 역할: ECS Exec용 `ssmmessages:*`
-3. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 8081 readiness, 등록 해제 지연 60초
+3. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초
+   - dev의 `application-prod.yml`(`probes.add-additional-paths`)은 서비스 포트에 `/readyz`를 열고 로드밸런서가 이를 보게 한다. 관리 포트(8081)의 readiness는 서비스 포트가 요청을 받는지 확인하지 않기 때문이다. 기존 TG `attraction-final`은 이 변경이 운영에 나가지 않아 아직 8081 readiness를 본다
 4. task SG: 기존 app SG 재사용 (RDS 3306, Redis 6379, Loki 3100, Prometheus 9090, ALB → 8080·8081 규칙 유지)
 5. 사이드카 이미지 2개를 ECR에 push
 6. 서비스 생성
@@ -128,7 +134,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 검증
 - [ ] 각 가중치 단계에서 5xx 비율과 지연 시간이 전환 전과 같은 수준
 - [ ] 로그인(쿠키, CSRF), 결제 승인, 웹훅 수신 정상
-- [ ] worker로 넘긴 뒤 스케줄러 대시보드에서 worker의 `instance`로만 5개 실행 확인
+- [ ] worker로 넘긴 뒤 스케줄러 대시보드에서 worker의 `instance`로만 6개 실행 확인 (슬롯 생성은 worker 기동 시와 매일 00:05)
 
 롤백
 - 가중치를 기존 TG 100으로 되돌린다.

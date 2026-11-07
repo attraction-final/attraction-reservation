@@ -84,7 +84,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 | `<APP_IMAGE>`, `<FLUENT_BIT_IMAGE>`, `<ALLOY_IMAGE>` | ECR 이미지 주소:태그 |
 | `<EXECUTION_ROLE_ARN>`, `<TASK_ROLE_ARN>` | 3단계에서 만드는 역할 |
 | `<SSM_PARAMETER_ARN_PREFIX>` | `arn:aws:ssm:<리전>:<계정>:parameter/attraction-reservation/prod` |
-| `<LOKI_HOST>`, `<LOKI_PORT>` | SSM `LOKI_URL`에서 나눈 값 (Fluent Bit Loki 출력은 URL이 아니라 host·port를 받는다) |
+| `<LOKI_HOST>`, `<LOKI_PORT>` | `loki.attraction.internal`, `3100` (Fluent Bit Loki 출력은 URL이 아니라 host·port를 받는다). 모니터링 EC2가 바뀌어도 task definition을 다시 등록하지 않도록 IP 대신 프라이빗 DNS 이름을 쓴다 |
 | `<AWS_REGION>` | 사이드카 로그 그룹 리전 |
 
 검증 (2026-11-07 완료)
@@ -127,8 +127,9 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 4. ECS 클러스터 `attraction-reservation` (Fargate)
 5. 새 TG `attraction-app-ecs`: ip 유형, HTTP 8080, 헬스체크 **8080 `/readyz`**, 등록 해제 지연 60초. ALB 리스너에는 연결하지 않는다(4단계에서 연결)
    - dev의 `application-prod.yml`(`probes.add-additional-paths`)은 서비스 포트에 `/readyz`를 열고 로드밸런서가 이를 보게 한다. 관리 포트(8081)의 readiness는 서비스 포트가 요청을 받는지 확인하지 않기 때문이다. 기존 TG `attraction-final`은 이 변경이 운영에 나가지 않아 아직 8081 readiness를 본다
-6. task definition 2개 등록: 자리 표시자를 위 값으로 채워 등록한다. 저장소 파일은 그대로 두고, 렌더링 자동화는 5단계 CD에서 한다
-7. 서비스 생성
+6. Route 53 프라이빗 호스팅 영역 `attraction.internal`(`Z0261876YAS37FHXGKQ4`)을 VPC에 연결하고 A 레코드 `loki.attraction.internal` → `10.0.130.10`(TTL 60초)을 만든다. VPC `enableDnsSupport`·`enableDnsHostnames`가 켜져 있고 DHCP 옵션이 `AmazonProvidedDNS`라 task에서 이름이 풀린다. 모니터링 EC2를 바꾸면 이 레코드만 고친다
+7. task definition 2개 등록: 자리 표시자를 위 값으로 채워 등록한다. 저장소 파일은 그대로 두고, 렌더링 자동화는 5단계 CD에서 한다
+8. 서비스 생성
 
 | | api | worker |
 |---|---|---|
@@ -151,6 +152,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - [ ] api task에 스케줄러 실행 메트릭이 없음 (`api` 프로필 적용)
 - [ ] `flyway_schema_history`에 V3 성공 기록, 슬롯 0건 그대로
 - [ ] 사이드카 로그가 CloudWatch `/ecs/attraction-reservation`에 남고 오류가 없음
+- [ ] task 안에서 `loki.attraction.internal`이 `10.0.130.10`으로 풀림 (ECS Exec). Route 53 `TestDNSAnswer`는 프라이빗 영역을 지원하지 않아 VPC 안에서 확인한다
 - [ ] ECS Exec로 app 컨테이너 접속
 - [ ] ALB 리스너 규칙이 바뀌지 않음 (사용자 트래픽 없음)
 
@@ -219,3 +221,4 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - 모니터링 스택을 ECS나 관리형(AMP, Amazon Managed Grafana)으로 이전
 - ElastiCache 복제본, RDS Multi-AZ
 - `TicketExpirationScheduler`의 `SKIP LOCKED` 적용과 로그 형식 정리 (worker를 여러 개로 늘릴 때 함께 진행)
+- 모니터링 주소를 프라이빗 DNS 이름으로 통일: EC2 Alloy의 Loki 주소, SSM `LOKI_URL`·`PROMETHEUS_URL`(EC2와 함께 쓰는 값이라 이번에 바꾸지 않음. Prometheus 레코드도 그때 만든다)

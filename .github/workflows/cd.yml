@@ -35,7 +35,7 @@ name: CD
 #   4. 실패하면 MONITORING_VERSION을 이전 값으로 되돌린다. (다음 배포에서 같은 변경을 다시 반영한다)
 #      인스턴스에 받은 설정은 되돌리지 않으므로, 다음 배포 전까지 일부만 바뀐 설정으로 동작할 수 있다.
 #
-# GitHub Environment(production)에 필요한 설정
+# GitHub Actions 변수 (저장소 변수, job은 production Environment에서 실행)
 #   vars.AWS_REGION            예: ap-northeast-2
 #   vars.AWS_DEPLOY_ROLE_ARN   GitHub OIDC로 맡을 배포 역할
 #   vars.ECR_REPOSITORY        이미지를 올릴 ECR 저장소 이름
@@ -351,7 +351,7 @@ jobs:
           for NAME in REGISTRY SIDECAR_TAG ECR_REPOSITORY SSM_PREFIX ECS_CLUSTER \
             ECS_EXECUTION_ROLE_ARN ECS_TASK_ROLE_ARN LOKI_HOST LOKI_PORT; do
             if [ -z "${!NAME}" ]; then
-              echo "::error::${NAME} 값이 비어 있습니다. GitHub Environment(production) 변수를 확인하세요."
+              echo "::error::${NAME} 값이 비어 있습니다. GitHub Actions 변수를 확인하세요."
               exit 1
             fi
           done

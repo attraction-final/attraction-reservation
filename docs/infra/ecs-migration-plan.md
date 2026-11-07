@@ -178,7 +178,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - S3 실행 구성 업로드는 7단계까지 유지: ASG 인스턴스는 기동할 때 `APP_VERSION`의 실행 구성을 받으므로, 없으면 5단계 롤백(ASG desired 1)에서 인스턴스가 뜨지 못한다
 - `workflow_dispatch` 롤백: 지정한 SHA를 checkout해 그 커밋의 템플릿으로 같은 흐름을 탄다. `deploy/ecs/`가 없는 커밋은 배포하지 않는다
 - `deploy-monitoring`, `changes`는 변경 없음
-- GitHub Environment(production) 변수 추가: `ECS_CLUSTER`, `ECS_EXECUTION_ROLE_ARN`, `ECS_TASK_ROLE_ARN`, `LOKI_HOST`, `LOKI_PORT`. 사이드카 저장소 이름은 `ECR_REPOSITORY`에 `-fluent-bit`·`-alloy`를 붙이고, SSM ARN 접두사는 계정과 `SSM_PREFIX`로 만든다. `ASG_NAME`은 7단계에서 지운다
+- GitHub Actions 저장소 변수 추가: `ECS_CLUSTER`, `ECS_EXECUTION_ROLE_ARN`, `ECS_TASK_ROLE_ARN`, `LOKI_HOST`, `LOKI_PORT`. 사이드카 저장소 이름은 `ECR_REPOSITORY`에 `-fluent-bit`·`-alloy`를 붙이고, SSM ARN 접두사는 계정과 `SSM_PREFIX`로 만든다. `ASG_NAME`은 7단계에서 지운다
 - 배포 역할 권한: `ecs:RegisterTaskDefinition`, `ecs:DescribeTaskDefinition`, 이 클러스터 서비스의 `ecs:UpdateService`·`ecs:DescribeServices`, 두 역할에 대한 `iam:PassRole`(`ecs-tasks.amazonaws.com`에만), 사이드카 ECR 저장소 push 추가. `autoscaling` 권한 제거
 - 이 단계가 끝나면 main 배포는 ECS에만 반영된다. 사용자 요청은 5단계 전까지 그대로 ASG(이전 버전)가 받는다.
 - `workflow_run`은 dev에 있는 `cd.yml`로 실행되므로, 이 변경이 dev에 머지된 뒤 dev → main 릴리스 전에 main push가 생기면 새 CD는 사이드카 디렉터리가 없어 실패한다. ECS와 `APP_VERSION`은 바뀌지 않는다.

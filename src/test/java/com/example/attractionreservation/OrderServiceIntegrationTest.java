@@ -35,7 +35,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import com.example.attractionreservation.domain.payment.port.PaymentGateway;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -46,9 +48,12 @@ import java.time.Clock;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -81,6 +86,10 @@ class OrderServiceIntegrationTest {
 
     @MockitoSpyBean
     private Clock clock;
+
+    // 만료 취소는 취소 전에 PG 결제 상태를 확인한다. 실제 PG를 호출하지 않도록 대체한다.
+    @MockitoBean
+    private PaymentGateway paymentGateway;
 
     @Test
     @DisplayName("주문과 항목을 DB에 함께 저장하고 상품 가격 변경 후에도 주문 단가를 유지한다")
@@ -313,6 +322,8 @@ class OrderServiceIntegrationTest {
         Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
 
         doReturn(now).when(clock).instant();
+        // 결제창을 열지 않은 주문처럼 PG에 결제가 없다.
+        when(paymentGateway.getPayment(anyString())).thenReturn(Optional.empty());
 
         TransactionTemplate transaction =
                 new TransactionTemplate(transactionManager);
@@ -565,6 +576,9 @@ class OrderServiceIntegrationTest {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @DisplayName("자동 취소에서 실패한 주문은 롤백하고 다음 정상 주문은 취소한다")
     void updateExpiredOrdersByCancel_failureDoesNotBlockNextOrder() {
+        // 결제창을 열지 않은 주문처럼 PG에 결제가 없다.
+        when(paymentGateway.getPayment(anyString())).thenReturn(Optional.empty());
+
         TransactionTemplate transaction =
                 new TransactionTemplate(transactionManager);
 
@@ -620,7 +634,7 @@ class OrderServiceIntegrationTest {
 
             // 서비스 처리가 끝난 후 새 트랜잭션에서 실제 저장 상태를 확인한다.
             transaction.executeWithoutResult(status -> {
-                // 결제가 완료된 주문의 취소 시도는 롤백된다.
+                // 결제가 완료된 주문은 취소 전 결제 확인에서 건너뛰어 그대로 남는다.
                 assertThat(orderRepository.findById(ids[1])
                         .orElseThrow().getStatus())
                         .isEqualTo(OrderStatus.PENDING);

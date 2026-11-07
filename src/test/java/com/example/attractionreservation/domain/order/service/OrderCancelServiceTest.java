@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.order.service;
 
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.facade.PaymentFacade;
 import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
@@ -23,12 +25,15 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.data.domain.Pageable;
 
 import java.time.temporal.ChronoUnit;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class OrderCancelServiceTest {
 
     @Mock
@@ -55,6 +60,9 @@ class OrderCancelServiceTest {
 
     @Mock
     private PaymentService paymentService;
+
+    @Mock
+    private PaymentFacade paymentFacade;
 
     @Mock
     private OrderCancelProcessor orderCancelProcessor;
@@ -478,5 +486,215 @@ class OrderCancelServiceTest {
         verify(orderCancelProcessor).cancelExpiredOrder(
                 eq(102L), eq(1L), any(Instant.class)
         );
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentSyncResult.class, names = {"NOT_PAID", "NOT_OUR_PAYMENT"})
+    @DisplayName("PG에서 결제되지 않은 만료 주문은 취소한다")
+    void updateExpiredOrdersByCancel_unpaidAtPg_cancelled(PaymentSyncResult result) {
+        // given
+        givenExpiredOrderWithPayment();
+        when(paymentFacade.syncPayment("pg-101")).thenReturn(result);
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(101L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PaymentSyncResult.class, names = {"APPROVED", "ALREADY_DONE", "PG_FAILED", "COMPENSATED", "STATE_CONFLICT", "REFUND_SYNC_REQUIRED"})
+    @DisplayName("PG에서 결제·실패가 확인된 만료 주문은 결제 처리 경로가 정리하므로 취소하지 않는다")
+    void updateExpiredOrdersByCancel_settledAtPg_notCancelled(PaymentSyncResult result) {
+        // given
+        givenExpiredOrderWithPayment();
+        when(paymentFacade.syncPayment("pg-101")).thenReturn(result);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isZero();
+        verifyNoInteractions(orderCancelProcessor);
+    }
+
+    @Test
+    @DisplayName("결제창을 열지 않아 PG에 결제가 없는 만료 주문은 취소한다")
+    void updateExpiredOrdersByCancel_noPaymentAtPg_cancelled() {
+        // given
+        givenExpiredOrderWithPayment();
+        when(paymentFacade.syncPayment("pg-101"))
+                .thenThrow(new BusinessException(ErrorCode.PAYMENT_PG_PAYMENT_NOT_FOUND));
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(101L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("한 주문의 PG 조회만 실패하면 그 주문만 취소하지 않고 다음 주문을 처리한다")
+    void updateExpiredOrdersByCancel_singlePgLookupFailed_continuesNextOrder() {
+        // given
+        givenExpiredOrdersWithPayment(101L, 102L);
+        when(paymentFacade.syncPayment("pg-101"))
+                .thenThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+        when(paymentFacade.syncPayment("pg-102")).thenReturn(PaymentSyncResult.NOT_PAID);
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(102L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+        verify(orderCancelProcessor, never()).cancelExpiredOrder(
+                eq(101L), any(), any(Instant.class)
+        );
+    }
+
+    @Test
+    @DisplayName("PG 조회가 연속 3번 실패하면 PG 장애로 보고 남은 주문은 다음 주기로 넘긴다")
+    void updateExpiredOrdersByCancel_threeConsecutivePgLookupsFailed_stopsCycle() {
+        // given
+        givenExpiredOrdersWithPayment(101L, 102L, 103L, 104L);
+        for (String pgId : List.of("pg-101", "pg-102", "pg-103")) {
+            when(paymentFacade.syncPayment(pgId))
+                    .thenThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+        }
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isZero();
+        verify(orderRepository, never()).findPaymentPgIdByOrderId(104L);
+        verifyNoInteractions(orderCancelProcessor);
+    }
+
+    @Test
+    @DisplayName("PG 조회가 중간에 성공하면 연속 실패 횟수를 다시 센다")
+    void updateExpiredOrdersByCancel_pgLookupSucceededBetweenFailures_continues() {
+        // given
+        givenExpiredOrdersWithPayment(101L, 102L, 103L, 104L, 105L);
+        for (String pgId : List.of("pg-101", "pg-102", "pg-104", "pg-105")) {
+            when(paymentFacade.syncPayment(pgId))
+                    .thenThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+        }
+        when(paymentFacade.syncPayment("pg-103")).thenReturn(PaymentSyncResult.NOT_PAID);
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(103L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+        verify(paymentFacade).syncPayment("pg-105");
+    }
+
+    @Test
+    @DisplayName("PG 조회 실패는 연동 클라이언트가 이미 기록하므로 자동 취소 실패를 ERROR로 다시 남기지 않는다")
+    void updateExpiredOrdersByCancel_pgLookupFailed_noErrorLog(CapturedOutput output) {
+        // given
+        givenExpiredOrderWithPayment();
+        when(paymentFacade.syncPayment("pg-101"))
+                .thenThrow(new BusinessException(ErrorCode.PAYMENT_GATEWAY_ERROR));
+
+        // when
+        orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(output.getOut())
+                .doesNotContain("event=ORDER_AUTO_CANCEL_FAILED")
+                .contains("event=ORDER_AUTO_CANCEL_PROCESSED")
+                .contains("failureCodes=\"PAYMENT_GATEWAY_ERROR\"");
+    }
+
+    @Test
+    @DisplayName("PG 조회 실패가 아닌 서버 오류는 자동 취소 실패를 ERROR로 남기고 다음 주문을 처리한다")
+    void updateExpiredOrdersByCancel_serverErrorOnCancel_errorLoggedAndContinues(CapturedOutput output) {
+        // given
+        Order failedOrder = createOrder(1L);
+        Order nextOrder = createOrder(1L);
+        ReflectionTestUtils.setField(nextOrder, "id", 102L);
+        when(orderRepository.findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                any(Instant.class),
+                any(Pageable.class)
+        )).thenReturn(List.of(failedOrder, nextOrder));
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(101L), eq(1L), any(Instant.class)
+        )).thenThrow(new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR));
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(102L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+        assertThat(output.getOut())
+                .contains("event=ORDER_AUTO_CANCEL_FAILED")
+                .contains("errorCode=INTERNAL_SERVER_ERROR");
+    }
+
+    @Test
+    @DisplayName("결제 데이터가 없는 만료 주문은 PG를 조회하지 않고 취소한다")
+    void updateExpiredOrdersByCancel_noPaymentRow_cancelledWithoutPgLookup() {
+        // given
+        when(orderRepository.findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                any(Instant.class),
+                any(Pageable.class)
+        )).thenReturn(List.of(createOrder(1L)));
+        when(orderRepository.findPaymentPgIdByOrderId(101L)).thenReturn(Optional.empty());
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(101L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+        verifyNoInteractions(paymentFacade);
+    }
+
+    // 회원 1의 만료 주문들과 각 주문의 결제(pg-{주문 ID})를 준비한다.
+    private void givenExpiredOrdersWithPayment(Long... orderIds) {
+        List<Order> orders = new ArrayList<>();
+        for (Long orderId : orderIds) {
+            Order order = createOrder(1L);
+            ReflectionTestUtils.setField(order, "id", orderId);
+            orders.add(order);
+            lenient().when(orderRepository.findPaymentPgIdByOrderId(orderId))
+                    .thenReturn(Optional.of("pg-" + orderId));
+        }
+        when(orderRepository.findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                any(Instant.class),
+                any(Pageable.class)
+        )).thenReturn(orders);
+    }
+
+    private void givenExpiredOrderWithPayment() {
+        when(orderRepository.findExpiredPendingOrders(
+                eq(OrderStatus.PENDING),
+                any(Instant.class),
+                any(Pageable.class)
+        )).thenReturn(List.of(createOrder(1L)));
+        when(orderRepository.findPaymentPgIdByOrderId(101L)).thenReturn(Optional.of("pg-101"));
     }
 }

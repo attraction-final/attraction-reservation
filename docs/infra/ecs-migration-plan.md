@@ -222,9 +222,38 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 ### 6단계: 알림 (Grafana Alerting)
 
-- worker의 스케줄러 실행 횟수 5분간 0 (`tasks_scheduled_execution_seconds_count`)
-- api 5xx 비율 상승, ALB 정상 대상 0
-- (가능하면) 미처리 웹훅·환불 적체량
+현재 상태
+- Grafana에는 알림 설정이 없다. provisioning에는 데이터소스(Prometheus, Loki, CloudWatch)와 대시보드 4개만 있다.
+- 미처리 웹훅·환불 적체량을 나타내는 앱 지표가 없다. 적체량 알림은 앱 코드에 gauge를 추가해야 하므로 이번 범위에서 뺀다(범위 밖).
+- Grafana `.env`는 모니터링 인스턴스가 처음 뜰 때 user-data가 SSM에서 한 번 만든다. CD(`deploy-monitoring`)는 `.env`를 건드리지 않는다.
+
+알림 받을 곳: Slack incoming webhook (2026-11-08 결정)
+- webhook URL은 SSM `monitoring/ALERT_WEBHOOK_URL`(SecureString)에 둔다. 값은 저장소에 남기지 않는다.
+
+규칙 (이번 전환과 관련된 장애만)
+
+| 규칙 | 조건 | 데이터 |
+|---|---|---|
+| api 정상 대상 0 | `attraction-app-ecs` `HealthyHostCount` < 1, 2분 | CloudWatch ALB |
+| worker 스케줄러 멈춤 | worker `tasks_scheduled_execution_seconds_count`가 10분 동안 늘지 않음 (worker task가 없을 때도 잡힌다) | Prometheus |
+| api 5xx | 5분 동안 5xx 비율 5% 초과 그리고 5건 이상 (요청이 적을 때 한두 건으로 울리지 않게) | Prometheus |
+| api 메트릭 끊김 | `up{service="api"}`가 5분 동안 없음. Alloy 사이드카는 essential이 아니라 죽어도 task가 남는다 | Prometheus |
+
+- 로그 라우터(Fluent Bit)는 essential이라 죽으면 task가 내려가 "api 정상 대상 0"으로 잡힌다.
+- CD 실패는 GitHub Actions 실패 알림으로 받는다.
+
+변경
+- `deploy/monitoring/grafana/provisioning/alerting/alerts.yml` (새 파일): 규칙 4개, Slack contact point, 알림 정책. webhook URL은 환경변수로 참조한다
+- `deploy/monitoring/compose.yml`: grafana에 webhook 환경변수 전달
+- `deploy/monitoring/user-data.sh`: `.env`를 만들 때 webhook도 SSM에서 받는다
+- `cd.yml` `deploy-monitoring`: Run Command 스크립트가 배포마다 SSM에서 `.env`를 다시 만든다. 이미 떠 있는 인스턴스에도 새 비밀값이 들어가야 하기 때문이다
+- 모니터링 역할(`monitoring-ec2-role`)은 `monitoring/*` SSM 읽기와 CloudWatch 지표 읽기 권한이 있다(구현 때 CloudWatch ALB 지표 조회 확인)
+- 반영은 `deploy/monitoring/`이 바뀐 main 배포 때 CD가 한다
+
+검증
+- [ ] 로컬 Grafana 13.3.0에 provisioning을 올려 규칙 4개와 contact point가 로드됨
+- [ ] 배포 후 contact point 테스트 알림이 Slack에 옴
+- [ ] worker desired 0으로 잠깐 내려 "worker 스케줄러 멈춤" 알림이 오고, 되돌리면 해제 알림이 옴
 
 ### 7단계: 정리
 
@@ -248,4 +277,5 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - 모니터링 스택을 ECS나 관리형(AMP, Amazon Managed Grafana)으로 이전
 - ElastiCache 복제본, RDS Multi-AZ
 - `TicketExpirationScheduler`의 `SKIP LOCKED` 적용과 로그 형식 정리 (worker를 여러 개로 늘릴 때 함께 진행)
+- 미처리 웹훅·환불 적체량 지표(gauge)와 알림 (앱 코드 변경이 필요)
 - 모니터링 주소를 프라이빗 DNS 이름으로 통일: EC2 Alloy의 Loki 주소, SSM `LOKI_URL`·`PROMETHEUS_URL`(EC2와 함께 쓰는 값이라 이번에 바꾸지 않음. Prometheus 레코드도 그때 만든다)

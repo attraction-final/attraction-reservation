@@ -54,8 +54,8 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 | 스케줄러 프로필 테스트 (새 파일) | `api` 프로필이면 스케줄러 빈이 없고, 기본이면 5개가 모두 등록되는지 검증 |
 
 검증
-- [ ] 새 테스트와 기존 테스트 통과
-- [ ] 현재 EC2에 배포 후 스케줄러 대시보드에서 5개 모두 실행 확인
+- [x] 새 테스트와 기존 테스트 통과 (`e0068033`, dev 머지)
+- 현재 EC2 배포 확인은 하지 않는다. EC2 자동 배포는 main의 CI 성공이 있어야 시작되는데, main에 dev 변경분이 많이 쌓여 있어 1단계만 따로 내보낼 수 없다. 실제 동작은 3단계(api의 스케줄러 OFF)와 4단계(worker의 스케줄러 5개 실행)에서 확인한다.
 
 ### 2단계: 사이드카와 task definition
 
@@ -94,6 +94,11 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 ### 3단계: AWS 리소스 생성
 
+사전 확인: api task는 dev 최신 이미지로 뜨므로, 사용자 트래픽이 없어도 기동하면서 운영 DB에 Flyway 마이그레이션을 적용한다. 운영 앱(`APP_VERSION`)과 dev 사이의 변경을 먼저 검토한다.
+- [ ] 적용될 마이그레이션 목록과 운영 DB에 적용할 수 있는지
+- [ ] 4단계에서 기존 버전(ASG)과 새 버전(ECS)이 함께 트래픽을 받으므로, 기존 버전이 새 스키마에서도 동작하는지 (컬럼 삭제·이름 변경 등 호환되지 않는 변경이 있는지)
+- [ ] 새로 필요한 환경변수가 SSM `env/`에 있는지
+
 1. ECS 클러스터 `attraction-reservation` (Fargate), 사이드카 로그 그룹 `/ecs/attraction-reservation` (보존 7일)
 2. IAM
    - Task 실행 역할: ECR pull, SSM `env/*`·`PROMETHEUS_URL` 읽기와 KMS 복호화, 사이드카 로그용 `logs:CreateLogStream`·`logs:PutLogEvents`
@@ -110,6 +115,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - [ ] Loki에서 해당 task의 logfmt 로그 조회, 스택 트레이스가 한 건으로 묶임
 - [ ] Prometheus에 task ID를 `instance`로 단 메트릭 수집
 - [ ] 이 시점에는 사용자 트래픽이 들어가지 않음
+- [ ] api task에 스케줄러 실행 메트릭이 없음 (`api` 프로필 적용)
 
 ### 4단계: 트래픽 전환
 

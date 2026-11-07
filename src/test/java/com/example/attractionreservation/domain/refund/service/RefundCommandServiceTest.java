@@ -91,7 +91,7 @@ class RefundCommandServiceTest {
     void claim_requested_ClaimedWithCancellableAmount() {
         //given
         saveRefund(RefundStatus.COMPLETED, adult, 1);   // PG에 반영된 10,000원
-        saveRefund(RefundStatus.FAILED, child, 1);      // 아직 PG에 반영되지 않은 5,000원
+        saveRefund(RefundStatus.DEAD, child, 1);        // PG에 반영되지 않은 5,000원. FAILED는 점유를 막으므로 DEAD로 둔다
         Long refundId = saveRefund(RefundStatus.REQUESTED, adult, 2);
         flushAndClear();
 
@@ -200,9 +200,10 @@ class RefundCommandServiceTest {
     @DisplayName("다른 환불이 아직 재시도 대기 중이면 이번 환불이 완료돼도 PARTIALLY_REFUNDED다.")
     void recordComplete_otherRefundFailed_PartiallyRefunded() {
         //given
-        saveRefund(RefundStatus.FAILED, adult, 3);
         Long refundId = saveRefund(RefundStatus.REQUESTED, child, 4);
         refundCommandService.claim(refundId, now);
+        // FAILED가 먼저 있으면 점유하지 않으므로 점유한 뒤에 만든다.
+        saveRefund(RefundStatus.FAILED, adult, 3);
         flushAndClear();
 
         //when
@@ -270,20 +271,23 @@ class RefundCommandServiceTest {
     @DisplayName("처리 대상으로 요청된 환불과 재시도 시각이 지난 실패만 조회한다.")
     void findProcessableIds_mixedStatuses_OnlyProcessable() {
         //given
-        Long requested = saveRefund(RefundStatus.REQUESTED, adult, 1);
         Long retryDue = saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
         saveRefund(RefundStatus.FAILED, child, 1, now);            // 1분 뒤 재시도
         saveRefund(RefundStatus.COMPLETED, child, 1);
         // 방금 점유됨. 같은 결제에 두면 위 후보들이 같은 결제의 PG 취소 중 환불 때문에 빠지므로 다른 결제에 둔다.
         OrderItem otherItem = createOtherPaymentItem();
         saveRefund(otherPayment, RefundStatus.PROCESSING, otherItem, 1, now);
+        // 요청된 환불은 위 두 결제의 FAILED·PROCESSING 환불에 막히지 않도록 세 번째 결제에 둔다.
+        Payment thirdPayment = createPayment("third");
+        Long requested = saveRefund(thirdPayment, RefundStatus.REQUESTED,
+                thirdPayment.getOrder().getOrderItems().get(0), 1, now);
         flushAndClear();
 
         //when
         List<Long> ids = refundCommandService.findProcessableIds(now, 10);
 
         //then
-        assertThat(ids).containsExactly(requested, retryDue);
+        assertThat(ids).containsExactly(retryDue, requested);
     }
 
     @Test
@@ -509,6 +513,100 @@ class RefundCommandServiceTest {
         Refund found = find(waiting);
         assertThat(found.getStatus()).isEqualTo(RefundStatus.REQUESTED);
         assertThat(found.getAttemptCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("같은 결제의 다른 환불이 재시도 대기 중(FAILED)이면 PG 반영 여부를 모르므로 요청된 환불을 점유하지 않는다.")
+    void claim_otherRefundFailed_NotClaimed() {
+        //given
+        saveRefund(RefundStatus.FAILED, adult, 1);
+        Long waiting = saveRefund(RefundStatus.REQUESTED, child, 1);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> claimed = refundCommandService.claim(waiting, now);
+
+        //then
+        assertThat(claimed).isEmpty();
+        Refund found = find(waiting);
+        assertThat(found.getStatus()).isEqualTo(RefundStatus.REQUESTED);
+        assertThat(found.getAttemptCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("같은 결제에 재시도 대기 중인 환불이 둘이면 id가 작은 환불만 점유한다.")
+    void claim_twoFailedRefunds_ClaimsLowerIdOnly() {
+        //given
+        Instant retryDue = now.minus(Duration.ofMinutes(10));
+        Long first = saveRefund(RefundStatus.FAILED, adult, 1, retryDue);
+        Long second = saveRefund(RefundStatus.FAILED, child, 1, retryDue);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> secondClaimed = refundCommandService.claim(second, now);
+        Optional<ClaimedRefund> firstClaimed = refundCommandService.claim(first, now);
+
+        //then
+        assertThat(secondClaimed).isEmpty();
+        assertThat(firstClaimed).map(ClaimedRefund::refundId).contains(first);
+        assertThat(find(second).getStatus()).isEqualTo(RefundStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("처리 중으로 멈춘 환불은 같은 결제에 재시도 대기 중인 환불이 있어도 다시 점유한다.")
+    void claim_staleProcessingWithFailed_Reclaimed() {
+        //given
+        Long failed = saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
+        Long stale = saveRefund(RefundStatus.PROCESSING, child, 1);
+        flushAndClear();
+        entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
+                .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
+                .setParameter("id", stale)
+                .executeUpdate();
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> claimed = refundCommandService.claim(stale, now);
+
+        //then
+        assertThat(claimed).map(ClaimedRefund::refundId).contains(stale);
+        assertThat(find(stale).getAttemptCount()).isEqualTo(2);
+        assertThat(find(failed).getStatus()).isEqualTo(RefundStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("재시도 대기 중이던 환불이 완료되면 같은 결제의 요청된 환불을 점유한다.")
+    void claim_failedRefundCompleted_ClaimsNext() {
+        //given
+        Long failed = saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
+        Long waiting = saveRefund(RefundStatus.REQUESTED, child, 1);
+        refundCommandService.claim(failed, now);
+        refundCommandService.recordComplete(failed, 2, now);
+        flushAndClear();
+
+        //when
+        Optional<ClaimedRefund> claimed = refundCommandService.claim(waiting, now);
+
+        //then
+        assertThat(claimed).map(ClaimedRefund::refundId).contains(waiting);
+        assertThat(find(waiting).getStatus()).isEqualTo(RefundStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("같은 결제에 재시도 대기 중인 환불이 있으면 요청된 환불은 처리 대상으로 조회하지 않는다.")
+    void findProcessableIds_blockedByFailed_Excluded() {
+        //given
+        Long retryDue = saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
+        saveRefund(RefundStatus.REQUESTED, child, 1);
+        OrderItem otherItem = createOtherPaymentItem();
+        Long otherPaymentRefund = saveRefund(otherPayment, RefundStatus.REQUESTED, otherItem, 1, now);
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(retryDue, otherPaymentRefund);
     }
 
     @Test
@@ -834,22 +932,28 @@ class RefundCommandServiceTest {
 
     // 다른 사용자의 결제(성인 10,000원 × 2장)를 만들고 그 주문 상품을 반환한다. 결제는 otherPayment에 담는다.
     private OrderItem createOtherPaymentItem() {
-        User otherUser = User.builder()
-                .email("other@email.com")
+        otherPayment = createPayment("other");
+        return otherPayment.getOrder().getOrderItems().get(0);
+    }
+
+    // name 사용자의 결제(성인 10,000원 × 2장)를 만든다. 주문 상품은 결제의 주문에서 꺼낸다.
+    private Payment createPayment(String name) {
+        User user = User.builder()
+                .email(name + "@email.com")
                 .password("password")
-                .nickname("other")
+                .nickname(name)
                 .build();
-        entityManager.persist(otherUser);
+        entityManager.persist(user);
 
-        Order otherOrder = Order.create(otherUser, 20000, LocalDate.of(2026, 10, 25));
-        OrderItem orderItem = addOrderItem(otherOrder, adult.getTicketProduct(), 10000, 2);
-        otherOrder.markAsPaid();
-        entityManager.persist(otherOrder);
+        Order order = Order.create(user, 20000, LocalDate.of(2026, 10, 25));
+        addOrderItem(order, adult.getTicketProduct(), 10000, 2);
+        order.markAsPaid();
+        entityManager.persist(order);
 
-        otherPayment = Payment.create(otherOrder);
-        otherPayment.markAsPaid(now);
-        entityManager.persist(otherPayment);
-        return orderItem;
+        Payment created = Payment.create(order);
+        created.markAsPaid(now);
+        entityManager.persist(created);
+        return created;
     }
 
     // 주문 생성 기능이 없어 주문 상품을 직접 만든다. 주문을 저장하면 cascade로 함께 저장된다.

@@ -1,6 +1,6 @@
 # 관리자 예약 목록 실행 계획 분석 및 조회 최적화
 
-> **KAN-133** · 상태·ID 인덱스로 전체 목록의 스캔·Sort를 제거하고, 조건부 count join으로 전체·RESERVED 집계 비용을 줄였다. RESERVED 목록 시간 증가와 추가 회귀·인덱스 유지 비용은 계속 검토한다.
+> **KAN-133** · 상태·ID 인덱스와 조건부 count join의 조회 효과, 조건별 회귀 20개, V5의 공간·쓰기 비용을 확인했다. RESERVED 목록 시간 증가와 관련 기존 테스트 전체 회귀·PR 검증은 남아 있다.
 
 ## 1. 목적과 측정 조건
 
@@ -183,7 +183,7 @@ WHERE r.reservation_status = ?;
 
 목록은 변경하지 않았으며, 같은 재실행의 목록 중앙값은 전체 0.0598ms, RESERVED 1.14ms, 시설·날짜 2.93ms였다. 이전 대비 시간 차이를 count 변경으로 인한 목록 개선·악화로 단정하지 않는다. RESERVED 목록의 V5 이전 대비 시간 증가는 여전히 남은 관찰 항목이다.
 
-현재 측정은 조건이 없는 분기와 시설·날짜 조건이 있는 분기를 확인한다. 회원만·날짜만·시설만 지정한 경우와 다른 조합은 추가 회귀 검증 대상으로 남긴다.
+성능 측정은 조건 없는 분기와 시설·날짜 분기를 확인했다. 이후 별도 회귀 테스트에서 회원·시설·날짜의 8개 조합과 join 없는 빈 결과까지 보강했다. 다음 절에 결과를 구분해 기록한다.
 
 ### 결과 파일을 읽는 방법
 
@@ -199,19 +199,68 @@ WHERE r.reservation_status = ?;
 
 count 최상위의 `rows=1`은 집계 결과 한 행을 반환한다는 뜻이다. 원본 데이터 한 행만 읽었다는 의미가 아니다. 전체 count의 간단한 `Count rows` 출력도 O(1) 집계의 증거로 해석하지 않는다.
 
-## 6. 다음 개선과 검증 기준
+## 6. 조건별 회귀와 V5 유지 비용
+
+### 조건별 회귀 20개
+
+2026-11-09 **01:00:24 KST**의 AdminReservationListQueryIntegrationTest XML에서 **20개 통과**, 실패·오류·건너뜀 0개를 확인했다.
+
+| 범위 | 케이스 수 | 확인 내용 |
+| --- | ---: | --- |
+| 기존 관리자 목록 회귀 | 11 | 응답·회원·시설·상태·날짜·복합 조건·빈 결과·페이지 |
+| 회원·시설·날짜 조건 조합 | 8 | 전체 건수·예약 ID 유지, 실제 count SQL의 연관 테이블 접근 필요 여부 |
+| join 없는 빈 결과 | 1 | 없는 회원 검색에서 전체 건수 0, 빈 페이지, count join 생략 |
+| **합계** | **20** | 실패·오류·건너뜀 0개 |
+
+SQL은 테스트 전용 StatementInspector로 수집하며 결과나 SQL을 변경하지 않는다. 이 클래스는 엔티티로 스키마를 만드는 create-drop 테스트이므로 Flyway·운영 DB의 인덱스 검증을 대체하지 않는다.
+
+### 유지 비용의 비교 조건
+
+2026-11-09 **01:08:50 KST**의 관리자 계획·유지 비용 측정 테스트는 1개 통과했다. 측정 도우미가 이슈·인덱스를 지정받도록 보완하고 V5인 `idx_reservations_status_id`를 선택했다.
+
+| 비교 항목 | 구성 |
+| --- | --- |
+| 기준 테이블 | 기존 인덱스들 + V4 회원용 인덱스 |
+| 추가 테이블 | 동일 구성 + V5 상태·ID 인덱스 |
+| 초기 데이터 | 각각 예약 100,000건, 기존 UNIQUE·Generated Column·FK 유지 |
+| 반복 | 워밍업 1회 후 5회, 인덱스 유무의 실행 순서 교대 |
+| INSERT | RESERVED 예약 1,000건, 동일 ID·값 사용 |
+| UPDATE | 기존 RESERVED 1,000건을 CANCELLED로 변경, 사유·시각·updated_at 포함 |
+| 시간 범위 | JDBC batch와 트랜잭션 시작·커밋, 준비·검증·DDL·통계 갱신은 제외 |
+| 최종 검증 | 양쪽 106,000건·상태 분포 일치, 원본 예약 100,000건 유지 |
+
+V5만 유무를 다르게 하므로 V4 인덱스 비용을 함께 제거한 비교가 아니다. 모든 DDL·DML은 테스트 전용 컨테이너 안에서 수행한다.
+
+### 저장 공간과 쓰기 결과
+
+예약 100,000건에서 새 인덱스는 **161 pages × 16,384 bytes = 2,637,824 bytes, 약 2.52MiB**로 추정됐다. mysql.innodb_index_stats의 size 통계에 페이지 크기를 곱한 값이며 정확한 파일 실사용량은 아니다.
+
+아래 값은 **1,000건 + 커밋의 ms**이고, 5회 측정값은 크기순으로 정리했다.
+
+| 작업·조건 | 5회 측정값(ms) | 중앙값(ms) |
+| --- | --- | ---: |
+| INSERT, V5 없음 | 47.590801, 52.848400, 63.867400, 66.563601, 83.189000 | 63.8674 |
+| INSERT, V5 있음 | 47.643501, 47.690899, 49.291900, 52.842200, 60.086200 | 49.2919 |
+| UPDATE, V5 없음 | 169.832201, 171.168900, 177.810200, 208.036899, 295.004901 | 177.8102 |
+| UPDATE, V5 있음 | 185.934101, 190.084200, 201.085800, 239.015100, 247.654800 | 201.0858 |
+
+상태 UPDATE 중앙값은 +23.2756ms였다. INSERT는 V5가 있는 쪽이 더 짧게 나왔지만, 인덱스가 INSERT를 빠르게 한다는 근거로 사용하지 않는다. 캐시·I/O·페이지 배치의 영향을 배제하지 못한 단일 스레드 합성 실험이다.
+
+이 측정은 업무 Service·슬롯 인원 변경·HTTP·동시 잠금 경합을 포함하지 않는다. 인덱스의 최종 채택은 조회 이득·추가 공간·쓰기 결과와 회귀 검증을 함께 보고 판단하며, 운영 지연·처리량의 보장으로 표현하지 않는다.
+
+## 7. 다음 개선과 검증 기준
 
 | 순서 | 할 일 | 유지·확인할 내용 |
 | --- | --- | --- |
 | 1 | V5로 전체 목록 개선 확인 | 완료. RESERVED 목록 시간 증가는 후속 비교에서 계속 확인 |
 | 2 | count의 조건부 join 적용 | 완료. 세 측정 조건의 건수 유지와 join 제거 확인 |
 | 3 | 동일 데이터·조건으로 재측정 | 완료. 각 변경 단계의 중앙값을 분리해 기록 |
-| 4 | 회귀 검증 | 응답·필터·정렬·페이지·전체 건수 유지 |
-| 5 | 인덱스 추가 시 비용 확인 | 저장 공간·INSERT·상태 UPDATE 유지 비용 |
+| 4 | 회귀 검증 | 조건별 20개 통과. 관련 기존 예약·Flyway 전체 실행은 다음 단계 |
+| 5 | 인덱스 추가 시 비용 확인 | 완료. 약 2.52MiB와 합성 쓰기 비용 기록, 운영 영향은 별도 검증 |
 
 1차 인덱스와 2차 count 쿼리 변경을 분리해 측정했다. 추가 스키마 변경이 필요하면 엔티티와 새 Flyway migration에 함께 반영하고 기존 적용 파일은 수정하지 않는다.
 
-## 7. 해석의 한계
+## 8. 해석의 한계
 
 - 이 테스트는 응답과 수집 성공을 검증한다. 느리거나 Sort가 있다는 이유로 실패하지 않으므로 통과가 최적화 완료를 뜻하지 않는다.
 - 정확한 전체 count와 LIMIT 10 목록은 처리 요구량이 다르다. count도 10건만 읽는 것을 목표로 잡지 않는다.
@@ -220,13 +269,24 @@ count 최상위의 `rows=1`은 집계 결과 한 행을 반환한다는 뜻이�
 - 내부 노드 시간을 합산하거나 목록·count 시간을 더해 HTTP 응답 시간으로 표현하지 않는다.
 - 날짜 필터의 모든 경계값, 깊은 offset, 모든 상태·조건 조합, 운영 p95·최대 처리량은 검증하지 않았다.
 
-## 8. 재현과 현재 상태
+## 9. 재현과 현재 상태
 
 ```bash
 ./gradlew test --tests "*AdminReservationListPlanIntegrationTest" --rerun-tasks
 ```
 
+조건별 회귀와 관련 기존 테스트 실행 명령:
+
+```bash
+./gradlew test --tests "*AdminReservationListQueryIntegrationTest" --rerun-tasks
+./gradlew test --tests "*Reservation*" --tests "*FlywayMigrationIntegrationTest" --rerun-tasks
+```
+
+위 두 번째 명령의 전체 결과는 아직 확인하지 않았다. 최신 유지 비용 요약은 실행 폴더의 `maintenance/summary.txt`, 크기는 `maintenance/sizes-at-100000-rows.txt`에서 볼 수 있다. 원본 결과 파일은 Git에 첨부하지 않는다.
+
 - [측정 테스트](../../src/test/java/com/example/attractionreservation/domain/reservation/service/AdminReservationListPlanIntegrationTest.java)
+- [조건별 회귀 테스트](../../src/test/java/com/example/attractionreservation/domain/reservation/service/AdminReservationListQueryIntegrationTest.java)
+- [공통 유지 비용 측정 도우미](../../src/test/java/com/example/attractionreservation/domain/reservation/service/ReservationIndexMaintenanceMeasurement.java)
 - [Repository](../../src/main/java/com/example/attractionreservation/domain/reservation/repository/ReservationCustomRepositoryImpl.java)
 - [Service](../../src/main/java/com/example/attractionreservation/domain/reservation/service/ReservationService.java)
 - [응답 DTO](../../src/main/java/com/example/attractionreservation/domain/reservation/dto/SearchAdminReservationResponse.java)
@@ -239,7 +299,9 @@ count 최상위의 `rows=1`은 집계 결과 한 행을 반환한다는 뜻이�
 | 1차 인덱스 후보·V5 적용 | 완료 |
 | V5 후 동일 조건 재측정 | 완료. 전체 목록 개선, RESERVED 목록 시간 증가 관찰 |
 | 조건부 count join·동일 조건 재측정 | 완료. 전체·RESERVED count 감소, 시설·날짜 건수 유지 |
+| 조건별 회귀 20개 | 완료 |
+| V5 저장 공간·쓰기 비용 | 완료. 한계와 관찰 결과 기록 |
 | 관련 기존 테스트 전체 회귀 | 미진행 |
-| V5 저장 공간·쓰기 비용·PR CI | 미진행 |
+| PR CI·최종 채택 | 미진행 |
 
 수치는 당시 사용자가 실행한 실제 결과에서 확인했다. 원본 로그·XML·해시 첨부 대신 핵심 지표와 대표 계획을 본문에 남겼으며, 문서 정리 중 테스트를 재실행하지 않았다.

@@ -376,6 +376,11 @@ public class OrderService {
 
         try {
             PaymentSyncResult result = paymentFacade.syncPayment(pgId.get());
+            // 원장 상태와 충돌하면 승인되지 않은 채 PENDING으로 남아 매 주기 건너뛰므로 사람이 확인할 수 있게 남긴다.
+            if (result == PaymentSyncResult.STATE_CONFLICT) {
+                log.warn("event=ORDER_AUTO_CANCEL_SKIPPED orderId={} pgId={} reason=\"PG 결제와 원장 상태 충돌, 수동 확인 필요\"",
+                        orderId, pgId.get());
+            }
             return result == PaymentSyncResult.NOT_PAID || result == PaymentSyncResult.NOT_OUR_PAYMENT;
         } catch (BusinessException exception) {
             if (exception.getErrorCode() == ErrorCode.PAYMENT_PG_PAYMENT_NOT_FOUND) {

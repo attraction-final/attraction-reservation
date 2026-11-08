@@ -524,6 +524,23 @@ class OrderCancelServiceTest {
     }
 
     @Test
+    @DisplayName("PG 결제가 원장 상태와 충돌하면 취소하지 않고 수동 확인이 필요하다고 WARN으로 남긴다")
+    void updateExpiredOrdersByCancel_stateConflictAtPg_warnLogged(CapturedOutput output) {
+        // given
+        givenExpiredOrderWithPayment();
+        when(paymentFacade.syncPayment("pg-101")).thenReturn(PaymentSyncResult.STATE_CONFLICT);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isZero();
+        verifyNoInteractions(orderCancelProcessor);
+        assertThat(output.getOut())
+                .containsPattern("WARN .*event=ORDER_AUTO_CANCEL_SKIPPED orderId=101 pgId=pg-101");
+    }
+
+    @Test
     @DisplayName("결제창을 열지 않아 PG에 결제가 없는 만료 주문은 취소한다")
     void updateExpiredOrdersByCancel_noPaymentAtPg_cancelled() {
         // given

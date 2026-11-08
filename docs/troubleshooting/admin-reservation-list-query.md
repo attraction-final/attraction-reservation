@@ -1,6 +1,6 @@
 # 관리자 예약 목록 실행 계획 분석 및 조회 최적화
 
-> **KAN-133** · 상태·ID 인덱스와 조건부 count join의 조회 효과, 조건별 회귀 20개, V5의 공간·쓰기 비용을 확인했다. RESERVED 목록 시간 증가와 관련 기존 테스트 전체 회귀·PR 검증은 남아 있다.
+> **KAN-133** · 상태·ID 인덱스와 조건부 count join의 조회 효과, V5의 공간·쓰기 비용을 확인했다. 관련 예약·Flyway 회귀는 **43개 Suite·261개 모두 통과**했다. RESERVED 목록 시간 증가의 해석과 PR 검증은 남아 있다.
 
 ## 1. 목적과 측정 조건
 
@@ -255,7 +255,7 @@ V5만 유무를 다르게 하므로 V4 인덱스 비용을 함께 제거한 비�
 | 1 | V5로 전체 목록 개선 확인 | 완료. RESERVED 목록 시간 증가는 후속 비교에서 계속 확인 |
 | 2 | count의 조건부 join 적용 | 완료. 세 측정 조건의 건수 유지와 join 제거 확인 |
 | 3 | 동일 데이터·조건으로 재측정 | 완료. 각 변경 단계의 중앙값을 분리해 기록 |
-| 4 | 회귀 검증 | 조건별 20개 통과. 관련 기존 예약·Flyway 전체 실행은 다음 단계 |
+| 4 | 회귀 검증 | 조건별 20개 포함 관련 예약·Flyway 43개 Suite·261개 통과 |
 | 5 | 인덱스 추가 시 비용 확인 | 완료. 약 2.52MiB와 합성 쓰기 비용 기록, 운영 영향은 별도 검증 |
 
 1차 인덱스와 2차 count 쿼리 변경을 분리해 측정했다. 추가 스키마 변경이 필요하면 엔티티와 새 Flyway migration에 함께 반영하고 기존 적용 파일은 수정하지 않는다.
@@ -282,7 +282,18 @@ V5만 유무를 다르게 하므로 V4 인덱스 비용을 함께 제거한 비�
 ./gradlew test --tests "*Reservation*" --tests "*FlywayMigrationIntegrationTest" --rerun-tasks
 ```
 
-위 두 번째 명령의 전체 결과는 아직 확인하지 않았다. 최신 유지 비용 요약은 실행 폴더의 `maintenance/summary.txt`, 크기는 `maintenance/sizes-at-100000-rows.txt`에서 볼 수 있다. 원본 결과 파일은 Git에 첨부하지 않는다.
+2026-11-09 관련 회귀 실행 후 생성된 XML에서 다음 결과를 확인했다.
+
+| 범위 | Suite 수 | 테스트 수 | 결과 |
+| --- | ---: | ---: | --- |
+| 예약 관련 + Flyway 회귀 전체 실행 | 43 | **261** | 실패·오류·건너뜀 0 |
+| 포함된 관리자 목록 조건별 회귀 | 1 | 20 | 모두 통과 |
+| 포함된 관리자 계획·유지 비용 측정 | 1 | 1 | 통과 |
+| 포함된 Flyway migration 검증 | 1 | 4 | 모두 통과 |
+
+하위 행은 261개에 포함되므로 별도로 합산하지 않는다. 관리자 계획 테스트 시작은 01:20:50 KST, 조건별 회귀는 01:21:25 KST, Flyway는 01:24:02 KST였다. 프로젝트 전체 테스트·운영 DB 적용·HTTP 부하 검증으로 확대하지 않는다.
+
+최신 유지 비용 요약은 실행 폴더의 `maintenance/summary.txt`, 크기는 `maintenance/sizes-at-100000-rows.txt`에서 볼 수 있다. 원본 결과 파일은 Git에 첨부하지 않는다. 앞 절의 시간은 해당 단계에서 확인한 실행값이며, 회귀 재실행 값으로 섞어서 바꾸지 않는다.
 
 - [측정 테스트](../../src/test/java/com/example/attractionreservation/domain/reservation/service/AdminReservationListPlanIntegrationTest.java)
 - [조건별 회귀 테스트](../../src/test/java/com/example/attractionreservation/domain/reservation/service/AdminReservationListQueryIntegrationTest.java)
@@ -301,7 +312,7 @@ V5만 유무를 다르게 하므로 V4 인덱스 비용을 함께 제거한 비�
 | 조건부 count join·동일 조건 재측정 | 완료. 전체·RESERVED count 감소, 시설·날짜 건수 유지 |
 | 조건별 회귀 20개 | 완료 |
 | V5 저장 공간·쓰기 비용 | 완료. 한계와 관찰 결과 기록 |
-| 관련 기존 테스트 전체 회귀 | 미진행 |
+| 관련 기존 예약·Flyway 전체 회귀 | 완료. 43개 Suite·261개 통과 |
 | PR CI·최종 채택 | 미진행 |
 
 수치는 당시 사용자가 실행한 실제 결과에서 확인했다. 원본 로그·XML·해시 첨부 대신 핵심 지표와 대표 계획을 본문에 남겼으며, 문서 정리 중 테스트를 재실행하지 않았다.

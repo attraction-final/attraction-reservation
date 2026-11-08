@@ -180,10 +180,11 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - `deploy-monitoring`, `changes`는 변경 없음
 - GitHub Actions 저장소 변수 추가: `ECS_CLUSTER`, `ECS_EXECUTION_ROLE_ARN`, `ECS_TASK_ROLE_ARN`, `LOKI_HOST`, `LOKI_PORT`. 사이드카 저장소 이름은 `ECR_REPOSITORY`에 `-fluent-bit`·`-alloy`를 붙이고, SSM ARN 접두사는 계정과 `SSM_PREFIX`로 만든다. `ASG_NAME`은 7단계에서 지운다
 - 배포 역할 권한: `ecs:RegisterTaskDefinition`, `ecs:DescribeTaskDefinition`, 이 클러스터 서비스의 `ecs:UpdateService`·`ecs:DescribeServices`, 두 역할에 대한 `iam:PassRole`(`ecs-tasks.amazonaws.com`에만), 사이드카 ECR 저장소 push 추가. `autoscaling` 권한 제거
-- 이 단계가 끝나면 main 배포는 ECS에만 반영된다. 사용자 요청은 5단계 전까지 그대로 ASG(이전 버전)가 받는다.
+- 이 단계가 끝나면 main 배포는 ECS에만 반영된다. 5단계를 이 단계보다 먼저 끝냈으므로(2026-11-08) 새 CD의 첫 배포가 곧바로 사용자 트래픽을 받는 api·worker를 PR 브랜치 이미지(`b9682e47`)에서 main SHA로 바꾼다.
 - `workflow_run`은 dev에 있는 `cd.yml`로 실행되므로, 이 변경이 dev에 머지된 뒤 dev → main 릴리스 전에 main push가 생기면 새 CD는 사이드카 디렉터리가 없어 실패한다. ECS와 `APP_VERSION`은 바뀌지 않는다.
+- 이 PR이 머지되기 전에는 main에 push하지 않는다. 옛 CD가 인스턴스 0대인 ASG에 Instance Refresh를 시도하고, ECS에는 반영되지 않는다.
 
-검증 (ECS 응답은 헤더 조건 규칙으로 확인)
+검증 (5단계를 먼저 끝내 헤더 조건 규칙은 지웠다. 남은 확인은 기본 경로로 한다)
 - [x] actionlint(shellcheck 포함) 통과, 렌더링·배포 판정 스크립트를 로컬에서 실행 (렌더링 결과가 `:1`과 같음, 빈 변수·남은 자리 표시자에서 실패, 실제 서비스의 완료 배포는 성공·없는 배포는 실패로 판정)
 - [x] 서킷 브레이커 (2026-11-08): 현재 이미지에 `SERVER_PORT=9999`만 더한 revision(`api:2`, 8080 헬스체크 실패)으로 워크플로의 배포 step을 실제 서비스에 실행 → 15분 만에 `FAILED`(tasks failed to start)로 판정되고 `api:1`로 자동 롤백. 그동안 기존 task는 healthy로 유지(최소 100%). `api:2`는 등록 해제. 운영 이미지 `a262e16`은 api/worker 프로필 분리 전이라 ECS에서 스케줄러가 돌게 되므로 쓰지 않았다. main에 일부러 깨진 커밋을 넣지 않는다
   - 실패 판정까지 약 15분(task 1개 기준). `ROLLOUT_TIMEOUT_SECONDS`(20분)는 이보다 길다
@@ -193,7 +194,8 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 ### 5단계: 트래픽 전환
 
 시작 조건
-- 4단계가 끝나 새 CD로 main SHA가 api·worker 서비스에 배포되어 있다.
+- 처음 계획: 4단계가 끝나 새 CD로 main SHA가 api·worker 서비스에 배포되어 있다.
+- 실제 (2026-11-08): 4단계 PR(#238) 머지를 기다리지 않고 먼저 진행했다. api는 3단계에서 띄운 `api:1`, worker는 `worker:1`로 둘 다 PR 브랜치 이미지 `b9682e47`(api 프로필 스케줄러 수정 포함)이다. 운영 DB는 3단계에서 이미 V3이고 실제 사용자가 없어, CD 검증 전에 트래픽을 넘겨도 영향이 없다. 머지 후 새 CD의 첫 배포가 두 서비스를 main SHA로 바꾼다.
 
 전환 전 상태
 - ASG는 새 CD가 건드리지 않으므로 이전 버전(`a262e16`)으로 남아 있다. 이 버전에는 슬롯 생성 스케줄러가 없고 나머지 5개(10~30초 주기)가 돈다.
@@ -206,13 +208,24 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
    - Launch Template, 기존 TG, S3 실행 구성은 롤백용으로 7단계까지 남겨 둔다.
 3. 헤더 조건 규칙(우선순위 20)을 지운다.
 
-검증
-- [ ] 헤더 없는 요청이 ECS에서 응답: `/readyz` 200(전환 전에는 ASG가 받아 401), 공개 조회 API, `/auth/csrf`
-- [ ] 443 리스너 규칙이 기본 규칙(`attraction-app-ecs`)과 Grafana 규칙만 남음
-- [ ] 스케줄러 실행 메트릭(`tasks_scheduled_execution_seconds_count`)이 worker의 `instance`에서만 6개 나오고, EC2 `instance` 메트릭은 끊김
-- [ ] Loki에서 api·worker ERROR 0건
-- [ ] 슬롯 수가 전환 전과 같음 (어트랙션 0건이라 0건 유지)
+실행 결과 (2026-11-08, KST)
+- 22:35 ALB 기본 규칙 변경. 몇 초 뒤부터 헤더 없는 `/readyz`가 401(ASG) → 200(ECS)
+- 22:36 ASG 인스턴스 `i-04f31494c206d830b` 종료
+- 22:37 worker task RUNNING, 22:38 HEALTHY
+- 22:39 헤더 조건 규칙 삭제
+
+검증 (2026-11-09 재확인)
+- [x] 헤더 없는 요청이 ECS에서 응답: `/readyz` 200(전환 전에는 ASG가 받아 401), `/api/attractions` 200, `/api/auth/csrf` 200
+- [x] 443 리스너 규칙이 기본 규칙(`attraction-app-ecs`)과 Grafana 규칙만 남음
+- [x] 스케줄러 실행 메트릭(`tasks_scheduled_execution_seconds_count`)이 `service=worker`에서만 6개(주기 5개 + `generateDaily`) 나오고, EC2 `instance` 메트릭은 종료 뒤 끊김. api·worker `up` = 1
+- [ ] Loki에서 api·worker ERROR 0건 → worker ERROR 2건(WARN 4건): 슬롯 생성 스케줄러가 기동 시(`STARTUP`)와 00:05(`DAILY`) 모두 실패. 아래 "발견한 문제" 참고. 전환으로 생긴 오류는 없고 api는 WARN·ERROR 0건
+- [x] 슬롯 수가 전환 전과 같음 (어트랙션 0건이라 0건 유지)
 - 결제 승인·웹훅은 실제 흐름이 없어 이 단계에서 확인하지 않는다. 결제 연동을 실제로 쓰기 시작할 때 확인한다.
+
+발견한 문제: 슬롯 자동 생성이 항상 실패 (앱 코드, 전환과 무관)
+- `Cannot execute statement in a READ ONLY transaction` (`select a1_0.id from attractions ... for update`)
+- `AttractionRepository.findAllActiveIds()`에 `@Lock(PESSIMISTIC_WRITE)`가 붙어 있는데, 호출하는 `AttractionSlotGenerationService.findTargetAttractionIds()`가 `@Transactional(readOnly = true)`라 MySQL이 `FOR UPDATE`를 거부한다. 어트랙션별 잠금은 `generateSlots()`의 `findActiveByIdForUpdate()`가 이미 한다.
+- 어트랙션이 0건이라 지금은 피해가 없다. KAN-123 코드 문제라 이 전환과 별도 티켓으로 고친다.
 
 롤백
 - ALB 기본 규칙을 `attraction-final`로 되돌리고 worker desired 0 → ASG min 1 / desired 1. 인스턴스는 `APP_VERSION`(main SHA)의 S3 실행 구성으로 뜬다(4단계에서 S3 업로드를 유지한 이유). 이전 버전이 아니라 main SHA로 돌아간다.
@@ -316,4 +329,5 @@ B. 저장소 정리 (PR 하나)
 - ElastiCache 복제본, RDS Multi-AZ
 - `TicketExpirationScheduler`의 `SKIP LOCKED` 적용과 로그 형식 정리 (worker를 여러 개로 늘릴 때 함께 진행)
 - 미처리 웹훅·환불 적체량 지표(gauge)와 알림 (앱 코드 변경이 필요)
+- 슬롯 자동 생성 실패 수정 (5단계에서 발견, `findAllActiveIds()`의 `@Lock` 제거)
 - 모니터링 주소를 프라이빗 DNS 이름으로 통일: EC2 Alloy의 Loki 주소, SSM `LOKI_URL`·`PROMETHEUS_URL`(EC2와 함께 쓰는 값이라 이번에 바꾸지 않음. Prometheus 레코드도 그때 만든다)

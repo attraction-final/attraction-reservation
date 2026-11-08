@@ -244,6 +244,7 @@ class OrderCancelServiceTest {
                 any(Instant.class),
                 any(Pageable.class)
         )).thenReturn(List.of(createOrder(1L)));
+        givenUnpaidAtPg(101L);
 
         when(orderCancelProcessor.cancelExpiredOrder(
                 eq(101L), eq(1L), any(Instant.class)
@@ -447,6 +448,7 @@ class OrderCancelServiceTest {
                 any(Instant.class),
                 any(Pageable.class)
         )).thenReturn(List.of(createOrder(1L)));
+        givenUnpaidAtPg(101L);
 
         when(orderCancelProcessor.cancelExpiredOrder(
                 eq(101L), eq(1L), any(Instant.class)
@@ -469,6 +471,7 @@ class OrderCancelServiceTest {
                 any(Instant.class),
                 any(Pageable.class)
         )).thenReturn(List.of(failedOrder, nextOrder));
+        givenUnpaidAtPg(101L, 102L);
 
         when(orderCancelProcessor.cancelExpiredOrder(
                 eq(101L), eq(1L), any(Instant.class)
@@ -676,6 +679,7 @@ class OrderCancelServiceTest {
                 any(Instant.class),
                 any(Pageable.class)
         )).thenReturn(List.of(failedOrder, nextOrder));
+        givenUnpaidAtPg(101L, 102L);
         when(orderCancelProcessor.cancelExpiredOrder(
                 eq(101L), eq(1L), any(Instant.class)
         )).thenThrow(new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR));
@@ -694,8 +698,8 @@ class OrderCancelServiceTest {
     }
 
     @Test
-    @DisplayName("결제 데이터가 없는 만료 주문은 PG를 조회하지 않고 취소한다")
-    void updateExpiredOrdersByCancel_noPaymentRow_cancelledWithoutPgLookup() {
+    @DisplayName("결제 데이터가 없는 만료 주문은 결제가 주문과 함께 생성되는 규칙에 어긋나므로 취소하지 않고 실패로 집계한다")
+    void updateExpiredOrdersByCancel_noPaymentRow_notCancelled(CapturedOutput output) {
         // given
         when(orderRepository.findExpiredPendingOrders(
                 eq(OrderStatus.PENDING),
@@ -703,16 +707,16 @@ class OrderCancelServiceTest {
                 any(Pageable.class)
         )).thenReturn(List.of(createOrder(1L)));
         when(orderRepository.findPaymentPgIdByOrderId(101L)).thenReturn(Optional.empty());
-        when(orderCancelProcessor.cancelExpiredOrder(
-                eq(101L), eq(1L), any(Instant.class)
-        )).thenReturn(true);
 
         // when
         int count = orderService.updateExpiredOrdersByCancel();
 
         // then
-        assertThat(count).isEqualTo(1);
-        verifyNoInteractions(paymentFacade);
+        assertThat(count).isZero();
+        verifyNoInteractions(paymentFacade, orderCancelProcessor);
+        assertThat(output.getOut())
+                .contains("failedCount=1")
+                .contains("failureCodes=\"PAYMENT_NOT_FOUND\"");
     }
 
     // 회원 1의 만료 주문들과 각 주문의 결제(pg-{주문 ID})를 준비한다.
@@ -730,6 +734,14 @@ class OrderCancelServiceTest {
                 any(Instant.class),
                 any(Pageable.class)
         )).thenReturn(orders);
+    }
+
+    // 각 주문의 결제(pg-{주문 ID})가 PG에서 아직 결제되지 않은 상태로 준비한다.
+    private void givenUnpaidAtPg(Long... orderIds) {
+        for (Long orderId : orderIds) {
+            when(orderRepository.findPaymentPgIdByOrderId(orderId)).thenReturn(Optional.of("pg-" + orderId));
+            when(paymentFacade.syncPayment("pg-" + orderId)).thenReturn(PaymentSyncResult.NOT_PAID);
+        }
     }
 
     private void givenExpiredOrderWithPayment() {

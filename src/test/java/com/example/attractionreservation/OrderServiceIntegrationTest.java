@@ -5,6 +5,7 @@ import com.example.attractionreservation.domain.order.dto.SearchOrderListRespons
 import com.example.attractionreservation.domain.payment.entity.Payment;
 import com.example.attractionreservation.domain.payment.entity.enums.PaymentStatus;
 import com.example.attractionreservation.domain.payment.repository.PaymentRepository;
+import com.example.attractionreservation.domain.payment.service.PaymentService;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Propagation;
@@ -54,8 +55,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -96,6 +100,10 @@ class OrderServiceIntegrationTest {
     // 만료 취소는 취소 전에 PG 결제 상태를 확인한다. 실제 PG를 호출하지 않도록 대체한다.
     @MockitoBean
     private PaymentGateway paymentGateway;
+
+    // 결제 데이터가 있는 주문의 결제 취소 실패를 재현하는 데 사용한다. 그 외에는 실제 동작을 그대로 쓴다.
+    @MockitoSpyBean
+    private PaymentService paymentService;
 
     @Test
     @DisplayName("주문과 항목을 DB에 함께 저장하고 상품 가격 변경 후에도 주문 단가를 유지한다")
@@ -715,12 +723,11 @@ class OrderServiceIntegrationTest {
     @DisplayName("자동 취소 중 결제 취소에 실패하면 주문 취소와 재고 복구를 함께 롤백한다")
     void updateExpiredOrdersByCancel_paymentCancelFailed_rollsBackOrderAndStock() {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
-        ExpiredOrder expired = transaction.execute(status -> {
-            ExpiredOrder created = createExpiredOrder("자동취소롤백테스트");
-            // 결제 데이터가 없으면 PG 확인 없이 취소를 시도하고, 결제 취소 단계에서 PAYMENT_NOT_FOUND로 실패한다.
-            paymentRepository.delete(paymentRepository.findByPgId(created.pgId()).orElseThrow());
-            return created;
-        });
+        ExpiredOrder expired = transaction.execute(status -> createExpiredOrder("자동취소롤백테스트"));
+        // PG에는 결제가 없어 만료 취소를 진행하고, 재고 복구 뒤의 결제 취소 단계에서 실패시킨다.
+        when(paymentGateway.getPayment(expired.pgId())).thenReturn(Optional.empty());
+        doThrow(new BusinessException(ErrorCode.PAYMENT_CANCEL_PROHIBITED))
+                .when(paymentService).cancelledByUser(anyLong(), eq(expired.orderId()));
 
         try {
             int count = orderService.updateExpiredOrdersByCancel();

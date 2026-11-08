@@ -40,7 +40,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -362,24 +361,23 @@ public class OrderService {
      * 만료 취소 전에 PG 결제 상태를 확인한다. 트랜잭션 밖에서 PG를 조회한다.
      *
      * <p>결제 완료면 승인(원장 반영·티켓 발급)되고, 결제 실패면 실패 처리(주문 취소)되므로 만료 취소할 필요가 없다.
-     * 결제창을 열지 않아 PG에 결제가 없거나, 결제 데이터가 없는 기존 주문은 미결제로 본다.
+     * 결제창을 열지 않아 PG에 결제가 없으면 미결제로 본다.
      * 확인한 뒤 PG에서 결제되면 승인 경로가 취소된 결제의 보상 요청을 만든다.
      *
      * @return PG에서 결제되지 않아 만료 취소해도 되면 true
-     * @throws BusinessException PG 조회 실패 등 다음 주기에 다시 확인해야 하는 경우
+     * @throws BusinessException 결제 데이터가 없거나(주문과 함께 생성되므로 정상 흐름에서는 없음),
+     *                           PG 조회 실패 등 다음 주기에 다시 확인해야 하는 경우
      */
     private boolean isUnpaidAtPg(Long orderId) {
-        Optional<String> pgId = orderRepository.findPaymentPgIdByOrderId(orderId);
-        if (pgId.isEmpty()) {
-            return true;
-        }
+        String pgId = orderRepository.findPaymentPgIdByOrderId(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
 
         try {
-            PaymentSyncResult result = paymentFacade.syncPayment(pgId.get());
+            PaymentSyncResult result = paymentFacade.syncPayment(pgId);
             // 원장 상태와 충돌하면 승인되지 않은 채 PENDING으로 남아 매 주기 건너뛰므로 사람이 확인할 수 있게 남긴다.
             if (result == PaymentSyncResult.STATE_CONFLICT) {
                 log.warn("event=ORDER_AUTO_CANCEL_SKIPPED orderId={} pgId={} reason=\"PG 결제와 원장 상태 충돌, 수동 확인 필요\"",
-                        orderId, pgId.get());
+                        orderId, pgId);
             }
             return result == PaymentSyncResult.NOT_PAID || result == PaymentSyncResult.NOT_OUR_PAYMENT;
         } catch (BusinessException exception) {

@@ -23,6 +23,7 @@ import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
@@ -256,6 +257,11 @@ public class OrderService {
                 } else {
                     skippedCount++;
                 }
+            } catch (PessimisticLockingFailureException exception) {
+                // 웹훅·승인 API 등 다른 처리가 같은 결제를 잠그고 있다. 그쪽에 맡기고 남았으면 다음 주기에 다시 확인한다.
+                skippedCount++;
+                log.info("event=ORDER_AUTO_CANCEL_SKIPPED targetUserId={} orderId={} reason=\"다른 처리가 결제를 잠그고 있음\"",
+                        userId, orderId);
             } catch (BusinessException exception) {
                 // 이 주문의 실패가 다음 주문 처리를 막지 않는다. PG 확인이 연속으로 실패한 경우만 이번 주기를 끝낸다.
                 failedCount++;

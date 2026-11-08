@@ -38,6 +38,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import com.example.attractionreservation.domain.payment.port.PaymentGateway;
+import com.example.attractionreservation.domain.payment.port.dto.PaymentGatewayResponse;
+import com.example.attractionreservation.domain.payment.port.enums.GatewayPaymentStatus;
+import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -83,6 +86,9 @@ class OrderServiceIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private TicketRepository ticketRepository;
 
     @MockitoSpyBean
     private Clock clock;
@@ -574,8 +580,8 @@ class OrderServiceIntegrationTest {
 
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @DisplayName("자동 취소에서 실패한 주문은 롤백하고 다음 정상 주문은 취소한다")
-    void updateExpiredOrdersByCancel_failureDoesNotBlockNextOrder() {
+    @DisplayName("자동 취소에서 결제가 완료된 주문은 결제 확인에서 건너뛰고 다음 주문은 취소한다")
+    void updateExpiredOrdersByCancel_paidPaymentSkipped_cancelsNextOrder() {
         // 결제창을 열지 않은 주문처럼 PG에 결제가 없다.
         when(paymentGateway.getPayment(anyString())).thenReturn(Optional.empty());
 
@@ -593,7 +599,7 @@ class OrderServiceIntegrationTest {
 
             Instant now = Instant.now();
 
-            // 실패할 주문을 먼저 조회하도록 더 오래된 시각으로 저장한다.
+            // 건너뛸 주문을 먼저 조회하도록 더 오래된 시각으로 저장한다.
             Long failedOrderId = saveOrderForExpirationTest(
                     user,
                     OrderStatus.PENDING,
@@ -643,7 +649,7 @@ class OrderServiceIntegrationTest {
                         .orElseThrow().getStatus())
                         .isEqualTo(PaymentStatus.PAID);
 
-                // 앞 주문의 실패와 관계없이 다음 주문은 취소된다.
+                // 앞 주문을 건너뛰어도 다음 주문은 취소된다.
                 assertThat(orderRepository.findById(ids[2])
                         .orElseThrow().getStatus())
                         .isEqualTo(OrderStatus.CANCELLED);
@@ -653,7 +659,7 @@ class OrderServiceIntegrationTest {
                         .isEqualTo(PaymentStatus.CANCELLED);
             });
 
-            // 실패한 주문을 다시 만나도 예외를 밖으로 던지지 않는다.
+            // 건너뛴 주문을 다시 만나도 예외를 밖으로 던지지 않는다.
             assertThat(orderService.updateExpiredOrdersByCancel()).isZero();
         } finally {
             transaction.executeWithoutResult(status -> {
@@ -668,6 +674,117 @@ class OrderServiceIntegrationTest {
                 userRepository.deleteById(ids[0]);
             });
         }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("만료 주문이 PG에서 결제 완료됐으면 취소하지 않고 결제 승인과 티켓 발급까지 처리한다")
+    void updateExpiredOrdersByCancel_paidAtPg_approvesAndIssuesTickets() {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        ExpiredOrder expired = transaction.execute(status -> createExpiredOrder("PG결제완료만료테스트"));
+        when(paymentGateway.getPayment(expired.pgId())).thenReturn(Optional.of(new PaymentGatewayResponse(
+                expired.pgId(), GatewayPaymentStatus.PAID, 120000L, null, Instant.now(), List.of())));
+
+        try {
+            int count = orderService.updateExpiredOrdersByCancel();
+
+            assertThat(count).isZero();
+
+            transaction.executeWithoutResult(status -> {
+                assertThat(paymentRepository.findByPgId(expired.pgId())
+                        .orElseThrow().getStatus())
+                        .isEqualTo(PaymentStatus.PAID);
+
+                assertThat(orderRepository.findById(expired.orderId())
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.COMPLETED);
+
+                // 주문 수량(2장)만큼 티켓을 발급하고, 취소하지 않았으므로 재고도 복구하지 않는다.
+                assertThat(ticketRepository.findAllByOrderId(expired.orderId())).hasSize(2);
+                assertThat(ticketProductRepository.findById(expired.productId())
+                        .orElseThrow().getStock())
+                        .isEqualTo(98);
+            });
+        } finally {
+            transaction.executeWithoutResult(status -> deleteExpiredOrder(expired));
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("자동 취소 중 결제 취소에 실패하면 주문 취소와 재고 복구를 함께 롤백한다")
+    void updateExpiredOrdersByCancel_paymentCancelFailed_rollsBackOrderAndStock() {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        ExpiredOrder expired = transaction.execute(status -> {
+            ExpiredOrder created = createExpiredOrder("자동취소롤백테스트");
+            // 결제 데이터가 없으면 PG 확인 없이 취소를 시도하고, 결제 취소 단계에서 PAYMENT_NOT_FOUND로 실패한다.
+            paymentRepository.delete(paymentRepository.findByPgId(created.pgId()).orElseThrow());
+            return created;
+        });
+
+        try {
+            int count = orderService.updateExpiredOrdersByCancel();
+
+            assertThat(count).isZero();
+
+            transaction.executeWithoutResult(status -> {
+                assertThat(orderRepository.findById(expired.orderId())
+                        .orElseThrow().getStatus())
+                        .isEqualTo(OrderStatus.PENDING);
+
+                // 같은 트랜잭션에서 복구한 재고도 롤백된다.
+                assertThat(ticketProductRepository.findById(expired.productId())
+                        .orElseThrow().getStock())
+                        .isEqualTo(98);
+            });
+        } finally {
+            transaction.executeWithoutResult(status -> deleteExpiredOrder(expired));
+        }
+    }
+
+    // 상품 60,000원 × 2장 주문을 결제 대기 결제와 함께 만들고 생성 시각을 31분 전으로 옮긴다. 재고는 100 → 98이 된다.
+    private ExpiredOrder createExpiredOrder(String nickname) {
+        User user = userRepository.saveAndFlush(
+                User.builder()
+                        .email(UUID.randomUUID() + "@test.com")
+                        .password("test-password-hash")
+                        .nickname(nickname)
+                        .build()
+        );
+
+        TicketProduct product = ticketProductRepository.saveAndFlush(
+                new TicketProduct(
+                        "종일이용권",
+                        60000,
+                        "자동 취소 통합 테스트 상품",
+                        TicketType.ALL_DAY,
+                        100,
+                        TicketProductStatus.ON_SALE
+                )
+        );
+
+        CreateOrderResponse response = orderService.createOrder(user.getId(), new CreateOrderRequest(
+                List.of(new CreateOrderRequest.Item(product.getId(), 2)), validVisitDate()));
+
+        entityManager.createQuery("UPDATE Order o SET o.createdAt = :createdAt WHERE o.id = :orderId")
+                .setParameter("createdAt", Instant.now().minus(31, ChronoUnit.MINUTES))
+                .setParameter("orderId", response.orderId())
+                .executeUpdate();
+
+        return new ExpiredOrder(user.getId(), product.getId(), response.orderId(), response.pgId());
+    }
+
+    private void deleteExpiredOrder(ExpiredOrder expired) {
+        ticketRepository.deleteAll(ticketRepository.findAllByOrderId(expired.orderId()));
+        paymentRepository.findByPgId(expired.pgId()).ifPresent(paymentRepository::delete);
+        paymentRepository.flush();
+        orderRepository.deleteById(expired.orderId());
+        orderRepository.flush();
+        ticketProductRepository.deleteById(expired.productId());
+        userRepository.deleteById(expired.userId());
+    }
+
+    private record ExpiredOrder(Long userId, Long productId, Long orderId, String pgId) {
     }
 
     @Test

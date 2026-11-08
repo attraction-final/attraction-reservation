@@ -25,6 +25,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -507,7 +508,7 @@ class OrderCancelServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = PaymentSyncResult.class, names = {"APPROVED", "ALREADY_DONE", "PG_FAILED", "COMPENSATED", "STATE_CONFLICT", "REFUND_SYNC_REQUIRED"})
+    @EnumSource(value = PaymentSyncResult.class, names = {"NOT_PAID", "NOT_OUR_PAYMENT"}, mode = EnumSource.Mode.EXCLUDE)
     @DisplayName("PG에서 결제·실패가 확인된 만료 주문은 결제 처리 경로가 정리하므로 취소하지 않는다")
     void updateExpiredOrdersByCancel_settledAtPg_notCancelled(PaymentSyncResult result) {
         // given
@@ -619,6 +620,31 @@ class OrderCancelServiceTest {
                 .doesNotContain("event=ORDER_AUTO_CANCEL_FAILED")
                 .contains("event=ORDER_AUTO_CANCEL_PROCESSED")
                 .contains("failureCodes=\"PAYMENT_GATEWAY_ERROR\"");
+    }
+
+    @Test
+    @DisplayName("결제 동기화 중 다른 처리가 결제를 잠그고 있으면 그 주문만 건너뛰고 다음 주문을 처리한다")
+    void updateExpiredOrdersByCancel_paymentLocked_skipsAndContinues(CapturedOutput output) {
+        // given
+        givenExpiredOrdersWithPayment(101L, 102L);
+        when(paymentFacade.syncPayment("pg-101"))
+                .thenThrow(new PessimisticLockingFailureException("lock wait timeout"));
+        when(paymentFacade.syncPayment("pg-102")).thenReturn(PaymentSyncResult.NOT_PAID);
+        when(orderCancelProcessor.cancelExpiredOrder(
+                eq(102L), eq(1L), any(Instant.class)
+        )).thenReturn(true);
+
+        // when
+        int count = orderService.updateExpiredOrdersByCancel();
+
+        // then
+        assertThat(count).isEqualTo(1);
+        verify(orderCancelProcessor, never()).cancelExpiredOrder(
+                eq(101L), any(), any(Instant.class)
+        );
+        assertThat(output.getOut())
+                .contains("event=ORDER_AUTO_CANCEL_SKIPPED targetUserId=1 orderId=101")
+                .doesNotContain("event=ORDER_AUTO_CANCEL_FAILED");
     }
 
     @Test

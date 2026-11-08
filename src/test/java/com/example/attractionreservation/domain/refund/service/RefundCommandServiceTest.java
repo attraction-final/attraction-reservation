@@ -643,6 +643,26 @@ class RefundCommandServiceTest {
     }
 
     @Test
+    @DisplayName("같은 결제에 재시도 시각이 지난 FAILED 환불이 있어도 멈춘 PROCESSING 환불만 처리 대상으로 조회한다.")
+    void findProcessableIds_staleProcessingWithFailed_OnlyStale() {
+        //given
+        saveRefund(RefundStatus.FAILED, adult, 1, now.minus(Duration.ofMinutes(10)));
+        Long stale = saveRefund(RefundStatus.PROCESSING, child, 1);
+        flushAndClear();
+        entityManager.createQuery("update Refund r set r.updatedAt = :updatedAt where r.id = :id")
+                .setParameter("updatedAt", now.minus(RefundCommandService.STALE_PROCESSING_TIMEOUT))
+                .setParameter("id", stale)
+                .executeUpdate();
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(stale);
+    }
+
+    @Test
     @DisplayName("멈춘 처리로 보고 다른 처리가 다시 점유했으면 이전 처리의 늦은 완료 결과는 거부한다.")
     void recordComplete_reclaimedByOther_Fail() {
         //given

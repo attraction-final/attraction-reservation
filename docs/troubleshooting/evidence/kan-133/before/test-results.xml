@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.attractionreservation.domain.reservation.service.AdminReservationListPlanIntegrationTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-08T13:47:57.794Z" hostname="DESKTOP-VFIEUJ0" time="38.967">
+  <properties/>
+  <testcase name="관리자 예약 목록의 전체·상태·어트랙션과 날짜 조건별 실제 SQL과 실행 계획을 수집한다" classname="com.example.attractionreservation.domain.reservation.service.AdminReservationListPlanIntegrationTest" time="7.986"/>
+  <system-out><![CDATA[22:47:58.773 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.example.attractionreservation.AttractionReservationApplication for test class com.example.attractionreservation.domain.reservation.service.AdminReservationListPlanIntegrationTest
+22:47:58.836 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.example.attractionreservation.AttractionReservationApplication for test class com.example.attractionreservation.domain.reservation.service.AdminReservationListPlanIntegrationTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.1.1)
+
+ts=2026-11-08T22:47:59.855+09:00 level=INFO logger=c.e.a.d.r.s.AdminReservationListPlanIntegrationTest thread=Test worker traceId= Starting AdminReservationListPlanIntegrationTest using Java 17.0.12 with PID 27332 (started by PC_1M in D:\개발자\TeamProject\attraction-reservation)
+ts=2026-11-08T22:47:59.857+09:00 level=INFO logger=c.e.a.d.r.s.AdminReservationListPlanIntegrationTest thread=Test worker traceId= The following 1 profile is active: "test"
+ts=2026-11-08T22:48:01.373+09:00 level=INFO logger=o.s.d.r.c.RepositoryConfigurationDelegate thread=Test worker traceId= Multiple Spring Data modules found, entering strict repository configuration mode
+ts=2026-11-08T22:48:01.376+09:00 level=INFO logger=o.s.d.r.c.RepositoryConfigurationDelegate thread=Test worker traceId= Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+ts=2026-11-08T22:48:02.180+09:00 level=INFO logger=o.s.d.r.c.RepositoryConfigurationDelegate thread=Test worker traceId= Finished Spring Data repository scanning in 781 ms. Found 13 JPA repository interfaces.
+ts=2026-11-08T22:48:04.376+09:00 level=INFO logger=o.testcontainers.images.PullPolicy thread=Test worker traceId= Image pull policy will be performed by: DefaultPullPolicy()
+ts=2026-11-08T22:48:04.386+09:00 level=INFO logger=o.t.utility.ImageNameSubstitutor thread=Test worker traceId= Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
+ts=2026-11-08T22:48:04.469+09:00 level=INFO logger=o.testcontainers.DockerClientFactory thread=Test worker traceId= Testcontainers version: 2.0.5
+ts=2026-11-08T22:48:05.560+09:00 level=INFO logger=o.t.d.DockerClientProviderStrategy thread=Test worker traceId= Loaded org.testcontainers.dockerclient.NpipeSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
+ts=2026-11-08T22:48:06.680+09:00 level=INFO logger=o.t.d.DockerClientProviderStrategy thread=Test worker traceId= Found Docker environment with local Npipe socket (npipe:////./pipe/docker_engine)
+ts=2026-11-08T22:48:06.685+09:00 level=INFO logger=o.testcontainers.DockerClientFactory thread=Test worker traceId= Docker host IP address is localhost
+ts=2026-11-08T22:48:06.726+09:00 level=INFO logger=o.testcontainers.DockerClientFactory thread=Test worker traceId= Connected to docker: 
+  Server Version: 29.6.2
+  API Version: 1.55
+  Operating System: Docker Desktop
+  Total Memory: 7872 MB
+  Labels: 
+    com.docker.desktop.address=npipe://\\.\pipe\docker_cli
+ts=2026-11-08T22:48:06.863+09:00 level=INFO logger=tc.testcontainers/ryuk:0.14.0 thread=Test worker traceId= Creating container for image: testcontainers/ryuk:0.14.0
+ts=2026-11-08T22:48:07.067+09:00 level=INFO logger=o.t.utility.RegistryAuthLocator thread=Test worker traceId= Credential helper/store (docker-credential-desktop) does not have credentials for https://index.docker.io/v1/
+ts=2026-11-08T22:48:07.419+09:00 level=INFO logger=tc.testcontainers/ryuk:0.14.0 thread=Test worker traceId= Container testcontainers/ryuk:0.14.0 is starting: a376380be2c267eed95b3c9206405c76f1ee931e8c4f2d02d625f385bdc3c1b2
+ts=2026-11-08T22:48:08.090+09:00 level=INFO logger=tc.testcontainers/ryuk:0.14.0 thread=Test worker traceId= Container testcontainers/ryuk:0.14.0 started in PT1.2268465S
+ts=2026-11-08T22:48:08.100+09:00 level=INFO logger=o.t.utility.RyukResourceReaper thread=Test worker traceId= Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
+ts=2026-11-08T22:48:08.101+09:00 level=INFO logger=o.testcontainers.DockerClientFactory thread=Test worker traceId= Checking the system...
+ts=2026-11-08T22:48:08.102+09:00 level=INFO logger=o.testcontainers.DockerClientFactory thread=Test worker traceId= ?? Docker server version should be at least 1.6.0
+ts=2026-11-08T22:48:08.103+09:00 level=INFO logger=tc.mysql:8.4 thread=Test worker traceId= Creating container for image: mysql:8.4
+ts=2026-11-08T22:48:08.227+09:00 level=INFO logger=tc.mysql:8.4 thread=Test worker traceId= Container mysql:8.4 is starting: 79a245f591f0bf4d3abede617bee6e4d20b8f2139b89f84e79daca3ea92ea3bb
+ts=2026-11-08T22:48:08.546+09:00 level=INFO logger=tc.mysql:8.4 thread=Test worker traceId= Waiting for database connection to become available at jdbc:mysql://localhost:53918/test?rewriteBatchedStatements=true using query 'SELECT 1'
+ts=2026-11-08T22:48:20.062+09:00 level=INFO logger=tc.mysql:8.4 thread=Test worker traceId= Container mysql:8.4 started in PT11.9590975S
+ts=2026-11-08T22:48:20.062+09:00 level=INFO logger=tc.mysql:8.4 thread=Test worker traceId= Container is started (JDBC URL: jdbc:mysql://localhost:53918/test?rewriteBatchedStatements=true)
+ts=2026-11-08T22:48:20.604+09:00 level=INFO logger=org.flywaydb.core.FlywayExecutor thread=Test worker traceId= Database: jdbc:mysql://localhost:53918/test?rewriteBatchedStatements=true (MySQL 8.4)
+ts=2026-11-08T22:48:20.752+09:00 level=INFO logger=o.f.c.i.s.JdbcTableSchemaHistory thread=Test worker traceId= Schema history table `test`.`flyway_schema_history` does not exist yet
+ts=2026-11-08T22:48:20.760+09:00 level=INFO logger=o.f.core.internal.command.DbValidate thread=Test worker traceId= Successfully validated 4 migrations (execution time 00:00.039s)
+ts=2026-11-08T22:48:20.789+09:00 level=INFO logger=org.flywaydb.core.Flyway thread=Test worker traceId= All configured schemas are empty; a baseline marker will not be added to Flyway's schema history table. A baseline or migration script with a lower version than the baseline version may execute if available. Check the Schemas parameter if this is not intended. See https://help.red-gate.com/help/flyway-cli12/help_4.aspx?topic=baseline-on-migrate for more info
+ts=2026-11-08T22:48:20.796+09:00 level=INFO logger=o.f.c.i.s.JdbcTableSchemaHistory thread=Test worker traceId= Creating Schema History table `test`.`flyway_schema_history` ...
+ts=2026-11-08T22:48:20.904+09:00 level=INFO logger=o.f.core.internal.command.DbMigrate thread=Test worker traceId= Current version of schema `test`: << Empty Schema >>
+ts=2026-11-08T22:48:20.940+09:00 level=INFO logger=o.f.core.internal.command.DbMigrate thread=Test worker traceId= Migrating schema `test` to version "1 - init"
+ts=2026-11-08T22:48:21.639+09:00 level=INFO logger=o.f.core.internal.command.DbMigrate thread=Test worker traceId= Migrating schema `test` to version "2 - add attraction active name unique"
+ts=2026-11-08T22:48:21.748+09:00 level=INFO logger=o.f.core.internal.command.DbMigrate thread=Test worker traceId= Migrating schema `test` to version "3 - add attraction ride info columns"
+ts=2026-11-08T22:48:21.842+09:00 level=INFO logger=o.f.core.internal.command.DbMigrate thread=Test worker traceId= Migrating schema `test` to version "4 - add reservation user status id index"
+ts=2026-11-08T22:48:21.898+09:00 level=INFO logger=o.f.core.internal.command.DbMigrate thread=Test worker traceId= Successfully applied 4 migrations to schema `test`, now at version v4 (execution time 00:00.815s)
+ts=2026-11-08T22:48:22.236+09:00 level=INFO logger=org.hibernate.orm.jpa thread=Test worker traceId= HHH008540: Processing PersistenceUnitInfo [name: default]
+ts=2026-11-08T22:48:22.380+09:00 level=INFO logger=org.hibernate.orm.core thread=Test worker traceId= HHH000001: Hibernate ORM core version 7.4.5.Final
+ts=2026-11-08T22:48:22.961+09:00 level=INFO logger=o.s.o.j.p.SpringPersistenceUnitInfo thread=Test worker traceId= No LoadTimeWeaver setup: ignoring JPA class transformer
+ts=2026-11-08T22:48:23.023+09:00 level=INFO logger=com.zaxxer.hikari.HikariDataSource thread=Test worker traceId= HikariPool-1 - Starting...
+ts=2026-11-08T22:48:23.089+09:00 level=INFO logger=com.zaxxer.hikari.pool.HikariPool thread=Test worker traceId= HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@77565bc4
+ts=2026-11-08T22:48:23.091+09:00 level=INFO logger=com.zaxxer.hikari.HikariDataSource thread=Test worker traceId= HikariPool-1 - Start completed.
+ts=2026-11-08T22:48:23.219+09:00 level=INFO logger=o.hibernate.orm.connections.pooling thread=Test worker traceId= HHH10001005: Database info:
+	Database JDBC URL [jdbc:mysql://localhost:53918/test?rewriteBatchedStatements=true]
+	Database driver: MySQL Connector/J
+	Database dialect: MySQLDialect
+	Database version: 8.4.11
+	Default catalog/schema: test/undefined
+	Autocommit mode: undefined/unknown
+	Isolation level: REPEATABLE_READ [default REPEATABLE_READ]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+ts=2026-11-08T22:48:25.712+09:00 level=INFO logger=org.hibernate.orm.core thread=Test worker traceId= HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+ts=2026-11-08T22:48:25.801+09:00 level=INFO logger=o.s.o.j.LocalContainerEntityManagerFactoryBean thread=Test worker traceId= Initialized JPA EntityManagerFactory for persistence unit 'default'
+ts=2026-11-08T22:48:25.969+09:00 level=INFO logger=o.s.d.j.r.q.QueryEnhancerFactories thread=Test worker traceId= Hibernate is in classpath; If applicable, HQL parser will be used.
+ts=2026-11-08T22:48:28.749+09:00 level=INFO logger=c.e.a.d.r.s.AdminReservationListPlanIntegrationTest thread=Test worker traceId= Started AdminReservationListPlanIntegrationTest in 29.745 seconds (process running for 35.19)
+Hibernate: 
+    select
+        r1_0.id,
+        r1_0.active_reservation,
+        r1_0.attraction_slot_id,
+        as1_0.id,
+        as1_0.attraction_id,
+        a1_0.id,
+        a1_0.active_attraction,
+        a1_0.close_time,
+        a1_0.created_at,
+        a1_0.deleted_at,
+        a1_0.description,
+        a1_0.duration_minutes,
+        a1_0.entrance_move_minutes,
+        a1_0.guardian_height_cm,
+        a1_0.location,
+        a1_0.max_height_cm,
+        a1_0.min_height_cm,
+        a1_0.name,
+        a1_0.open_time,
+        a1_0.operation_status,
+        a1_0.updated_at,
+        as1_0.auto_closed,
+        as1_0.capacity,
+        as1_0.created_at,
+        as1_0.ends_at,
+        as1_0.reserved_count,
+        as1_0.starts_at,
+        as1_0.status,
+        as1_0.updated_at,
+        r1_0.cancel_reason,
+        r1_0.cancelled_at,
+        r1_0.created_at,
+        r1_0.reservation_number,
+        r1_0.reservation_status,
+        r1_0.ticket_id,
+        r1_0.updated_at,
+        r1_0.user_id 
+    from
+        reservations r1_0 
+    join
+        attraction_slots as1_0 
+            on as1_0.id=r1_0.attraction_slot_id 
+    join
+        attractions a1_0 
+            on a1_0.id=as1_0.attraction_id 
+    order by
+        r1_0.reservation_status desc,
+        r1_0.id desc 
+    limit
+        ?, ?
+Hibernate: 
+    select
+        count(r1_0.id) 
+    from
+        reservations r1_0 
+    join
+        attraction_slots as1_0 
+            on as1_0.id=r1_0.attraction_slot_id
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=content iteration=1 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=79795 rows=10) (actual time=65.1..65.1 rows=10 loops=1)\n    -> Nested loop inner join  (cost=79795 rows=99553) (actual time=65.1..65.1 rows=10 loops=1)\n        -> Nested loop inner join  (cost=44951 rows=99553) (actual time=65..65 rows=10 loops=1)\n            -> Sort: r1_0.reservation_status DESC, r1_0.id DESC  (cost=10108 rows=99553) (actual time=65..65 rows=10 loops=1)\n                -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.178..35.8 rows=100000 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00245..0.00245 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00122..0.00125 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=content iteration=2 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=79795 rows=10) (actual time=65.1..65.1 rows=10 loops=1)\n    -> Nested loop inner join  (cost=79795 rows=99553) (actual time=65.1..65.1 rows=10 loops=1)\n        -> Nested loop inner join  (cost=44951 rows=99553) (actual time=65.1..65.1 rows=10 loops=1)\n            -> Sort: r1_0.reservation_status DESC, r1_0.id DESC  (cost=10108 rows=99553) (actual time=65.1..65.1 rows=10 loops=1)\n                -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.216..36.1 rows=100000 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00201..0.00204 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00101..0.00104 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=content iteration=3 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=79795 rows=10) (actual time=66..66 rows=10 loops=1)\n    -> Nested loop inner join  (cost=79795 rows=99553) (actual time=66..66 rows=10 loops=1)\n        -> Nested loop inner join  (cost=44951 rows=99553) (actual time=65.9..65.9 rows=10 loops=1)\n            -> Sort: r1_0.reservation_status DESC, r1_0.id DESC  (cost=10108 rows=99553) (actual time=65.9..65.9 rows=10 loops=1)\n                -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.204..36.3 rows=100000 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00223..0.00226 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00109..0.00113 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=content iteration=4 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=79795 rows=10) (actual time=65.8..65.8 rows=10 loops=1)\n    -> Nested loop inner join  (cost=79795 rows=99553) (actual time=65.8..65.8 rows=10 loops=1)\n        -> Nested loop inner join  (cost=44951 rows=99553) (actual time=65.8..65.8 rows=10 loops=1)\n            -> Sort: r1_0.reservation_status DESC, r1_0.id DESC  (cost=10108 rows=99553) (actual time=65.7..65.8 rows=10 loops=1)\n                -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.177..36.5 rows=100000 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00256..0.00259 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00112..0.00114 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=content iteration=5 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=79795 rows=10) (actual time=65.1..65.1 rows=10 loops=1)\n    -> Nested loop inner join  (cost=79795 rows=99553) (actual time=65.1..65.1 rows=10 loops=1)\n        -> Nested loop inner join  (cost=44951 rows=99553) (actual time=65.1..65.1 rows=10 loops=1)\n            -> Sort: r1_0.reservation_status DESC, r1_0.id DESC  (cost=10108 rows=99553) (actual time=65..65 rows=10 loops=1)\n                -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.212..36.1 rows=100000 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00252..0.00255 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00109..0.0011 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=count iteration=1 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=20215 rows=1) (actual time=23.7..23.7 rows=1 loops=1)\n    -> Nested loop inner join  (cost=10220 rows=99953) (actual time=0.0514..20.2 rows=100000 loops=1)\n        -> Covering index scan on as1_0 using idx_attraction_slots_attraction_starts  (cost=51.2 rows=500) (actual time=0.0381..0.0856 rows=500 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=0.387 rows=200) (actual time=0.00415..0.0311 rows=200 loops=500)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=count iteration=2 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=20215 rows=1) (actual time=23.8..23.8 rows=1 loops=1)\n    -> Nested loop inner join  (cost=10220 rows=99953) (actual time=0.0465..20.3 rows=100000 loops=1)\n        -> Covering index scan on as1_0 using idx_attraction_slots_attraction_starts  (cost=51.2 rows=500) (actual time=0.0344..0.0837 rows=500 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=0.387 rows=200) (actual time=0.00418..0.0312 rows=200 loops=500)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=count iteration=3 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=20215 rows=1) (actual time=23.6..23.6 rows=1 loops=1)\n    -> Nested loop inner join  (cost=10220 rows=99953) (actual time=0.0478..20.1 rows=100000 loops=1)\n        -> Covering index scan on as1_0 using idx_attraction_slots_attraction_starts  (cost=51.2 rows=500) (actual time=0.0354..0.0841 rows=500 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=0.387 rows=200) (actual time=0.00407..0.031 rows=200 loops=500)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=count iteration=4 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=20215 rows=1) (actual time=23.8..23.8 rows=1 loops=1)\n    -> Nested loop inner join  (cost=10220 rows=99953) (actual time=0.0491..20.2 rows=100000 loops=1)\n        -> Covering index scan on as1_0 using idx_attraction_slots_attraction_starts  (cost=51.2 rows=500) (actual time=0.036..0.0845 rows=500 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=0.387 rows=200) (actual time=0.00414..0.0312 rows=200 loops=500)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=all queryType=count iteration=5 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=20215 rows=1) (actual time=23.8..23.8 rows=1 loops=1)\n    -> Nested loop inner join  (cost=10220 rows=99953) (actual time=0.0446..20.2 rows=100000 loops=1)\n        -> Covering index scan on as1_0 using idx_attraction_slots_attraction_starts  (cost=51.2 rows=500) (actual time=0.0326..0.0789 rows=500 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=0.387 rows=200) (actual time=0.00413..0.0311 rows=200 loops=500)\n	\n"
+Hibernate: 
+    select
+        r1_0.id,
+        r1_0.active_reservation,
+        r1_0.attraction_slot_id,
+        as1_0.id,
+        as1_0.attraction_id,
+        a1_0.id,
+        a1_0.active_attraction,
+        a1_0.close_time,
+        a1_0.created_at,
+        a1_0.deleted_at,
+        a1_0.description,
+        a1_0.duration_minutes,
+        a1_0.entrance_move_minutes,
+        a1_0.guardian_height_cm,
+        a1_0.location,
+        a1_0.max_height_cm,
+        a1_0.min_height_cm,
+        a1_0.name,
+        a1_0.open_time,
+        a1_0.operation_status,
+        a1_0.updated_at,
+        as1_0.auto_closed,
+        as1_0.capacity,
+        as1_0.created_at,
+        as1_0.ends_at,
+        as1_0.reserved_count,
+        as1_0.starts_at,
+        as1_0.status,
+        as1_0.updated_at,
+        r1_0.cancel_reason,
+        r1_0.cancelled_at,
+        r1_0.created_at,
+        r1_0.reservation_number,
+        r1_0.reservation_status,
+        r1_0.ticket_id,
+        r1_0.updated_at,
+        r1_0.user_id 
+    from
+        reservations r1_0 
+    join
+        attraction_slots as1_0 
+            on as1_0.id=r1_0.attraction_slot_id 
+    join
+        attractions a1_0 
+            on a1_0.id=as1_0.attraction_id 
+    where
+        r1_0.reservation_status=? 
+    order by
+        r1_0.reservation_status desc,
+        r1_0.id desc 
+    limit
+        ?, ?
+Hibernate: 
+    select
+        count(r1_0.id) 
+    from
+        reservations r1_0 
+    join
+        attraction_slots as1_0 
+            on as1_0.id=r1_0.attraction_slot_id 
+    where
+        r1_0.reservation_status=?
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=content iteration=1 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=12445 rows=2.5) (actual time=0.0362..0.0621 rows=10 loops=1)\n    -> Nested loop inner join  (cost=12445 rows=2.5) (actual time=0.0357..0.0609 rows=10 loops=1)\n        -> Nested loop inner join  (cost=6223 rows=2.5) (actual time=0.0305..0.0534 rows=10 loops=1)\n            -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=0.765 rows=2.5) (actual time=0.0227..0.0429 rows=10 loops=1)\n                -> Index scan on r1_0 using PRIMARY (reverse)  (cost=0.765 rows=10) (actual time=0.0195..0.0391 rows=40 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=850e-6..860e-6 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=560e-6..620e-6 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=content iteration=2 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=12445 rows=2.5) (actual time=0.034..0.0948 rows=10 loops=1)\n    -> Nested loop inner join  (cost=12445 rows=2.5) (actual time=0.0335..0.0611 rows=10 loops=1)\n        -> Nested loop inner join  (cost=6223 rows=2.5) (actual time=0.0288..0.0541 rows=10 loops=1)\n            -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=0.765 rows=2.5) (actual time=0.021..0.0429 rows=10 loops=1)\n                -> Index scan on r1_0 using PRIMARY (reverse)  (cost=0.765 rows=10) (actual time=0.0179..0.0384 rows=40 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=900e-6..910e-6 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=560e-6..600e-6 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=content iteration=3 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=12445 rows=2.5) (actual time=0.0643..0.103 rows=10 loops=1)\n    -> Nested loop inner join  (cost=12445 rows=2.5) (actual time=0.0633..0.102 rows=10 loops=1)\n        -> Nested loop inner join  (cost=6223 rows=2.5) (actual time=0.0524..0.0876 rows=10 loops=1)\n            -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=0.765 rows=2.5) (actual time=0.0375..0.0686 rows=10 loops=1)\n                -> Index scan on r1_0 using PRIMARY (reverse)  (cost=0.765 rows=10) (actual time=0.0324..0.0633 rows=40 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00156..0.00157 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00117..0.00118 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=content iteration=4 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=12445 rows=2.5) (actual time=0.0354..0.0613 rows=10 loops=1)\n    -> Nested loop inner join  (cost=12445 rows=2.5) (actual time=0.0348..0.0599 rows=10 loops=1)\n        -> Nested loop inner join  (cost=6223 rows=2.5) (actual time=0.0293..0.0521 rows=10 loops=1)\n            -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=0.765 rows=2.5) (actual time=0.0219..0.0418 rows=10 loops=1)\n                -> Index scan on r1_0 using PRIMARY (reverse)  (cost=0.765 rows=10) (actual time=0.0185..0.0377 rows=40 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=830e-6..860e-6 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=570e-6..610e-6 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=content iteration=5 plan="EXPLAIN	\n-> Limit: 10 row(s)  (cost=12445 rows=2.5) (actual time=0.0373..0.063 rows=10 loops=1)\n    -> Nested loop inner join  (cost=12445 rows=2.5) (actual time=0.0364..0.0613 rows=10 loops=1)\n        -> Nested loop inner join  (cost=6223 rows=2.5) (actual time=0.0312..0.0541 rows=10 loops=1)\n            -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=0.765 rows=2.5) (actual time=0.0229..0.0427 rows=10 loops=1)\n                -> Index scan on r1_0 using PRIMARY (reverse)  (cost=0.765 rows=10) (actual time=0.0197..0.0394 rows=40 loops=1)\n            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=920e-6..940e-6 rows=1 loops=10)\n        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=570e-6..580e-6 rows=1 loops=10)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=count iteration=1 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=21307 rows=1) (actual time=33.4..33.4 rows=1 loops=1)\n    -> Nested loop inner join  (cost=18818 rows=24888) (actual time=0.126..32.5 rows=25000 loops=1)\n        -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=10108 rows=24888) (actual time=0.119..26.5 rows=25000 loops=1)\n            -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.116..19.1 rows=100000 loops=1)\n        -> Single-row covering index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=102e-6..124e-6 rows=1 loops=25000)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=count iteration=2 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=21307 rows=1) (actual time=35.6..35.6 rows=1 loops=1)\n    -> Nested loop inner join  (cost=18818 rows=24888) (actual time=0.131..34.7 rows=25000 loops=1)\n        -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=10108 rows=24888) (actual time=0.122..28 rows=25000 loops=1)\n            -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.119..20 rows=100000 loops=1)\n        -> Single-row covering index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=108e-6..131e-6 rows=1 loops=25000)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=count iteration=3 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=21307 rows=1) (actual time=35.4..35.4 rows=1 loops=1)\n    -> Nested loop inner join  (cost=18818 rows=24888) (actual time=0.126..34.5 rows=25000 loops=1)\n        -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=10108 rows=24888) (actual time=0.118..28.2 rows=25000 loops=1)\n            -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.116..20.4 rows=100000 loops=1)\n        -> Single-row covering index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=109e-6..132e-6 rows=1 loops=25000)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=count iteration=4 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=21307 rows=1) (actual time=34..34 rows=1 loops=1)\n    -> Nested loop inner join  (cost=18818 rows=24888) (actual time=0.127..33 rows=25000 loops=1)\n        -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=10108 rows=24888) (actual time=0.12..27 rows=25000 loops=1)\n            -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.117..19.4 rows=100000 loops=1)\n        -> Single-row covering index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=105e-6..127e-6 rows=1 loops=25000)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=reserved queryType=count iteration=5 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=21307 rows=1) (actual time=36.9..36.9 rows=1 loops=1)\n    -> Nested loop inner join  (cost=18818 rows=24888) (actual time=0.141..36 rows=25000 loops=1)\n        -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=10108 rows=24888) (actual time=0.117..29.4 rows=25000 loops=1)\n            -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.115..21.3 rows=100000 loops=1)\n        -> Single-row covering index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=118e-6..142e-6 rows=1 loops=25000)\n	\n"
+Hibernate: 
+    select
+        r1_0.id,
+        r1_0.active_reservation,
+        r1_0.attraction_slot_id,
+        as1_0.id,
+        as1_0.attraction_id,
+        a1_0.id,
+        a1_0.active_attraction,
+        a1_0.close_time,
+        a1_0.created_at,
+        a1_0.deleted_at,
+        a1_0.description,
+        a1_0.duration_minutes,
+        a1_0.entrance_move_minutes,
+        a1_0.guardian_height_cm,
+        a1_0.location,
+        a1_0.max_height_cm,
+        a1_0.min_height_cm,
+        a1_0.name,
+        a1_0.open_time,
+        a1_0.operation_status,
+        a1_0.updated_at,
+        as1_0.auto_closed,
+        as1_0.capacity,
+        as1_0.created_at,
+        as1_0.ends_at,
+        as1_0.reserved_count,
+        as1_0.starts_at,
+        as1_0.status,
+        as1_0.updated_at,
+        r1_0.cancel_reason,
+        r1_0.cancelled_at,
+        r1_0.created_at,
+        r1_0.reservation_number,
+        r1_0.reservation_status,
+        r1_0.ticket_id,
+        r1_0.updated_at,
+        r1_0.user_id 
+    from
+        reservations r1_0 
+    join
+        attraction_slots as1_0 
+            on as1_0.id=r1_0.attraction_slot_id 
+    join
+        attractions a1_0 
+            on a1_0.id=as1_0.attraction_id 
+    where
+        a1_0.id=? 
+        and as1_0.starts_at>=? 
+        and as1_0.starts_at<? 
+    order by
+        r1_0.reservation_status desc,
+        r1_0.id desc 
+    limit
+        ?, ?
+Hibernate: 
+    select
+        count(r1_0.id) 
+    from
+        reservations r1_0 
+    join
+        attraction_slots as1_0 
+            on as1_0.id=r1_0.attraction_slot_id 
+    join
+        attractions a1_0 
+            on a1_0.id=as1_0.attraction_id 
+    where
+        a1_0.id=? 
+        and as1_0.starts_at>=? 
+        and as1_0.starts_at<?
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=content iteration=1 plan="EXPLAIN	\n-> Limit: 10 row(s)  (actual time=2.66..2.66 rows=10 loops=1)\n    -> Sort: r1_0.reservation_status DESC, r1_0.id DESC, limit input to 10 row(s) per chunk  (actual time=2.66..2.66 rows=10 loops=1)\n        -> Stream results  (cost=352 rows=1000) (actual time=0.0645..2.43 rows=1000 loops=1)\n            -> Nested loop inner join  (cost=352 rows=1000) (actual time=0.0585..1.32 rows=1000 loops=1)\n                -> Index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000'), with index condition: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=2.51 rows=5) (actual time=0.0177..0.0213 rows=5 loops=1)\n                -> Index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=54 rows=200) (actual time=0.0346..0.25 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=content iteration=2 plan="EXPLAIN	\n-> Limit: 10 row(s)  (actual time=2.74..2.74 rows=10 loops=1)\n    -> Sort: r1_0.reservation_status DESC, r1_0.id DESC, limit input to 10 row(s) per chunk  (actual time=2.74..2.74 rows=10 loops=1)\n        -> Stream results  (cost=352 rows=1000) (actual time=0.066..2.5 rows=1000 loops=1)\n            -> Nested loop inner join  (cost=352 rows=1000) (actual time=0.0594..1.38 rows=1000 loops=1)\n                -> Index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000'), with index condition: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=2.51 rows=5) (actual time=0.0184..0.0219 rows=5 loops=1)\n                -> Index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=54 rows=200) (actual time=0.0347..0.26 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=content iteration=3 plan="EXPLAIN	\n-> Limit: 10 row(s)  (actual time=2.68..2.69 rows=10 loops=1)\n    -> Sort: r1_0.reservation_status DESC, r1_0.id DESC, limit input to 10 row(s) per chunk  (actual time=2.68..2.68 rows=10 loops=1)\n        -> Stream results  (cost=352 rows=1000) (actual time=0.0642..2.45 rows=1000 loops=1)\n            -> Nested loop inner join  (cost=352 rows=1000) (actual time=0.0581..1.34 rows=1000 loops=1)\n                -> Index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000'), with index condition: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=2.51 rows=5) (actual time=0.0175..0.0206 rows=5 loops=1)\n                -> Index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=54 rows=200) (actual time=0.0346..0.253 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=content iteration=4 plan="EXPLAIN	\n-> Limit: 10 row(s)  (actual time=2.83..2.83 rows=10 loops=1)\n    -> Sort: r1_0.reservation_status DESC, r1_0.id DESC, limit input to 10 row(s) per chunk  (actual time=2.83..2.83 rows=10 loops=1)\n        -> Stream results  (cost=352 rows=1000) (actual time=0.0642..2.56 rows=1000 loops=1)\n            -> Nested loop inner join  (cost=352 rows=1000) (actual time=0.0582..1.43 rows=1000 loops=1)\n                -> Index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000'), with index condition: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=2.51 rows=5) (actual time=0.0181..0.0212 rows=5 loops=1)\n                -> Index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=54 rows=200) (actual time=0.0437..0.267 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=content iteration=5 plan="EXPLAIN	\n-> Limit: 10 row(s)  (actual time=2.72..2.72 rows=10 loops=1)\n    -> Sort: r1_0.reservation_status DESC, r1_0.id DESC, limit input to 10 row(s) per chunk  (actual time=2.72..2.72 rows=10 loops=1)\n        -> Stream results  (cost=352 rows=1000) (actual time=0.0648..2.49 rows=1000 loops=1)\n            -> Nested loop inner join  (cost=352 rows=1000) (actual time=0.0592..1.42 rows=1000 loops=1)\n                -> Index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000'), with index condition: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=2.51 rows=5) (actual time=0.018..0.0206 rows=5 loops=1)\n                -> Index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=54 rows=200) (actual time=0.0349..0.268 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=count iteration=1 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=203 rows=1) (actual time=0.292..0.292 rows=1 loops=1)\n    -> Nested loop inner join  (cost=103 rows=1000) (actual time=0.0174..0.257 rows=1000 loops=1)\n        -> Filter: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=1.26 rows=5) (actual time=0.0077..0.0104 rows=5 loops=1)\n            -> Covering index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000')  (cost=1.26 rows=5) (actual time=0.0059..0.0071 rows=5 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=4.35 rows=200) (actual time=0.0057..0.04 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=count iteration=2 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=203 rows=1) (actual time=0.263..0.263 rows=1 loops=1)\n    -> Nested loop inner join  (cost=103 rows=1000) (actual time=0.0188..0.227 rows=1000 loops=1)\n        -> Filter: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=1.26 rows=5) (actual time=0.0084..0.0102 rows=5 loops=1)\n            -> Covering index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000')  (cost=1.26 rows=5) (actual time=0.0062..0.0073 rows=5 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=4.35 rows=200) (actual time=0.0055..0.0323 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=count iteration=3 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=203 rows=1) (actual time=0.299..0.299 rows=1 loops=1)\n    -> Nested loop inner join  (cost=103 rows=1000) (actual time=0.0211..0.26 rows=1000 loops=1)\n        -> Filter: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=1.26 rows=5) (actual time=0.0089..0.0125 rows=5 loops=1)\n            -> Covering index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000')  (cost=1.26 rows=5) (actual time=0.0068..0.0085 rows=5 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=4.35 rows=200) (actual time=0.00684..0.0399 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=count iteration=4 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=203 rows=1) (actual time=0.273..0.273 rows=1 loops=1)\n    -> Nested loop inner join  (cost=103 rows=1000) (actual time=0.019..0.238 rows=1000 loops=1)\n        -> Filter: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=1.26 rows=5) (actual time=0.0084..0.011 rows=5 loops=1)\n            -> Covering index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000')  (cost=1.26 rows=5) (actual time=0.0059..0.0072 rows=5 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=4.35 rows=200) (actual time=0.0057..0.0321 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_PLAN_RECORDED scenario=attraction-date queryType=count iteration=5 plan="EXPLAIN	\n-> Aggregate: count(r1_0.id)  (cost=203 rows=1) (actual time=0.251..0.251 rows=1 loops=1)\n    -> Nested loop inner join  (cost=103 rows=1000) (actual time=0.0175..0.215 rows=1000 loops=1)\n        -> Filter: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=1.26 rows=5) (actual time=0.0081..0.0098 rows=5 loops=1)\n            -> Covering index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000')  (cost=1.26 rows=5) (actual time=0.0061..0.0073 rows=5 loops=1)\n        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=4.35 rows=200) (actual time=0.00528..0.0326 rows=200 loops=5)\n	\n"
+event=ADMIN_RESERVATION_QUERY_BASELINE_RECORDED count=100000 userCount=200 scenarioCount=3 repetitions=5 outputDirectory="D:\개발자\TeamProject\attraction-reservation\build\reports\admin-reservation-list-query\run-1794145708821-3d24036b-f96a-49fd-99f6-eac02fbbf6a4"
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

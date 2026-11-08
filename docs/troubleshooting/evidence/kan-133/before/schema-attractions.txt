@@ -1,0 +1,20 @@
+[{Table=attractions, Create Table=CREATE TABLE `attractions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `deleted_at` datetime(6) DEFAULT NULL,
+  `description` varchar(200) NOT NULL,
+  `duration_minutes` int NOT NULL,
+  `entrance_move_minutes` int NOT NULL,
+  `location` varchar(50) NOT NULL,
+  `name` varchar(50) NOT NULL,
+  `operation_status` enum('DELETED','MAINTENANCE','OPERATING','SUSPENDED') NOT NULL,
+  `active_attraction` int GENERATED ALWAYS AS ((case when (`deleted_at` is null) then 1 else NULL end)) VIRTUAL,
+  `min_height_cm` int DEFAULT NULL,
+  `max_height_cm` int DEFAULT NULL,
+  `guardian_height_cm` int DEFAULT NULL,
+  `open_time` time DEFAULT NULL,
+  `close_time` time DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_attraction_name_active` (`name`,`active_attraction`)
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci}]

@@ -1,0 +1,15 @@
+[{Table=attraction_slots, Create Table=CREATE TABLE `attraction_slots` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `auto_closed` bit(1) NOT NULL,
+  `capacity` int NOT NULL,
+  `ends_at` datetime(6) NOT NULL,
+  `reserved_count` int NOT NULL,
+  `starts_at` datetime(6) NOT NULL,
+  `status` enum('CANCELLED','CLOSED','OPEN','SUSPENDED') NOT NULL,
+  `attraction_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_attraction_slots_attraction_starts` (`attraction_id`,`starts_at`),
+  CONSTRAINT `FK65hbj9g1x231xvnowtd8xsns5` FOREIGN KEY (`attraction_id`) REFERENCES `attractions` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=501 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci}]

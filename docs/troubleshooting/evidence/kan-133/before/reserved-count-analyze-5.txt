@@ -1,0 +1,7 @@
+EXPLAIN	
+-> Aggregate: count(r1_0.id)  (cost=21307 rows=1) (actual time=36.9..36.9 rows=1 loops=1)
+    -> Nested loop inner join  (cost=18818 rows=24888) (actual time=0.141..36 rows=25000 loops=1)
+        -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=10108 rows=24888) (actual time=0.117..29.4 rows=25000 loops=1)
+            -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.115..21.3 rows=100000 loops=1)
+        -> Single-row covering index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=118e-6..142e-6 rows=1 loops=25000)
+	

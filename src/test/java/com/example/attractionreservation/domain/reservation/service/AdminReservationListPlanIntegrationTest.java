@@ -99,6 +99,9 @@ class AdminReservationListPlanIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private MySQLContainer mysql;
+
     @MockitoBean
     private UserService userService;
 
@@ -130,7 +133,7 @@ class AdminReservationListPlanIntegrationTest {
     }
 
     @Test
-    @DisplayName("관리자 예약 목록의 전체·상태·어트랙션과 날짜 조건별 실제 SQL과 실행 계획을 수집한다")
+    @DisplayName("관리자 예약 목록의 실행 계획과 상태·ID 인덱스의 크기·쓰기 비용을 수집한다")
     void findAdminReservationAll_recordsBaselineAndExecutionPlans() throws Exception {
         // given
         Path output = Path.of("build", "reports", "admin-reservation-list-query",
@@ -156,6 +159,10 @@ class AdminReservationListPlanIntegrationTest {
         for (Scenario scenario : scenarios) {
             recordScenario(output, scenario);
         }
+        // V4 등 기존 인덱스를 유지한 복제 테이블 두 개에서 V5 인덱스 하나의 추가 비용만 비교한다.
+        new ReservationIndexMaintenanceMeasurement(jdbc, transactionManager, mysql,
+                "KAN-133", "idx_reservations_status_id")
+                .record(output.resolve("maintenance"), REPETITIONS);
 
         // then
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM reservations", Long.class)).isEqualTo(allCount);

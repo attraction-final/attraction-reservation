@@ -1,0 +1,5 @@
+EXPLAIN	
+-> Aggregate: count(r1_0.id)  (cost=25.3 rows=1) (actual time=0.0536..0.0536 rows=1 loops=1)
+    -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=12.8 rows=125) (actual time=0.0125..0.0473 rows=125 loops=1)
+        -> Covering index lookup on r1_0 using idx_reservations_user_status_id (user_id=101, reservation_status='RESERVED')  (cost=12.8 rows=125) (actual time=0.0112..0.0322 rows=125 loops=1)
+	

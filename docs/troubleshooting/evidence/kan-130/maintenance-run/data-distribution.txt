@@ -1,0 +1,2 @@
+[{reservation_status=CANCELLED, count=25000}, {reservation_status=COMPLETED, count=25000}, {reservation_status=NO_SHOW, count=25000}, {reservation_status=RESERVED, count=25000}]
+[{user_id=101, reservation_status=CANCELLED, count=125}, {user_id=101, reservation_status=COMPLETED, count=125}, {user_id=101, reservation_status=NO_SHOW, count=125}, {user_id=101, reservation_status=RESERVED, count=125}]

@@ -1,5 +1,0 @@
-EXPLAIN	
--> Aggregate: count(r1_0.id)  (cost=150 rows=1) (actual time=0.912..0.912 rows=1 loops=1)
-    -> Filter: (r1_0.reservation_status = 'RESERVED')  (cost=138 rows=125) (actual time=0.0981..0.904 rows=125 loops=1)
-        -> Index lookup on r1_0 using uk_reservations_user_slot_active (user_id=101)  (cost=138 rows=500) (actual time=0.0948..0.865 rows=500 loops=1)
-	

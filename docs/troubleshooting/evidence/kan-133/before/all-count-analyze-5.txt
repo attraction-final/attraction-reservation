@@ -1,6 +1,0 @@
-EXPLAIN	
--> Aggregate: count(r1_0.id)  (cost=20215 rows=1) (actual time=23.8..23.8 rows=1 loops=1)
-    -> Nested loop inner join  (cost=10220 rows=99953) (actual time=0.0446..20.2 rows=100000 loops=1)
-        -> Covering index scan on as1_0 using idx_attraction_slots_attraction_starts  (cost=51.2 rows=500) (actual time=0.0326..0.0789 rows=500 loops=1)
-        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=0.387 rows=200) (actual time=0.00413..0.0311 rows=200 loops=500)
-	

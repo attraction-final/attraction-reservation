@@ -1,4 +1,0 @@
-select count(r1_0.id) from reservations r1_0 join attraction_slots as1_0 on as1_0.id=r1_0.attraction_slot_id where r1_0.reservation_status=?
-
-JDBC bindings:
-setString [1, RESERVED]

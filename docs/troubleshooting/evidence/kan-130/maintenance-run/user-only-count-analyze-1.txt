@@ -1,4 +1,0 @@
-EXPLAIN	
--> Aggregate: count(r1_0.id)  (cost=101 rows=1) (actual time=0.0998..0.0998 rows=1 loops=1)
-    -> Covering index lookup on r1_0 using idx_reservations_user_status_id (user_id=101)  (cost=50.6 rows=500) (actual time=0.0127..0.0817 rows=500 loops=1)
-	

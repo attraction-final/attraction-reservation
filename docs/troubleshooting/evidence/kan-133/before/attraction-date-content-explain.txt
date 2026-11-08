@@ -1,4 +1,0 @@
-id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra	
-1	SIMPLE	a1_0	null	const	PRIMARY	PRIMARY	8	const	1	100.0	Using temporary; Using filesort	
-1	SIMPLE	as1_0	null	range	PRIMARY,idx_attraction_slots_attraction_starts	idx_attraction_slots_attraction_starts	16	null	5	100.0	Using index condition	
-1	SIMPLE	r1_0	null	ref	FKcmoki4oisrprbwlrh3gw9vnh2	FKcmoki4oisrprbwlrh3gw9vnh2	8	test.as1_0.id	199	100.0	null	

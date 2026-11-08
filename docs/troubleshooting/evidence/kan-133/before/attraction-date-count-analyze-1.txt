@@ -1,7 +1,0 @@
-EXPLAIN	
--> Aggregate: count(r1_0.id)  (cost=203 rows=1) (actual time=0.292..0.292 rows=1 loops=1)
-    -> Nested loop inner join  (cost=103 rows=1000) (actual time=0.0174..0.257 rows=1000 loops=1)
-        -> Filter: ((as1_0.attraction_id = 3) and (as1_0.starts_at >= TIMESTAMP'2026-10-04 00:00:00') and (as1_0.starts_at < TIMESTAMP'2026-10-05 00:00:00'))  (cost=1.26 rows=5) (actual time=0.0077..0.0104 rows=5 loops=1)
-            -> Covering index range scan on as1_0 using idx_attraction_slots_attraction_starts over (attraction_id = 3 AND '2026-10-04 00:00:00.000000' <= starts_at < '2026-10-05 00:00:00.000000')  (cost=1.26 rows=5) (actual time=0.0059..0.0071 rows=5 loops=1)
-        -> Covering index lookup on r1_0 using FKcmoki4oisrprbwlrh3gw9vnh2 (attraction_slot_id=as1_0.id)  (cost=4.35 rows=200) (actual time=0.0057..0.04 rows=200 loops=5)
-	

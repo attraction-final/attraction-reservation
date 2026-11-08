@@ -1,4 +1,0 @@
-id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra	
-1	SIMPLE	r1_0	null	ref	uk_reservations_user_slot_active,FKcmoki4oisrprbwlrh3gw9vnh2	uk_reservations_user_slot_active	8	const	500	100.0	Using filesort	
-1	SIMPLE	as1_0	null	eq_ref	PRIMARY,idx_attraction_slots_attraction_starts	PRIMARY	8	test.r1_0.attraction_slot_id	1	100.0	null	
-1	SIMPLE	a1_0	null	eq_ref	PRIMARY	PRIMARY	8	test.as1_0.attraction_id	1	100.0	null	

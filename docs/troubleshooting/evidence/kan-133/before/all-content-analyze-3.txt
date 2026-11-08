@@ -1,9 +1,0 @@
-EXPLAIN	
--> Limit: 10 row(s)  (cost=79795 rows=10) (actual time=66..66 rows=10 loops=1)
-    -> Nested loop inner join  (cost=79795 rows=99553) (actual time=66..66 rows=10 loops=1)
-        -> Nested loop inner join  (cost=44951 rows=99553) (actual time=65.9..65.9 rows=10 loops=1)
-            -> Sort: r1_0.reservation_status DESC, r1_0.id DESC  (cost=10108 rows=99553) (actual time=65.9..65.9 rows=10 loops=1)
-                -> Table scan on r1_0  (cost=10108 rows=99553) (actual time=0.204..36.3 rows=100000 loops=1)
-            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.00223..0.00226 rows=1 loops=10)
-        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00109..0.00113 rows=1 loops=10)
-	

@@ -610,6 +610,39 @@ class RefundCommandServiceTest {
     }
 
     @Test
+    @DisplayName("같은 결제에 재시도 시각이 지난 FAILED 환불이 둘이면 id가 작은 환불만 처리 대상으로 조회한다.")
+    void findProcessableIds_twoFailedRetryDue_OnlyLowerId() {
+        //given
+        Instant retryDue = now.minus(Duration.ofMinutes(10));
+        Long first = saveRefund(RefundStatus.FAILED, adult, 1, retryDue);
+        saveRefund(RefundStatus.FAILED, child, 1, retryDue);
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(first);
+    }
+
+    @Test
+    @DisplayName("같은 결제의 FAILED 환불이 아직 재시도 시각 전이어도 요청된 환불은 처리 대상으로 조회하지 않는다.")
+    void findProcessableIds_failedNotDue_RequestedExcluded() {
+        //given
+        saveRefund(RefundStatus.FAILED, adult, 1, now);            // 1분 뒤 재시도
+        saveRefund(RefundStatus.REQUESTED, child, 1);
+        OrderItem otherItem = createOtherPaymentItem();
+        Long otherPaymentRefund = saveRefund(otherPayment, RefundStatus.REQUESTED, otherItem, 1, now);
+        flushAndClear();
+
+        //when
+        List<Long> ids = refundCommandService.findProcessableIds(now, 10);
+
+        //then
+        assertThat(ids).containsExactly(otherPaymentRefund);
+    }
+
+    @Test
     @DisplayName("멈춘 처리로 보고 다른 처리가 다시 점유했으면 이전 처리의 늦은 완료 결과는 거부한다.")
     void recordComplete_reclaimedByOther_Fail() {
         //given

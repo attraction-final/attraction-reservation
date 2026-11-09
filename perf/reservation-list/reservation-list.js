@@ -18,24 +18,36 @@ const durations = {
 const invalid = new Rate('reservation_list_invalid');
 const requests = new Counter('reservation_list_requests');
 
-// 2명 × 5회 × 2조건 = 조회 20건. 성능 합격 기준은 아직 설정하지 않는다.
+const mode = __ENV.TEST_MODE || 'smoke';
+if (!['smoke', 'warmup', 'load'].includes(mode)) throw new Error('잘못된 TEST_MODE');
+const users = mode === 'smoke' ? 2 : 10;
+const p95 = __ENV.P95_MS ? Number(__ENV.P95_MS) : null;
+if (p95 !== null && (!Number.isFinite(p95) || p95 <= 0)) throw new Error('P95_MS는 양수여야 합니다.');
+const thresholds = {
+  checks: ['rate==1'],
+  reservation_list_invalid: ['rate==0'],
+  reservation_list_requests: [mode === 'smoke' ? 'count==20' : 'count>=20'],
+  'http_req_failed{endpoint:reservation-list}': ['rate==0'],
+  'reservation_list_requests{variant:all}': [mode === 'smoke' ? 'count==10' : 'count>=10'],
+  'reservation_list_requests{variant:reserved}': [mode === 'smoke' ? 'count==10' : 'count>=10'],
+};
+// 성능 목표는 load에 명시한 경우에만 적용한다. warm-up의 시간 분포는 합격 기준에서 제외한다.
+if (mode === 'load' && p95 !== null) {
+  thresholds.reservation_list_all_duration = [`p(95)<${p95}`];
+  thresholds.reservation_list_reserved_duration = [`p(95)<${p95}`];
+}
 export const options = {
-  scenarios: {
+  scenarios: mode === 'smoke' ? {
     smoke: { executor: 'per-vu-iterations', vus: 2, iterations: 5, maxDuration: '60s', gracefulStop: '5s' },
+  } : {
+    [mode]: { executor: 'constant-vus', vus: users, duration: mode === 'warmup' ? '20s' : '60s', gracefulStop: '25s' },
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)'],
-  thresholds: {
-    checks: ['rate==1'],
-    reservation_list_invalid: ['rate==0'],
-    reservation_list_requests: ['count==20'],
-    'http_req_failed{endpoint:reservation-list}': ['rate==0'],
-    'reservation_list_requests{variant:all}': ['count==10'],
-    'reservation_list_requests{variant:reserved}': ['count==10'],
-  },
+  thresholds,
 };
 
 export function setup() {
-  if (fixture.length !== 4) throw new Error('DB 기대 결과는 회원 2명 × 조건 2개의 4행이어야 합니다.');
+  if (fixture.length !== 20) throw new Error('DB 기대 결과는 회원 10명 × 조건 2개의 20행이어야 합니다.');
   const accounts = [];
   for (const row of fixture) {
     if (!['all', 'reserved'].includes(row.variant) || !Array.isArray(row.rows)
@@ -48,9 +60,9 @@ export function setup() {
     if (account.expected[row.variant]) throw new Error('중복 기대 결과');
     account.expected[row.variant] = { total: row.total, rows: row.rows };
   }
-  if (accounts.length !== 2 || accounts.some(account => !account.expected.all || !account.expected.reserved)
-    || accounts[0].email === accounts[1].email) {
-    throw new Error('서로 다른 회원 2명의 조건별 기대 결과가 필요합니다.');
+  if (accounts.length !== 10 || accounts.some(account => !account.expected.all || !account.expected.reserved)
+    || new Set(accounts.map(account => account.email)).size !== 10) {
+    throw new Error('서로 다른 회원 10명의 조건별 기대 결과가 필요합니다.');
   }
   const response = http.get(`${BASE}/api/reservations/me`, {
     tags: { endpoint: 'auth-preflight' }, timeout: '10s',
@@ -59,9 +71,10 @@ export function setup() {
   if (!check(response, { '인증 없는 목록 조회는 401': r => r.status === 401 })) {
     throw new Error('인증 사전 검증 실패');
   }
-  // 로그인은 setup에서 한 번씩 수행한다. 토큰은 setup 데이터로만 전달하고 파일/로그에 남기지 않는다.
-  for (const account of accounts) account.token = login(account.email);
-  return accounts;
+  // 각 프로세스의 setup에서 로그인한다. warm-up과 load는 같은 계정을 사용하되 새 토큰을 발급한다.
+  const selected = accounts.sort((left, right) => left.email.localeCompare(right.email)).slice(0, users);
+  for (const account of selected) account.token = login(account.email);
+  return selected;
 }
 
 export default function (accounts) {
@@ -104,13 +117,13 @@ export function handleSummary(data) {
     options: data.options, state: data.state };
   const count = data.metrics.reservation_list_requests?.values.count ?? 0;
   const failed = data.metrics.checks?.values.fails ?? 0;
-  const lines = [`smoke 목록 요청: ${count}/20, 실패한 check: ${failed}`];
+  const lines = [`${mode} 목록 요청: ${count}${mode === 'smoke' ? '/20' : ''}, 실패한 check: ${failed}`];
   for (const variant of ['all', 'reserved']) {
     const values = data.metrics[`reservation_list_${variant}_duration`]?.values;
     if (values && Number.isFinite(values.med)) lines.push(`${variant}: med=${values.med.toFixed(2)}ms p95=${values['p(95)'].toFixed(2)}ms p99=${values['p(99)'].toFixed(2)}ms`);
   }
   return {
     stdout: lines.join('\n') + '\n',
-    [`/results/${runId}/summary.json`]: JSON.stringify(summary, null, 2),
+    [`/results/${runId}/${mode === 'warmup' ? 'warmup-summary.json' : 'summary.json'}`]: JSON.stringify(summary, null, 2),
   };
 }

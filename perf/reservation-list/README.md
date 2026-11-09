@@ -1,7 +1,8 @@
 # KAN-134 내 예약 목록 HTTP smoke 테스트
 
 실제 Spring Boot 앱과 Spring Security를 거쳐 응답 정확성을 확인한다.
-현재는 **부하를 높이기 전 연결 검증** 단계다. 성능 목표 달성이나 운영 처리 한계를 판단하지 않는다.
+smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
+다음은 같은 부하에서 주기적 자원 수집을 검증하는 단계다. 운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
 
@@ -15,10 +16,11 @@ PowerShell에서 실행할 때도 이 스크립트는 Git Bash 터미널에서 �
 | 파일/도구 | 역할 |
 | --- | --- |
 | `run.sh` | 전용 환경 기동 → 회원 준비 → SQL 준비 → k6 → 결과 수집을 순서대로 실행 |
+| `sample-resources.sh` | load 측정 중 Docker stats·앱 메트릭을 주기적으로 읽고 종료 시 회수 |
 | `prepare-accounts.js`, `auth.js` | k6에서 실제 가입·CSRF·로그인 처리. BCrypt를 SQL로 흉내 내지 않음 |
 | `prepare.sh`, `prepare.sql` | MySQL 컨테이너의 client로 fixture 생성 또는 기존 fixture 검증 |
 | `expected.sql` | API 응답과 비교할 회원별 예약 ID·정렬·DTO·건수를 DB에서 추출 |
-| `reservation-list.js` | setup에서 로그인, VU에서 목록 조회, handleSummary에서 집계 결과 저장 |
+| `reservation-list.js` | smoke / warmup / load 프로필, setup에서 로그인, VU에서 조회, 집계 결과 저장 |
 | `compose.yaml`, `application-perf.yaml` | 기존 앱/DB와 분리된 개인 테스트 환경 |
 
 준비용 k6 실행과 실제 smoke 실행은 별도 프로세스다. 회원 200명 준비 작업은 목록 성능 지표에 섞이지 않는다.
@@ -32,10 +34,10 @@ PowerShell에서 실행할 때도 이 스크립트는 Git Bash 터미널에서 �
 | 대상 | `GET /api/reservations/me?page=0&size=10`, 동일 요청의 `status=RESERVED` 조건 |
 | 데이터 | 회원 200명 × 500건 = 100,000건, 어트랙션 10개, 슬롯 500개 |
 | 상태 | 회원별 RESERVED·COMPLETED·CANCELLED·NO_SHOW 각 125건 |
-| 실제 요청 회원 | 서로 다른 회원 2명 |
+| 실제 요청 회원 | smoke는 2명, warm-up/load는 서로 다른 10명 |
 | smoke | 2 VUs × 5 iterations × 2조건 = 목록 조회 20건, iteration마다 1초 대기 |
 | 기능 합격 | 미인증 401, 조회 오류 0, 회원별 ID·순서·DTO·필터·페이지·전체 건수 일치 |
-| 성능 합격 | 아직 정하지 않음. 소규모·warm-up 없는 값으로 성능 결론을 내리지 않음 |
+| 성능 합격 | load에서 p95_ms를 명시한 경우에만 적용. smoke는 성능 합격 기준 없음 |
 | 앱 자원 | CPU 1개, 메모리 1GiB, JVM heap 256~512MiB, Hikari 최대 10개 |
 | MySQL / Redis / 부하용 k6 | CPU 1 / 0.5 / 1개, 메모리 1GiB / 256MiB / 512MiB |
 | 접근 | 앱 `127.0.0.1:18096`, 관리 포트 `127.0.0.1:18097`, DB/Redis는 내부 네트워크 |
@@ -79,11 +81,49 @@ SQL의 `perf_guard` CHECK 위반은 기대한 테스트 데이터와 다르다�
 ```text
 mysql·redis·app 기동
   → 준비용 k6: 앱 준비 확인, 테스트 계정 200명 생성/로그인 확인
-  → MySQL client: prepare.sql 실행, expected.sql로 기대 결과 4행 저장
+  → MySQL client: prepare.sql 실행, expected.sql로 10명의 기대 결과 20행 저장
   → 실행 환경·측정 전 메트릭 기록
   → smoke k6: setup에서 회원 2명 로그인, VU에서 목록 20회 검증
   → 측정 후 메트릭·종료 코드 기록
 ```
+
+### 3. 첫 부하 측정 — 실험 기준을 정한 다음 실행
+
+| 구간 | 조건 | 결과 |
+| --- | --- | --- |
+| warm-up | 같은 회원 10명, constant-vus, 20초, iteration마다 1초 대기 | warmup-summary.json |
+| 측정 | 회원 10명, constant-vus, 60초, iteration마다 1초 대기 | summary.json |
+| 완료 대기 | 각 구간 종료 시 진행 중 iteration에 최대 25초 허용 | 실제 종료 시각은 목표 duration보다 늦을 수 있음 |
+
+```bash
+bash perf/reservation-list/run.sh load-01 load 500
+```
+
+마지막 `500`은 전체 조회와 RESERVED 조회 **각각 p95 < 500ms**를 임시 실험 기준으로 적용한다.
+공식 서비스 SLO가 아니며, 목표 수치는 실험 전에 선택한다. 기준을 적용하지 않고 우선 관측만 할 때는 마지막 인자를 생략한다.
+
+```bash
+bash perf/reservation-list/run.sh load-01 load
+```
+
+두 명령은 대안이다. 같은 RUN_ID로 둘 다 실행하지 않는다. 기준 없이 실행해 종료 코드가 0이면 기능 검증 통과를 의미하며 성능 목표 통과를 뜻하지 않는다.
+어느 경우든 HTTP 오류율·응답 불일치율 0과 check 전체 통과는 요구한다.
+고정 동시 사용자 수를 유지하는 닫힌 모델이며, 응답이 느려지면 요청률이 낮아진다. 고정 RPS를 발생시키는 테스트가 아니다.
+
+warm-up과 측정은 별도 k6 프로세스로 실행해 지표를 합치지 않는다. 두 프로세스는 같은 계정을 사용하고 각각 setup에서 로그인한다.
+기능 검증에 실패한 warm-up 뒤에는 측정을 시작하지 않는다. before 메트릭은 warm-up 완료 후 기록한다.
+현재는 단계별 부하 증가가 아닌 첫 10 VUs 실험이며, 운영 수용량을 측정하는 프로필로 해석하지 않는다.
+
+### 4. 주기적 자원 수집을 포함한 다음 실행
+
+```bash
+bash perf/reservation-list/run.sh load-02 load
+```
+
+부하 조건은 load-01과 같은 10 VUs·60초이며 성능 합격 기준은 적용하지 않는다.
+warm-up 뒤에 수집 프로세스가 시작돼 측정용 k6와 병렬로 동작한다. warm-up의 자원은 수집하지 않는다.
+목표 간격은 처리 시간을 포함한 2초지만 Docker stats·scrape 시간에 따라 길어질 수 있어 실제 시각을 기록한다.
+HTTP 검증 통과와 수집 성공을 별개로 확인한다. 실행기 종료 시 수집 중단을 요청하고 프로세스를 회수한다.
 
 ## 결과 확인
 
@@ -91,10 +131,14 @@ mysql·redis·app 기동
 
 | 파일 | 확인할 내용 | 해석 범위 |
 | --- | --- | --- |
-| `summary.json` | check 실패, invalid rate, 조회 20건 완료, 조건별 duration | 인증·로그인 요청이 포함된 전체 HTTP 지표 대신 목록 전용 지표 사용 |
-| `fixture.jsonl` | 회원 2명의 조건별 DB 기대 결과 4행 | 토큰·비밀번호 없음. API 응답에서 복사한 기대값이 아님 |
+| `summary.json` | 측정 구간 check 실패, invalid rate, 요청 수, 조건별 duration | 인증·로그인 요청이 포함된 전체 HTTP 지표 대신 목록 전용 지표 사용 |
+| `warmup-summary.json`, `warmup-exit-code.txt` | load의 별도 warm-up 결과와 종료 코드 | 측정 결과와 합산하지 않음. smoke에는 생성하지 않음 |
+| `fixture.jsonl` | 회원 10명의 조건별 DB 기대 결과 20행 | smoke는 처음 두 회원만 사용. 토큰·비밀번호 없음 |
 | `metadata.txt` | 시각, HEAD·수정 상태, jar/스크립트 hash, 실제 DB 건수·버전·인덱스·앱/DB/Redis image ID | 소스와 jar 일치 여부는 빌드 절차로 별도 관리 |
 | `metrics-before.txt`, `metrics-after.txt` | Hikari·JVM·HTTP Prometheus 메트릭 | 전후 누적값/순간값. 구간 최대 CPU·메모리나 요청당 쿼리 수를 증명하지 않음 |
+| `resource-samples.jsonl` | load의 앱·MySQL·Redis·측정용 k6 Docker stats와 주기 시작/종료 시각 | 표본 최대값은 절대적인 순간 최대값이 아님. 시작/종료 경계에는 k6 표본이 없을 수 있음 |
+| `metrics-samples.txt` | load의 주기별 Hikari·JVM·HTTP 지표, scrape 완료 시각 | 여러 scrape를 이어 둔 분석용 텍스트이며 단일 Prometheus scrape 입력으로 쓰지 않음 |
+| `sampling-errors.txt`, `sampling-exit-code.txt` | 수집 오류·프로세스 종료 코드 | 종료 코드 0만으로 누락 없는 수집을 보장하지 않음. 오류 파일과 주기·컨테이너별 표본 확인 |
 | `exit-code.txt` | k6 종료 코드, 정상 통과는 0 | 준비 단계 실패나 강제 종료 시 파일 자체가 없을 수 있음 |
 
 목록 측정 지표는 `reservation_list_duration`, `reservation_list_all_duration`,
@@ -110,8 +154,11 @@ mysql·redis·app 기동
 
 ## 다음 단계
 
-smoke 통과 후 p95 목표·허용 오류율·동시 사용자 수·지속 시간을 정하고 warm-up을 측정 구간과 분리한다.
-이후 앱/DB/발생기 자원·GC·pool 대기를 구간별로 수집한다. 앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로
+첫 측정 전에 임시 p95 기준을 선택한다. 첫 10 VUs 결과를 확인한 뒤 부하 단계를 늘릴지 판단한다.
+주기적 수집을 추가했으며 실제 실행 검증은 다음 RUN_ID에서 수행한다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
+Docker stats와 앱 scrape는 동시에 취득한 값이 아니며 기록된 관측 시각을 함께 확인한다.
+Docker 메모리와 JVM heap 사용량은 서로 다른 지표다. 수집기 자체의 CPU·I/O 비용도 있으므로 load-01과의 시간 차이를 최적화 효과로 주장하지 않는다.
+앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로
 관측한 처리량을 운영 환경의 한계로 일반화하지 않는다. 이번 변경에서는 인덱스·pool·기능 API를 변경하지 않는다.
 
 ## 종료
@@ -126,4 +173,5 @@ docker compose -f perf/reservation-list/compose.yaml down
 
 - [k6 lifecycle: setup과 VU 실행 구분](https://grafana.com/docs/k6/latest/using-k6/test-lifecycle/)
 - [k6 handleSummary 결과 저장](https://grafana.com/docs/k6/latest/results-output/end-of-test/custom-summary/)
+- [Docker stats의 형식과 메모리 해석](https://docs.docker.com/reference/cli/docker/container/stats/)
 - 현재 ReservationController, SearchReservationListResponse, ReservationCustomRepositoryImpl, AuthController, CsrfController와 Flyway 스키마를 기준으로 작성했다.

@@ -77,6 +77,8 @@ services:
     working_dir: /scripts
     environment:
       RUN_ID: "${RUN_ID:-smoke-02}"
+      TEST_MODE: "${TEST_MODE:-smoke}"
+      P95_MS: "${P95_MS:-}"
     command: ["run", "--quiet", "reservation-list.js"]
     volumes:
       - ./:/scripts:ro

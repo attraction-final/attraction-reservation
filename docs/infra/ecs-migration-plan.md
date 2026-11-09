@@ -243,20 +243,29 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 알림 받을 곳: Slack incoming webhook (2026-11-08 결정)
 - webhook URL은 SSM `monitoring/ALERT_WEBHOOK_URL`(SecureString)에 둔다. 값은 저장소에 남기지 않는다.
 
-규칙 (이번 전환과 관련된 장애만)
+규칙 (2026-11-09 결정: 서비스 중단과 오류만)
 
 | 규칙 | 조건 | 데이터 |
 |---|---|---|
 | api 정상 대상 0 | `attraction-app-ecs` `HealthyHostCount` < 1, 2분 | CloudWatch ALB |
+| api 메트릭 끊김 | `up{service="api"}`가 5분 동안 없음. Alloy 사이드카는 essential이 아니라 죽어도 task가 남는다 | Prometheus |
 | worker 스케줄러 멈춤 | worker `tasks_scheduled_execution_seconds_count`가 10분 동안 늘지 않음 (worker task가 없을 때도 잡힌다) | Prometheus |
 | api 5xx | 5분 동안 5xx 비율 5% 초과 그리고 5건 이상 (요청이 적을 때 한두 건으로 울리지 않게) | Prometheus |
-| api 메트릭 끊김 | `up{service="api"}`가 5분 동안 없음. Alloy 사이드카는 essential이 아니라 죽어도 task가 남는다 | Prometheus |
+| ERROR 로그 | api·worker `logback_events_total{level="error"}`가 5분 동안 1건 이상. 로깅 규칙 5장의 "ERROR 로그는 알림 대상" 기준 | Prometheus |
 
 - 로그 라우터(Fluent Bit)는 essential이라 죽으면 task가 내려가 "api 정상 대상 0"으로 잡힌다.
+- 스케줄러 실행 실패(`exception!="none"`)는 따로 두지 않는다. 예외를 잡는 스케줄러는 ERROR 로그로 남기므로 "ERROR 로그"가 잡고, 잡지 않은 예외도 Spring이 ERROR로 남긴다.
+- 응답 지연, DB 커넥션 고갈, RDS·ElastiCache·task 자원 알림은 넣지 않는다. 실제 트래픽이 없어 기준을 정할 수 없고, 자원이 다해 task가 죽으면 위 규칙이 잡는다. 부하가 생기면 추가한다.
 - CD 실패는 GitHub Actions 실패 알림으로 받는다.
+- "ERROR 로그"는 슬롯 자동 생성 실패(5단계에서 발견)를 먼저 고친 뒤 켠다. 고치지 않으면 매일 00:05에 울린다.
+
+알림 정책
+- 채널 하나, 심각도 구분 없음
+- 해제(resolved) 알림을 보낸다
+- 같은 알림은 4시간마다 다시 보낸다
 
 변경
-- `deploy/monitoring/grafana/provisioning/alerting/alerts.yml` (새 파일): 규칙 4개, Slack contact point, 알림 정책. webhook URL은 환경변수로 참조한다
+- `deploy/monitoring/grafana/provisioning/alerting/alerts.yml` (새 파일): 규칙 5개, Slack contact point, 알림 정책. webhook URL은 환경변수로 참조한다
 - `deploy/monitoring/compose.yml`: grafana에 webhook 환경변수 전달
 - `deploy/monitoring/user-data.sh`: `.env`를 만들 때 webhook도 SSM에서 받는다
 - `cd.yml` `deploy-monitoring`: Run Command 스크립트가 배포마다 SSM에서 `.env`를 다시 만든다. 이미 떠 있는 인스턴스에도 새 비밀값이 들어가야 하기 때문이다
@@ -264,7 +273,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - 반영은 `deploy/monitoring/`이 바뀐 main 배포 때 CD가 한다
 
 검증
-- [ ] 로컬 Grafana 13.3.0에 provisioning을 올려 규칙 4개와 contact point가 로드됨
+- [ ] 로컬 Grafana 13.3.0에 provisioning을 올려 규칙 5개와 contact point가 로드됨
 - [ ] 배포 후 contact point 테스트 알림이 Slack에 옴
 - [ ] worker desired 0으로 잠깐 내려 "worker 스케줄러 멈춤" 알림이 오고, 되돌리면 해제 알림이 옴
 

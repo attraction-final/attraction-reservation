@@ -95,7 +95,7 @@ class OrderServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L, 20L)))
                 .thenReturn(List.of(secondProduct, firstProduct));
-        when(orderRepository.saveAndFlush(any(Order.class)))
+        when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> {
                     Order order = invocation.getArgument(0);
                     ReflectionTestUtils.setField(order, "id", 101L);
@@ -126,7 +126,7 @@ class OrderServiceTest {
                 .containsExactly(2, 1);
 
         ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderRepository).saveAndFlush(captor.capture());
+        verify(orderRepository).save(captor.capture());
         Order savedOrder = captor.getValue();
 
         assertThat(savedOrder.getUser()).isSameAs(user);
@@ -153,7 +153,7 @@ class OrderServiceTest {
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L))).thenReturn(List.of(product));
-        when(orderRepository.saveAndFlush(any(Order.class)))
+        when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(paymentService.createPayment(any(Order.class)))
                 .thenThrow(new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT));
@@ -392,7 +392,7 @@ class OrderServiceTest {
 
         // then
         ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderRepository).saveAndFlush(captor.capture());
+        verify(orderRepository).save(captor.capture());
         assertThat(captor.getValue().getVisitDate()).isEqualTo(visitDate);
     }
 
@@ -400,7 +400,7 @@ class OrderServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(product.getId())))
                 .thenReturn(List.of(product));
-        when(orderRepository.saveAndFlush(any(Order.class)))
+        when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> {
                     Order order = invocation.getArgument(0);
                     ReflectionTestUtils.setField(order, "id", 101L);

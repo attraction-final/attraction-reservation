@@ -42,8 +42,10 @@ domain/payment
 ├── service/WebhookEventCommandService  register, findProcessableIds, claim, recordResult, recordFailure
 ├── facade/WebhookEventProcessor        점유 → syncPayment → 결과 기록 (트랜잭션 없음)
 ├── facade/PaymentFacade.syncPayment    사용자 확인 없이 PG 상태를 원장에 반영, PaymentSyncResult 반환
+│                                       (주문 만료 자동 취소도 취소 전 PG 확인에 사용, KAN-131)
 ├── dto/PaymentSyncResult               APPROVED, ALREADY_DONE, NOT_PAID, PG_FAILED, COMPENSATED, NOT_OUR_PAYMENT,
-│                                       STATE_CONFLICT
+│                                       STATE_CONFLICT, REFUND_SYNC_REQUIRED, REFUND_SYNCED, REFUND_MISMATCH,
+│                                       REFUND_PENDING
 └── scheduler/WebhookEventScheduler     @Scheduled, payment.webhook.scheduler.enabled로 켜고 끔
 
 global/config/SchedulingConfig          @EnableScheduling
@@ -78,7 +80,7 @@ global/config/SchedulingConfig          @EnableScheduling
 
 | 상황 | 응답 | 저장 |
 |---|---|---|
-| 헤더 누락, 서명·타임스탬프 검증 실패 | 401 (`PAYMENT_WEBHOOK_INVALID_SIGNATURE`) | 저장 안 함, 경고 로그 |
+| 헤더 누락, 서명·타임스탬프 검증 실패 | 401 (`PAYMENT_WEBHOOK_INVALID_SIGNATURE`) | 저장 안 함, `WEBHOOK_VERIFICATION_FAILED`(INFO, 4xx라 로깅 규칙상 INFO) |
 | 처음 받은 거래 웹훅 | 200 | `RECEIVED` |
 | 처음 받은 결제와 무관한 웹훅 | 200 | `IGNORED` |
 | 이미 받은 `webhook_id` | 200 | 변화 없음 |
@@ -103,7 +105,7 @@ global/config/SchedulingConfig          @EnableScheduling
 | `created_at`, `updated_at` | `BaseTimeEntity`. 수신 시각, 처리 중 멈춘 행 판단 기준 |
 
 - 인덱스: `pg_id`, `(status, next_retry_at)`
-- `ddl-auto: validate`이므로 **테이블은 직접 만들어야 한다**(7장).
+- 테이블은 Flyway `V1__init.sql`이 만든다. 시각 컬럼은 모두 `DATETIME(6)`이다. 스키마 변경 방법은 [migration.md](../database/migration.md).
 
 ### 상태 전이 (`WebhookStatus.canTransitTo`)
 
@@ -141,11 +143,15 @@ global/config/SchedulingConfig          @EnableScheduling
 |---|---|---|
 | 원장에 없는 `pgId` | `NOT_OUR_PAYMENT` | `IGNORED` |
 | 이미 `FAILED`(`PAYMENT_ALREADY_PROCESSED`) | `ALREADY_DONE` | `PROCESSED` |
-| 원장 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED` → 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리 | `REFUND_SYNC_REQUIRED` (기록되지 않음) | 아래 세 줄 중 하나 |
+| 원장 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED` → 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리 | `REFUND_SYNC_REQUIRED` (기록되지 않음) | 아래 줄 중 하나 |
+| ↳ PG에 결제 없음 | 예외 전파 (`PAYMENT_PG_PAYMENT_NOT_FOUND`) | `FAILED` → 재시도 |
+| ↳ 확정 대기(`PG_PENDING`) 환불이 있고 그 취소 내역이 아직 `REQUESTED` | `REFUND_PENDING` | `PROCESSED` (스케줄러가 이어서 확정) |
+| ↳ 확정 대기 환불의 취소 내역이 `SUCCEEDED` → 환불 완료 | `REFUND_SYNCED` | `PROCESSED` |
+| ↳ 확정 대기 환불의 취소 실패 기록·다른 처리가 먼저 기록 → PG 취소 금액으로 이어서 판단 | 아래 금액 비교 결과 | |
 | ↳ PG 취소 금액 = 완료 환불 합계 | `ALREADY_DONE` | `PROCESSED` |
 | ↳ 차이와 같은 미완료 환불 1건을 PG 기준 완료 | `REFUND_SYNCED` | `PROCESSED` |
 | ↳ PG 취소 금액 < 완료 환불 합계 (조회 이후 다른 환불 완료) | 예외 전파 (`REFUND_PG_CANCELLED_AMOUNT_STALE`) | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
-| ↳ 그 밖(외부 취소 등) | `REFUND_MISMATCH` | **즉시 `DEAD`** + error 로그 (수동 확인) |
+| ↳ 그 밖(외부 취소 등) | `REFUND_MISMATCH` | **즉시 `DEAD`** (수동 확인). ERROR 로그 `REFUND_AMOUNT_MISMATCHED`는 `RefundProcessor`가 남기고, 웹훅 쪽은 처리 결과만 INFO로 남긴다 |
 | PG 결제 완료, 금액 일치 → 승인 | `APPROVED` | `PROCESSED` |
 | PG 미완료(`PAYMENT_NOT_PAID`) | `NOT_PAID` | `PROCESSED` |
 | PG 실패(`PAYMENT_PG_FAILED`) → 결제 실패 처리 | `PG_FAILED` | `PROCESSED` |
@@ -172,10 +178,22 @@ global/config/SchedulingConfig          @EnableScheduling
 payment:
   webhook:
     scheduler:
-      enabled: true      # false면 스케줄러 빈을 등록하지 않음 (테스트에서는 false)
+      enabled: true      # false면 스케줄러 빈을 등록하지 않음. api 프로필에서는 false
       fixed-delay: 10s   # 이전 실행이 끝난 뒤 다음 실행까지 대기, 실행이 겹치지 않음
       batch-size: 50     # 한 번에 처리할 최대 웹훅 수
+
+spring:
+  task:
+    scheduling:
+      pool:
+        size: 3          # 모든 @Scheduled 작업이 함께 쓰는 풀
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s   # 종료 시 실행 중인 작업을 기다리는 시간 (ECS stopTimeout 30s보다 짧게)
 ```
+
+- ECS에서는 API 인스턴스(`api` 프로필, `application-api.yml`)가 웹훅 스케줄러를 끄고 worker에서만 처리한다. 수신(컨트롤러)은 API 인스턴스가 받는다.
+- 스레드 풀은 웹훅·보상·환불·주문 만료·티켓 만료·슬롯 생성 스케줄러가 함께 쓴다. 상세는 [payment-compensation.md 5장 스케줄러 설정](payment-compensation.md#스케줄러-설정).
 
 ## 6. 테스트
 
@@ -199,26 +217,23 @@ payment:
 
 ### 배포 전 필수
 
-- [ ] **`webhook_events` 테이블 생성**: `ddl-auto: validate`이므로 테이블이 없으면 애플리케이션이 시작되지 않는다. DDL 공유·적용 방식(마이그레이션 도구 도입 여부)을 팀과 정한다.
-  - 시각 컬럼(`next_retry_at`, `processed_at`, `created_at`, `updated_at`)은 `DATETIME(6)`으로 만든다. 소수 초가 없으면 최대 0.5초 반올림되어 재시도 시각 비교가 어긋난다.
 - [ ] **PortOne 콘솔에 웹훅 URL 등록**: `POST /api/payments/webhooks/portone`
-- [ ] **인증 적용 시** `/api/payments/webhooks/**`를 인증 없이 허용(`permitAll`). 이 엔드포인트의 보안은 서명 검증이다.
 
 ### 검증
 
 - [ ] Testcontainers MySQL
   - 두 Processor가 같은 웹훅을 동시에 점유해도 한쪽만 처리한다
-  - 웹훅 처리와 승인 API가 동시에 들어와도 결제는 한 번만 `PAID`가 된다
+  - 웹훅 처리·승인 API·주문 만료 자동 취소가 동시에 들어와도 결제는 한 번만 `PAID`가 된다
 - [ ] 실제 PortOne 웹훅 본문 형식 확인 (민감 정보 포함 여부, 저장 전 점검)
 
 ### 보상 취소 Outbox (KAN-39에서 구현)
 
 - 웹훅의 스케줄러·Processor 구조를 그대로 재사용해 구현했다. 상세는 [payment-compensation.md](payment-compensation.md).
-- 두 스케줄러가 서로의 PG 지연에 밀리지 않도록 `spring.task.scheduling.pool.size: 2`로 스레드를 나눴다. 환불 스케줄러(KAN-51)가 더해져 지금은 `3`이다.
+- 두 스케줄러가 서로의 PG 지연에 밀리지 않도록 `spring.task.scheduling.pool.size: 2`로 스레드를 나눴다. 지금은 `3`이고, 같은 풀을 스케줄러 6개가 함께 쓴다(5장 스케줄러 설정).
 
 ### 운영
 
 - [ ] `DEAD` 웹훅 확인 수단(알림, 조회 쿼리 또는 API)
 - [ ] 처리 완료 웹훅 보관 기간과 정리 배치
-- [ ] **대사 배치**: 웹훅도 오지 않고 승인 API도 호출되지 않은 결제는 Inbox·Outbox로도 잡히지 않는다. PortOne 결제 목록과 원장을 비교하는 배치를 마지막 안전망으로 둔다.
+- [ ] **대사 배치**: 웹훅도 오지 않고 승인 API도 호출되지 않은 결제 중 `PENDING`인 것은 주문 만료 자동 취소가 취소 전에 PG를 확인해 승인한다(KAN-131). 그러나 만료 취소의 PG 확인 직후 결제되고 웹훅도 오지 않은 결제는 여전히 잡히지 않는다. PortOne 결제 목록과 원장을 비교하는 배치를 마지막 안전망으로 둔다.
 - [ ] `eventType`은 SDK 클래스 이름이다. PortOne 원문 `type`(예: `Transaction.Paid`)으로 저장하려면 본문을 한 번 더 파싱해야 한다.

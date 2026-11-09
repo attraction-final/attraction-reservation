@@ -29,11 +29,12 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long>, A
     @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId AND a.deletedAt IS NULL")
     Optional<Attraction> findActiveByIdForUpdate(@Param("attractionId") Long attractionId);
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
     // 슬롯 자동 생성 대상: 삭제되지 않은 어트랙션 ID 전체 (ID 순)
+    // 잠그지 않는다. 읽기 전용 트랜잭션에서 호출되고, 잠금은 어트랙션별 생성 단계(findActiveByIdForUpdate)에서 건다.
     @Query("SELECT a.id FROM Attraction a WHERE a.deletedAt IS NULL ORDER BY a.id")
     List<Long> findAllActiveIds();
 
+    // 예약 생성 시 같은 어트랙션의 예약 검사를 한 명씩 하도록 어트랙션 행을 잠근다
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId")
     Optional<Attraction> findByIdForUpdate(@Param("attractionId") Long attractionId);

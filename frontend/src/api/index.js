@@ -501,6 +501,18 @@ function toRouteResult(res, byId) {
 export const ROUTE_PICK_COUNT = 5;
 
 export const routeApi = {
+  // [GET /api/route-recommendations/attractions] → [{ attractionId, attractionName }]
+  // 추천에 고를 수 있는 어트랙션(좌표가 등록된 곳)과 사진·운영 상태가 있는 어트랙션 목록을 합쳐서 줘요.
+  // 좌표가 없는 어트랙션을 고르면 추천이 실패해서, 처음부터 선택지에서 빼요.
+  recommendableAttractions: async () => {
+    const [recommendable, all] = await Promise.all([
+      http.get('/route-recommendations/attractions'),
+      attractionApi.list('ALL'),
+    ]);
+    const ids = new Set(recommendable.map((a) => a.attractionId));
+    return all.filter((a) => ids.has(a.id));
+  },
+
   // [POST /api/route-recommendations] { latitude, longitude, accuracy, ..., attractionIds }
   // 현재 위치(getCurrentLocation 결과)와 어트랙션 5개로 총 이동 시간이 가장 짧은 방문 순서를 받아요.
   // 서버는 결과를 저장하지 않아요. 슬롯·예약과는 상관없이 이동 순서만 계산해요.

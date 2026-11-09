@@ -2,359 +2,291 @@ package com.example.attractionreservation.domain.routeRecommendation.service;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
-import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
-import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
-import com.example.attractionreservation.domain.reservation.entity.Reservation;                 // ★ 추가
-import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     // ★ 추가
-import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   // ★ 추가
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.AttractionView;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateAttraction;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelection;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.Coordinate;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.Exclusion;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearchResult;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.SlotState;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.SlotView;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.TravelTimeTable;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.TravelTimeTable.PathTime;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.WalkingTimeCalculator;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.GeoPoint;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.PathEdge;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.StartLeg;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.StartLegEstimator;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.VisitOrderOptimizer;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.VisitOrderResult;
+import com.example.attractionreservation.domain.routeRecommendation.config.RouteRecommendationProperties;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse.ExcludedAttraction;
-import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Leg;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Location;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.LocationWarning;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.UnavailablePath;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.UnavailableReason;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Visit;
 import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionLocation;
-import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
-import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
-import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
-import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
+import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionPath;
 import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionLocationRepository;
 import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionPathRepository;
-import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
-import com.example.attractionreservation.domain.ticket.entity.Ticket;
-import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
-import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
-import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
-import com.example.attractionreservation.domain.routeRecommendation.repository.StopCount;
-import com.example.attractionreservation.global.response.PageableDto;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 
+/**
+ * 사용자 현재 위치(브라우저 Geolocation)와 선택한 어트랙션 5개로 총 이동 시간이 가장 짧은 방문 순서를 추천한다.
+ *
+ * 처리 순서
+ *   1. DB 없이 할 수 있는 검증 (위치 정확도, 중복 ID)
+ *   2. 조회 ①②: 어트랙션, 좌표
+ *   3. 첫 구간(사용자 위치 → 각 어트랙션) 추정 + 서비스 지역 검증
+ *   4. 조회 ③: 선택한 어트랙션끼리의 구간 → 메모리 행렬
+ *   5. 완전 탐색 (VisitOrderOptimizer)
+ *   6. 응답 조립
+ *
+ * DB 조회는 방문 순서 수와 관계없이 항상 3번이다. 결과는 저장하지 않는다.
+ */
 @Service
 @RequiredArgsConstructor
 public class RouteRecommendationService {
-
-    private static final LocalTime AFTERNOON_TICKET_START = LocalTime.of(15, 0);
-    private static final long CANCEL_DEADLINE_MINUTES = 30;
-
-
-    private final RouteRecommendationRepository routeRecommendationRepository;
-    private final TicketRepository ticketRepository;
     private final AttractionRepository attractionRepository;
-    private final AttractionSlotRepository attractionSlotRepository;
-    private final ReservationRepository reservationRepository;
-    private final AttractionPathRepository attractionPathRepository;
     private final AttractionLocationRepository attractionLocationRepository;
-    private final CandidateSelector candidateSelector;
-    private final RouteSearcher routeSearcher;
-    private final WalkingTimeCalculator walkingTimeCalculator;
+    private final AttractionPathRepository attractionPathRepository;
+    private final StartLegEstimator startLegEstimator;
+    private final VisitOrderOptimizer visitOrderOptimizer;
+    private final RouteRecommendationProperties properties;
     private final Clock clock;
 
-    @Transactional
-    public SearchRouteRecommendationResponse createRouteRecommendation(Long userId, CreateRouteRecommendationRequest request) {
-        LocalDateTime now = LocalDateTime.now(clock);
+    @Transactional(readOnly = true)
+    public CreateRouteRecommendationResponse recommend(CreateRouteRecommendationRequest request) {
         List<Long> attractionIds = request.attractionIds();
 
-        validateNoDuplicateAttraction(attractionIds);
-        Coordinate currentLocation = findCurrentLocation(request); // null = 정문 출발
-        StartLocation startLocation = currentLocation == null ? StartLocation.ENTRANCE : StartLocation.CURRENT_LOCATION;
-        Ticket ticket = findUsableTicket(request.ticketId(), userId);
-        LocalDateTime startAt = correctStartAt(request.startAt(), now);
-        LocalDateTime endAt = request.endAt();
-        validateTimeRange(startAt, endAt, ticket);
-        validateNotBlockedByExistingReservation(ticket.getId(), now);   // ★ 추가
+        // 1. DB 조회 전에 끝낼 수 있는 검증
+        validateAccuracy(request.accuracy()); //현재 위치 정확도 체크
+        validateNoDuplicateAttraction(attractionIds); //어트랙션 중복 검사
 
-        List<AttractionView> attractions = findAttractionsInRequestOrder(attractionIds);
-        Map<Long, List<SlotView>> slotsByAttractionId = findSlotsByAttraction(attractionIds, ticket.getValidDate());
+        // 2. 조회 ①②
+        Map<Long, Attraction> attractions = findAttractions(attractionIds); //있는 어트랙션만 가져옴
+        Map<Long, GeoPoint> locations = findLocations(attractionIds);
 
-        CandidateSelection selection = candidateSelector.select(attractions, slotsByAttractionId, startAt, endAt, now);
-        TravelTimeTable travelTimes = findTravelTimesBetween(selection.candidates());
-        Map<Long, Integer> firstMoveMinutes = findFirstMoveMinutes(currentLocation, selection.candidates());
-        RouteSearchResult route = routeSearcher.search(
-                startAt, endAt, selection.candidates(), travelTimes, firstMoveMinutes);
-        List<Exclusion> exclusions = collectExclusionsInRequestOrder(attractions, selection, route);
+        // 3. 첫 구간 추정 (어트랙션 5개 → 5번 계산, 순서 120가지가 이 값을 재사용한다)
+        GeoPoint userLocation = new GeoPoint(request.latitude(), request.longitude());
+        Map<Long, StartLeg> startLegs = estimateStartLegs(userLocation, attractionIds, locations);
+        validateServiceArea(startLegs);
 
-        if (route.isEmpty()) {
-            return SearchRouteRecommendationResponse.none(ticket.getId(), startAt, endAt, startLocation,
-                    attractionIds.size(), toExcludedAttractions(exclusions));
+        // 4. 조회 ③ → 메모리 행렬
+        List<AttractionPath> paths = attractionPathRepository.findAllBetween(attractionIds);
+        Map<Long, Map<Long, PathEdge>> activeEdges = toActiveEdges(paths);
+        List<UnavailablePath> unavailablePaths = findUnavailablePaths(attractionIds, paths);
+
+        // 5. 완전 탐색
+        VisitOrderResult result = visitOrderOptimizer.optimize(attractionIds, startLegs, activeEdges);
+        if (!result.hasValidOrder()) {
+            throw new BusinessException(ErrorCode.ROUTE_NO_VALID_ORDER);
         }
 
-        RouteRecommendation recommendation = RouteRecommendation.create(
-                userId, ticket.getId(), startAt, endAt, startLocation, toStops(route), toExclusionEntities(exclusions));
-        return SearchRouteRecommendationResponse.from(routeRecommendationRepository.save(recommendation));
+        // 6. 응답
+        return new CreateRouteRecommendationResponse(
+                toLocation(request),
+                result.totalDistanceM(),
+                result.totalMoveMinutes(),
+                result.edges().stream().anyMatch(PathEdge::estimated),
+                result.evaluatedOrderCount(),
+                result.validOrderCount(),
+                toVisits(result.order(), attractions, locations),
+                toLegs(result),
+                unavailablePaths
+        );
     }
 
-    @Transactional(readOnly = true)
-    public SearchRouteRecommendationResponse findRouteRecommendationById(Long userId, Long recommendationId) {
-        RouteRecommendation recommendation = routeRecommendationRepository.findDetailById(recommendationId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ROUTE_RECOMMENDATION_NOT_FOUND));
+    // ===== 검증 =====
 
-        validateOwner(recommendation, userId);
-        return SearchRouteRecommendationResponse.from(recommendation);
+    // 정확도(오차 반경)가 기준 이상이면 첫 구간 계산을 믿을 수 없으므로 거부한다.
+    private void validateAccuracy(double accuracy) {
+        double limit = properties.getAccuracyLimitMeters();
+        if (accuracy >= limit) {
+            throw new BusinessException(ErrorCode.LOCATION_ACCURACY_TOO_LOW,
+                    "현재 위치의 정확도(오차 %.0fm)가 기준(%.0fm 미만)보다 낮아 경로를 추천할 수 없습니다. 위치를 다시 측정해주세요."
+                            .formatted(accuracy, limit));
+            //%.0f는 "실수(f)를 소수점 0자리로 반올림해서 넣어라
+            //문자열 안의 빈칸 %.0f에 실제 숫자를 끼워 넣는 거예요. Java 15부터 생긴 String.format()의 짧은 버전이에요.
+        }
     }
-
-    @Transactional(readOnly = true)
-    public PageableDto<SearchRouteRecommendationSummaryResponse> findRouteRecommendations(Long userId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
-        Page<RouteRecommendation> recommendations =
-                routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(userId, pageable);
-
-        Map<Long, Long> stopCounts = countStops(recommendations.getContent());
-        return PageableDto.from(recommendations.map(recommendation ->
-                SearchRouteRecommendationSummaryResponse.of(
-                        recommendation, stopCounts.getOrDefault(recommendation.getId(), 0L).intValue())));
-    }
-
-    @Transactional
-    public void deleteRouteRecommendation(Long userId, Long recommendationId) {
-        RouteRecommendation recommendation = routeRecommendationRepository.findByIdAndDeletedAtIsNull(recommendationId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ROUTE_RECOMMENDATION_NOT_FOUND));
-
-        validateOwner(recommendation, userId);
-        recommendation.delete(clock.instant());   // 소프트 삭제, 실제 예약은 그대로
-    }
-
-    // 검증
 
     private void validateNoDuplicateAttraction(List<Long> attractionIds) {
-        if (new HashSet<>(attractionIds).size() != attractionIds.size()) {
-            throw new BusinessException(ErrorCode.INVALID_ATTRACTION_SELECTION);
+        if (new HashSet<>(attractionIds).size() != attractionIds.size()) { //어트랙션 중복 검사
+            throw new BusinessException(ErrorCode.DUPLICATE_ROUTE_ATTRACTION);
         }
     }
 
-    // 위도·경도가 둘 다 없으면 null(정문 출발). 하나만 있거나 공원 범위 밖이면 400.
-    // 위·경도 값 범위(-90~90, -180~180)는 요청 DTO의 Bean Validation이 먼저 확인한다.
-    private Coordinate findCurrentLocation(CreateRouteRecommendationRequest request) {
-        if (request.latitude() == null && request.longitude() == null) {
-            return null;
-        }
-        if (request.latitude() == null || request.longitude() == null) {
-            throw new BusinessException(ErrorCode.INVALID_CURRENT_LOCATION);
-        }
-        Coordinate location = new Coordinate(request.latitude(), request.longitude());
-        if (!walkingTimeCalculator.isInsidePark(location)) {
-            throw new BusinessException(ErrorCode.CURRENT_LOCATION_OUT_OF_PARK);
-        }
-        return location;
-    }
-
-    private Ticket findUsableTicket(Long ticketId, Long userId) {
-        Ticket ticket = ticketRepository.findById(ticketId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.TICKET_NOT_FOUND));
-
-        Long ownerId = ticket.getOrderItem().getOrder().getUser().getId();
-        if (!ownerId.equals(userId)) {
-            throw new BusinessException(ErrorCode.TICKET_NOT_OWNED);
-        }
-        if (ticket.getStatus() != TicketStatus.IN_USE) {
-            throw new BusinessException(ErrorCode.TICKET_NOT_AVAILABLE);
-        }
-        return ticket;
-    }
-
-    private LocalDateTime correctStartAt(LocalDateTime requestedStartAt, LocalDateTime now) {
-        return requestedStartAt.isBefore(now) ? now : requestedStartAt;
-    }
-
-    private void validateTimeRange(LocalDateTime startAt, LocalDateTime endAt, Ticket ticket) {
-        LocalDate visitDate = ticket.getValidDate();
-        LocalDateTime usableFrom = visitDate.atTime(usableStartTime(ticket.getType()));
-        LocalDateTime parkClose = visitDate.atTime(AttractionSlot.PARK_CLOSE_TIME);
-
-        boolean invalid = !startAt.isBefore(endAt)
-                || startAt.isBefore(usableFrom)
-                || endAt.isAfter(parkClose);
-        if (invalid) {
-            throw new BusinessException(ErrorCode.INVALID_TIME_RANGE);
+    // 선택한 어트랙션 중 가장 가까운 곳까지의 직선거리가 기준을 넘으면 공원 밖으로 본다.
+    private void validateServiceArea(Map<Long, StartLeg> startLegs) {
+        int nearestMeters = startLegs.values().stream()
+                .mapToInt(StartLeg::straightDistanceM)
+                .min()
+                .orElseThrow();
+        if (nearestMeters > properties.getMaxStartDistanceMeters()) {
+            throw new BusinessException(ErrorCode.LOCATION_OUT_OF_SERVICE_AREA,
+                    "가장 가까운 어트랙션까지 직선거리 %dm로, 서비스 기준(%dm 이내)을 벗어났습니다."
+                            .formatted(nearestMeters, properties.getMaxStartDistanceMeters()));
         }
     }
 
-    private LocalTime usableStartTime(TicketType type) {
-        return switch (type) {
-            case ALL_DAY -> AttractionSlot.PARK_OPEN_TIME;
-            case AFTERNOON -> AFTERNOON_TICKET_START;
-        };
-    }
+    // ===== 조회 =====
 
-    private void validateNotBlockedByExistingReservation(Long ticketId, LocalDateTime now) {
-        boolean blocked = reservationRepository
-                .findAllWithSlotByTicketIdAndStatus(ticketId, ReservationStatus.RESERVED).stream()
-                .map(Reservation::getAttractionSlot)
-                .anyMatch(slot -> now.isAfter(slot.getStartsAt().minusMinutes(CANCEL_DEADLINE_MINUTES))
-                        && now.isBefore(slot.getEndsAt()));
-        if (blocked) {
-            throw new BusinessException(ErrorCode.ROUTE_RECOMMENDATION_BLOCKED);
-        }
-    }
-
-    private void validateOwner(RouteRecommendation recommendation, Long userId) {
-        if (!recommendation.isOwnedBy(userId)) {
-            throw new BusinessException(ErrorCode.NOT_ROUTE_OWNER);
-        }
-    }
-
-    //조회 + 변환
-
-    private List<AttractionView> findAttractionsInRequestOrder(List<Long> attractionIds) {
+    // 조회 ①: 삭제되지 않은 어트랙션만 인정한다. 하나라도 없으면 없는 ID를 알려준다.
+    private Map<Long, Attraction> findAttractions(List<Long> attractionIds) {
         Map<Long, Attraction> byId = attractionRepository.findAllById(attractionIds).stream()
                 .filter(attraction -> attraction.getDeletedAt() == null)
                 .collect(Collectors.toMap(Attraction::getId, Function.identity()));
 
-        if (byId.size() != attractionIds.size()) {
-            throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND);
-        }
-        return attractionIds.stream()
-                .map(byId::get)
-                .map(attraction -> new AttractionView(
-                        attraction.getId(),
-                        attraction.getName(),
-                        attraction.isOperating(),
-                        attraction.getEntranceMoveMinutes()))
+        List<Long> missingIds = attractionIds.stream()
+                .filter(id -> !byId.containsKey(id)) //.containsKey ->(있다/없다만 답함)
                 .toList();
+        if (!missingIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND,
+                    "어트랙션을 찾을 수 없습니다. attractionIds=" + missingIds);
+        }
+        return byId;
     }
 
-    // 후보 어트랙션끼리의 실측 이동 구간을 쿼리 1번으로 읽어 조회표로 만든다.
-    // 후보가 1개 이하면 어트랙션 간 이동이 없으므로 조회하지 않는다.
-    private TravelTimeTable findTravelTimesBetween(List<CandidateAttraction> candidates) {
-        if (candidates.size() < 2) {
-            return TravelTimeTable.empty();
-        }
-        List<Long> candidateIds = candidates.stream()
-                .map(CandidateAttraction::attractionId)
-                .toList();
-        List<PathTime> paths = attractionPathRepository.findAllBetween(candidateIds).stream()
-                .map(path -> new PathTime(
-                        path.getFromAttractionId(),
-                        path.getToAttractionId(),
-                        path.getMoveMinutes(),
-                        path.isActive()))
-                .toList();
-        return TravelTimeTable.from(paths);
-    }
-
-    // 현재 위치 → 후보 어트랙션별 첫 이동 시간을 좌표로 계산한다. 좌표는 쿼리 1번으로 읽는다.
-    // 위치 없이 요청했거나 후보가 없으면 조회하지 않는다. 좌표가 없는 어트랙션은 맵에서 빠져 정문 기준 시간을 쓴다.
-    private Map<Long, Integer> findFirstMoveMinutes(Coordinate currentLocation, List<CandidateAttraction> candidates) {
-        if (currentLocation == null || candidates.isEmpty()) {
-            return Map.of();
-        }
-        List<Long> candidateIds = candidates.stream()
-                .map(CandidateAttraction::attractionId)
-                .toList();
-        return attractionLocationRepository.findAllByAttractionIdIn(candidateIds).stream()
+    // 조회 ②: 좌표가 없으면 첫 구간도, 응답 좌표도 만들 수 없으므로 거부한다.
+    private Map<Long, GeoPoint> findLocations(List<Long> attractionIds) {
+        Map<Long, GeoPoint> byId = attractionLocationRepository.findAllByAttractionIdIn(attractionIds).stream()
                 .collect(Collectors.toMap(
                         AttractionLocation::getAttractionId,
-                        location -> walkingTimeCalculator.minutesBetween(
-                                currentLocation, new Coordinate(location.getLatitude(), location.getLongitude()))));
+                        location -> new GeoPoint(location.getLatitude(), location.getLongitude())));
+
+        List<Long> missingIds = attractionIds.stream()
+                .filter(id -> !byId.containsKey(id))
+                .toList();
+        if (!missingIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.ATTRACTION_LOCATION_NOT_FOUND,
+                    "좌표 정보가 등록되지 않은 어트랙션이 있습니다. attractionIds=" + missingIds);
+        }
+        return byId;
     }
 
-    private Map<Long, List<SlotView>> findSlotsByAttraction(List<Long> attractionIds, LocalDate visitDate) {
-        LocalDateTime dayStart = visitDate.atStartOfDay();
-        LocalDateTime nextDayStart = visitDate.plusDays(1).atStartOfDay();
-
-        Map<Long, List<SlotView>> slotsByAttractionId = new HashMap<>();
+    // ===== 계산 준비 =====
+//사용자 위치에서 각 어트랙션까지 첫 이동이 얼마나 걸리는지
+    private Map<Long, StartLeg> estimateStartLegs(
+            GeoPoint userLocation, List<Long> attractionIds, Map<Long, GeoPoint> locations) {
+        Map<Long, StartLeg> startLegs = new LinkedHashMap<>();
         for (Long attractionId : attractionIds) {
-            List<SlotView> slots = attractionSlotRepository
-                    .findSlotsByAttractionIdAndDate(attractionId, dayStart, nextDayStart, false).stream()
-                    .map(slot -> new SlotView(
-                            slot.getId(),
-                            slot.getStartsAt(),
-                            slot.getEndsAt(),
-                            SlotState.valueOf(slot.getStatus().name()),   // 두 enum 의 상수 이름이 같다
-                            slot.getCapacity(),
-                            slot.getReservedCount()))
-                    .toList();
-            slotsByAttractionId.put(attractionId, slots);
+            startLegs.put(attractionId, startLegEstimator.estimate(userLocation, locations.get(attractionId)));
         }
-        return slotsByAttractionId;
+        return startLegs;
     }
 
-    private List<Exclusion> collectExclusionsInRequestOrder(
-            List<AttractionView> attractions, CandidateSelection selection, RouteSearchResult route) {
-
-        Map<Long, Exclusion> byId = new HashMap<>();
-        selection.exclusions().forEach(exclusion -> byId.put(exclusion.attractionId(), exclusion));
-
-        Map<Long, String> names = attractions.stream()
-                .collect(Collectors.toMap(AttractionView::attractionId, AttractionView::attractionName));
-        route.unreachableAttractionIds().forEach(id ->
-                byId.put(id, new Exclusion(id, names.get(id), ExclusionReason.TIME_CONFLICT)));
-
-        return attractions.stream()
-                .map(AttractionView::attractionId)
-                .filter(byId::containsKey)
-                .map(byId::get)
-                .toList();
-    }
-
-    private List<RouteRecommendationStop> toStops(RouteSearchResult route) {
-        return route.visits().stream()
-                .map(visit -> RouteRecommendationStop.of(
-                        visit.sequence(),
-                        visit.attractionId(),
-                        visit.slotId(),
-                        visit.attractionName(),
-                        visit.moveMinutes(),
-                        visit.arrivalAt(),
-                        visit.startsAt(),
-                        visit.endsAt()))
-                .toList();
-    }
-
-    private List<RouteRecommendationExclusion> toExclusionEntities(List<Exclusion> exclusions) {
-        return exclusions.stream()
-                .map(exclusion -> RouteRecommendationExclusion.of(
-                        exclusion.attractionId(), exclusion.attractionName(), exclusion.reason()))
-                .toList();
-    }
-
-    private List<ExcludedAttraction> toExcludedAttractions(List<Exclusion> exclusions) {
-        return exclusions.stream()
-                .map(exclusion -> ExcludedAttraction.of(
-                        exclusion.attractionId(), exclusion.attractionName(), exclusion.reason()))
-                .toList();
-    }
-
-    /** 목록의 추천들의 방문지 개수를 쿼리 1번으로 센다. 빈 IN 절 쿼리는 보내지 않는다 */
-    private Map<Long, Long> countStops(List<RouteRecommendation> recommendations) {
-        if (recommendations.isEmpty()) {
-            return Map.of();
+    // 활성 구간만 출발 → (도착 → 구간) 행렬로 만든다. 비활성 구간은 계산에 넣지 않는다.
+    private Map<Long, Map<Long, PathEdge>> toActiveEdges(List<AttractionPath> paths) {
+        Map<Long, Map<Long, PathEdge>> edges = new HashMap<>();
+        for (AttractionPath path : paths) {
+            if (!path.isActive()) {
+                continue;
+            }
+            edges.computeIfAbsent(path.getFromAttractionId(), key -> new HashMap<>())
+                    .put(path.getToAttractionId(), new PathEdge(
+                            path.getFromAttractionId(),
+                            path.getToAttractionId(),
+                            path.getDistanceM(),
+                            path.getMoveMinutes(),
+                            path.isEstimated()));
         }
-        List<Long> ids = recommendations.stream()
-                .map(RouteRecommendation::getId)
-                .toList();
-        return routeRecommendationRepository.countStopsByRecommendationIds(ids).stream()
-                .collect(Collectors.toMap(StopCount::recommendationId, StopCount::stopCount));
+        return edges;
+    }
+
+    // 선택한 어트랙션의 모든 (출발, 도착) 쌍 중 계산에 쓸 수 없는 구간을 요청 순서대로 모은다.
+    private List<UnavailablePath> findUnavailablePaths(List<Long> attractionIds, List<AttractionPath> paths) {
+        Map<Long, Map<Long, AttractionPath>> byFromTo = new HashMap<>();
+        for (AttractionPath path : paths) {
+            byFromTo.computeIfAbsent(path.getFromAttractionId(), key -> new HashMap<>())
+                    .put(path.getToAttractionId(), path);
+        }
+
+        List<UnavailablePath> unavailable = new ArrayList<>();
+        for (Long from : attractionIds) {
+            for (Long to : attractionIds) {
+                if (from.equals(to)) {
+                    continue;
+                }
+                AttractionPath path = byFromTo.getOrDefault(from, Map.of()).get(to);
+                if (path == null) {
+                    unavailable.add(new UnavailablePath(from, to, UnavailableReason.MISSING));
+                } else if (!path.isActive()) {
+                    unavailable.add(new UnavailablePath(from, to, UnavailableReason.INACTIVE));
+                }
+            }
+        }
+        return unavailable;
+    }
+
+    // ===== 응답 조립 =====
+
+    private Location toLocation(CreateRouteRecommendationRequest request) {
+        Instant measuredAt = request.timestamp() == null ? null : Instant.ofEpochMilli(request.timestamp());
+
+        List<LocationWarning> warnings = new ArrayList<>();
+        if (measuredAt != null
+                && Duration.between(measuredAt, clock.instant()).compareTo(properties.getStaleAfter()) > 0) {
+            warnings.add(LocationWarning.STALE_POSITION);
+        }
+
+        return new Location(
+                request.latitude(),
+                request.longitude(),
+                request.accuracy(),
+                request.altitude(),
+                request.altitudeAccuracy(),
+                request.heading(),
+                request.speed(),
+                measuredAt == null ? null : KstTime.toLocalDateTime(measuredAt),
+                List.copyOf(warnings)
+        );
+    }
+
+    private List<Visit> toVisits(List<Long> order, Map<Long, Attraction> attractions, Map<Long, GeoPoint> locations) {
+        List<Visit> visits = new ArrayList<>();
+        for (int i = 0; i < order.size(); i++) {
+            Long attractionId = order.get(i);
+            GeoPoint location = locations.get(attractionId);
+            visits.add(new Visit(
+                    i + 1,
+                    attractionId,
+                    attractions.get(attractionId).getName(),
+                    location.latitude(),
+                    location.longitude()));
+        }
+        return visits;
+    }
+
+    // legs[0] = 사용자 위치 → 첫 어트랙션, legs[i] = (i)번째 → (i+1)번째 어트랙션
+    private List<Leg> toLegs(VisitOrderResult result) {
+        List<Leg> legs = new ArrayList<>();
+        StartLeg startLeg = result.startLeg();
+        legs.add(Leg.fromUserLocation(
+                result.order().get(0),
+                startLeg.straightDistanceM(),
+                startLeg.distanceM(),
+                startLeg.moveMinutes()));
+
+        for (int i = 0; i < result.edges().size(); i++) {
+            PathEdge edge = result.edges().get(i);
+            legs.add(Leg.fromAttractionPath(
+                    i + 2,
+                    edge.fromAttractionId(),
+                    edge.toAttractionId(),
+                    edge.distanceM(),
+                    edge.moveMinutes(),
+                    edge.estimated()));
+        }
+        return legs;
     }
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import { BackHeader, Empty, Loading } from '../components/ui.jsx';
@@ -30,6 +30,11 @@ export default function RouteSetup() {
   const [canUseEntrance, setCanUseEntrance] = useState(false); // 현재 위치로 실패했을 때 "정문 기준으로 추천받기" 버튼을 보일지
   const [submitting, setSubmitting] = useState(false);
   const [locating, setLocating] = useState(false); // 현재 위치를 받는 중
+  const errorRef = useRef(null);
+
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [error]);
 
   if (!user) {
     return (
@@ -152,11 +157,16 @@ export default function RouteSetup() {
             );
           })}
         </div>
-        {error && <span className="error-text" role="alert">{error}</span>}
-        {canUseEntrance && (
-          <button type="button" className="btn btn-outline" onClick={() => submit({ fromEntrance: true })} disabled={submitting}>
-            정문 기준으로 추천받기
-          </button>
+        {(error || canUseEntrance) && (
+          // 목록 아래에 있어서 실패하면 이 영역이 보이도록 스크롤해요.
+          <div ref={errorRef} className="stack gap-8" style={{ flexShrink: 0 }}>
+            {error && <span className="error-text" role="alert">{error}</span>}
+            {canUseEntrance && (
+              <button type="button" className="btn btn-outline" onClick={() => submit({ fromEntrance: true })} disabled={submitting}>
+                정문 기준으로 추천받기
+              </button>
+            )}
+          </div>
         )}
       </div>
 

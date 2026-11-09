@@ -16,8 +16,8 @@ if [[ -n "$p95_ms" && ( "$mode" != load || ! "$p95_ms" =~ ^[1-9][0-9]{0,4}$ ) ]]
   echo 'p95_ms는 load에서만 사용할 수 있는 양의 정수입니다.' >&2
   exit 1
 fi
-if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 ]]; then
-  echo 'TEST_VUS는 현재 단계에서 10, 20, 50만 지원합니다.' >&2
+if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 ]]; then
+  echo 'TEST_VUS는 현재 단계에서 10, 20, 50, 100만 지원합니다.' >&2
   exit 1
 fi
 target="$script_dir/results/$run_id"

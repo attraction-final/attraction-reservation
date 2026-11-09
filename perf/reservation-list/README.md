@@ -4,6 +4,7 @@
 smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
 주기적 자원 수집과 20 VUs 측정까지 확인했다. load-02·03의 마지막 Docker 수집은 각 1회 누락됐다.
 수집 종료 순서를 개선한 load-07도 50 VUs 기능 검증을 통과했고 수집·정리 오류는 없었다. 복구·중단 경로는 아직 미검증이다.
+100 VUs의 load-08도 기능 검증을 통과했으며, 시작 직후 한 표본에서 active 10·pending 18을 관측했다. 다음은 같은 100 VUs 반복이다.
 운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
@@ -36,7 +37,7 @@ PowerShell에서 실행할 때도 이 스크립트는 Git Bash 터미널에서 �
 | 대상 | `GET /api/reservations/me?page=0&size=10`, 동일 요청의 `status=RESERVED` 조건 |
 | 데이터 | 회원 200명 × 500건 = 100,000건, 어트랙션 10개, 슬롯 500개 |
 | 상태 | 회원별 RESERVED·COMPLETED·CANCELLED·NO_SHOW 각 125건 |
-| 실제 요청 회원 | smoke는 2명, warm-up/load는 TEST_VUS로 10·20·50명 선택 (기본 10명) |
+| 실제 요청 회원 | smoke는 2명, warm-up/load는 TEST_VUS로 10·20·50·100명 선택 (기본 10명) |
 | smoke | 2 VUs × 5 iterations × 2조건 = 목록 조회 20건, iteration마다 1초 대기 |
 | 기능 합격 | 미인증 401, 조회 오류 0, 회원별 ID·순서·DTO·필터·페이지·전체 건수 일치 |
 | 성능 합격 | load에서 p95_ms를 명시한 경우에만 적용. smoke는 성능 합격 기준 없음 |
@@ -83,7 +84,7 @@ SQL의 `perf_guard` CHECK 위반은 기대한 테스트 데이터와 다르다�
 ```text
 mysql·redis·app 기동
   → 준비용 k6: 앱 준비 확인, 테스트 계정 200명 생성/로그인 확인
-  → MySQL client: prepare.sql 실행, expected.sql로 후보 50명의 기대 결과 100행 저장
+  → MySQL client: prepare.sql 실행, expected.sql로 후보 100명의 기대 결과 200행 저장
   → 실행 환경·측정 전 메트릭 기록
   → smoke k6: setup에서 회원 2명 로그인, VU에서 목록 20회 검증
   → 측정 후 메트릭·종료 코드 기록
@@ -135,8 +136,8 @@ TEST_VUS=20 bash perf/reservation-list/run.sh load-03 load
 
 warm-up 20초·측정 60초·iteration마다 1초 대기·컨테이너 자원 제한·수집 방식은 유지하고 회원 20명으로 늘린다.
 성능 합격 기준은 적용하지 않는다. 변경한 기대 결과 SQL과 새 VU 설정의 실행 검증도 함께 수행한다.
-현재 TEST_VUS는 10·20·50을 지원한다. 생략하면 10이며 smoke는 계속 2명을 사용한다.
-기대 결과는 항상 후보 회원 50명·조건별 2행씩 100행을 추출하고 k6가 필요한 회원 수만 선택한다.
+현재 TEST_VUS는 10·20·50·100을 지원한다. 생략하면 10이며 smoke는 계속 2명을 사용한다.
+기대 결과는 항상 후보 회원 100명·조건별 2행씩 200행을 추출하고 k6가 필요한 회원 수만 선택한다.
 기존 결과 폴더의 4행/20행 fixture는 과거 실행 자료로 보존하며 새 실행에서 덮어쓰지 않는다.
 
 ### 6. 초기 CPU 표본의 구간 확인
@@ -191,6 +192,27 @@ batch stats 실패 시 앱·DB·Redis를 다시 수집해 전체 서버 표본 �
 load-07에서 측정·수집·정리 코드 모두 0, 오류·경계 이벤트 파일 비어 있음, Docker 표본 124개·앱 scrape 31회를 확인했다.
 복구 표본이 없어 복구 분기와 중단 시 cleanup까지 검증한 것은 아니다. 다시 실행할 때는 새로운 RUN_ID를 사용한다.
 
+### 10. 다음 단계: 100 VUs
+
+```bash
+TEST_VUS=100 bash perf/reservation-list/run.sh load-08 load
+```
+
+회원 100명으로 늘리고 warm-up 20초·측정 60초·iteration당 1초 대기·자원 제한·수집·정리 방식을 유지한다.
+기존 데이터 100,000건은 바꾸지 않으며 SQL 기대 결과는 후보 회원 100명·조건별 2행씩 총 200행을 만든다.
+성능 합격 기준은 계속 미설정이다. setup 로그인 비용은 목록 전용 Trend에 포함되지 않으며 marker로 구분한다.
+k6의 CPU·메모리도 함께 확인해 부하 발생기 한계와 앱의 한계를 구분한다. 새 SQL 범위·100 VUs의 실제 실행은 load-08에서 확인했다.
+
+### 11. 같은 100 VUs 반복
+
+```bash
+TEST_VUS=100 bash perf/reservation-list/run.sh load-09 load
+```
+
+코드·데이터·pool·측정 시간을 추가 변경하지 않고 시작 직후의 커넥션 대기와 p99 증가가 반복되는지 확인한다.
+load-08은 오류 없이 종료했지만 pending > 0은 30개 표본 중 1개였으므로 지속적인 pool 부족이라고 확정하지 않는다.
+관측된 대기는 connection 획득 대기다. row lock 대기나 지연의 직접 원인으로 혼동하지 않는다.
+
 ## 결과 확인
 
 결과는 `perf/reservation-list/results/<RUN_ID>/`에 저장되며 Git에서 제외한다.
@@ -199,7 +221,7 @@ load-07에서 측정·수집·정리 코드 모두 0, 오류·경계 이벤트 �
 | --- | --- | --- |
 | `summary.json` | 측정 구간 check 실패, invalid rate, 요청 수, 조건별 duration, setup/VU 시작 시각 Gauge | 인증·로그인 요청이 포함된 전체 HTTP 지표 대신 목록 전용 지표 사용 |
 | `warmup-summary.json`, `warmup-exit-code.txt` | load의 별도 warm-up 결과와 종료 코드 | 측정 결과와 합산하지 않음. smoke에는 생성하지 않음 |
-| `fixture.jsonl` | 후보 회원 50명의 조건별 DB 기대 결과 100행 | smoke는 2명, load는 선택한 10명/20명/50명 사용. 토큰·비밀번호 없음 |
+| `fixture.jsonl` | 후보 회원 100명의 조건별 DB 기대 결과 200행 | smoke는 2명, load는 선택한 10명/20명/50명/100명 사용. 토큰·비밀번호 없음 |
 | `metadata.txt` | 시각, HEAD·수정 상태, jar/스크립트 hash, 실제 DB 건수·버전·인덱스·앱/DB/Redis image ID | 소스와 jar 일치 여부는 빌드 절차로 별도 관리 |
 | `metrics-before.txt`, `metrics-after.txt` | Hikari·JVM·HTTP Prometheus 메트릭 | 전후 누적값/순간값. 구간 최대 CPU·메모리나 요청당 쿼리 수를 증명하지 않음 |
 | `resource-samples.jsonl` | load의 앱·MySQL·Redis·측정용 k6 Docker stats와 주기 시작/종료 시각 | 표본 최대값은 절대적인 순간 최대값이 아님. 시작/종료 경계에는 k6 표본이 없을 수 있음 |
@@ -224,7 +246,7 @@ load-07에서 측정·수집·정리 코드 모두 0, 오류·경계 이벤트 �
 ## 다음 단계
 
 첫 측정 전에 임시 p95 기준을 선택한다. 첫 10 VUs 결과를 확인한 뒤 부하 단계를 늘릴지 판단한다.
-load-07의 정상 종료에서 수집·정리 동작을 확인했다. 추가 부하와 병목 분석은 이후 단계이며, 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
+100 VUs에서 초기 connection 대기를 처음 관측했고 다음은 같은 조건 반복이다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
 Docker stats와 앱 scrape는 동시에 취득한 값이 아니며 기록된 관측 시각을 함께 확인한다.
 Docker 메모리와 JVM heap 사용량은 서로 다른 지표다. 수집기 자체의 CPU·I/O 비용도 있으므로 load-01과의 시간 차이를 최적화 효과로 주장하지 않는다.
 앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로

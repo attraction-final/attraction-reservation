@@ -109,6 +109,7 @@ GET /api/admin/orders/{orderId}
         "quantity": 1
       }
     ],
+    "tickets": [],
     "pgId": "example-payment-id"
   }
 }
@@ -116,7 +117,24 @@ GET /api/admin/orders/{orderId}
 
 `items[].id`는 주문 항목 ID이며 입장권 ID가 아니다.
 
-`price`는 주문 당시 단가다. 결제 데이터가 없는 기존 주문은 `pgId`가 null이거나 응답 설정에 따라 생략될 수 있다.
+`price`는 주문 당시 단가다. 결제 데이터가 없는 기존 주문은 `pgId`가 `null`로 나간다(필드는 생략되지 않는다).
+
+`tickets`는 주문에 발급된 입장권 목록이다. 관리자가 부분 환불할 입장권을 고르는 데 쓴다. 결제 전(`PENDING`) 주문은 입장권이 없으므로 빈 배열이다.
+
+```json
+"tickets": [
+  {
+    "ticketId": 501,
+    "orderItemId": 201,
+    "name": "성인 1일권",
+    "status": "UNUSED",
+    "validDate": "2026-11-05"
+  }
+]
+```
+
+- `orderItemId`는 입장권이 속한 주문 항목(`items[].id`)이다.
+- `status`는 입장권 상태다. 환불은 `UNUSED`만 가능하다.
 
 ## 관리자 대리 주문 생성
 
@@ -210,10 +228,10 @@ GET /api/orders/{orderId}
 - 본인 주문만 조회할 수 있다.
 - 다른 회원의 주문은 기존과 동일하게 접근을 거절한다.
 - 기존 응답 항목은 유지한다.
-- 결제가 없는 기존 주문은 `pgId`가 null이거나 생략될 수 있다.
+- 결제가 없는 기존 주문은 `pgId`가 `null`로 나간다.
 - 회원 주문 목록 `/api/orders/me` 응답에는 이번 작업으로 `pgId`를 추가하지 않았다.
 
-입장권 화면의 환불 연결에는 입장권 응답의 `orderId`도 필요하다. 해당 필드 추가는 별도 작업이다.
+입장권 화면의 환불 연결을 위해 입장권 응답(`SearchTicketResponse`)에 `orderId`와 `pgId`가 있다. `pgId`로 부분 환불 API(`/api/payments/{pgId}/refunds/partial`)를 호출한다.
 
 ## 주요 오류
 
@@ -222,8 +240,8 @@ GET /api/orders/{orderId}
 | 400 | 잘못된 페이지·회원 ID·수량·상태값·방문일 |
 | 401 | 미인증 또는 유효하지 않은 인증 |
 | 403 | 관리자 권한 없음 또는 주문 대상 회원이 ACTIVE가 아님 |
-| 404 | 대상 회원·주문·상품·필요한 결제 데이터 없음 |
-| 409 | 재고 부족, 판매 불가 상품, 취소할 수 없는 주문 상태 |
+| 404 | 대상 회원·주문·상품·필요한 결제 데이터 없음 (취소할 주문에 결제가 없으면 `PAYMENT_NOT_FOUND`) |
+| 409 | 재고 부족, 판매 불가 상품, 취소할 수 없는 주문 상태, 결제가 `PENDING`이 아니라 취소할 수 없음(`PAYMENT_CANCEL_PROHIBITED`) |
 
 업무 오류 응답 예시:
 
@@ -242,4 +260,4 @@ GET /api/orders/{orderId}
 
 관리자 생성·취소 완료 로그는 커밋 이후 관리자 ID·대상 회원 ID·주문 ID를 포함해 기록한다.
 
-프론트 연동과 배포 환경 검증은 별도로 진행한다. 관리자 환불 API와 입장권 `orderId` 추가는 이 작업에 포함하지 않는다.
+프론트 연동과 배포 환경 검증은 별도로 진행한다. 관리자 환불 API는 [refund-requirements.md REQ-003](../requirements/refund-requirements.md)을 참고한다.

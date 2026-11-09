@@ -17,13 +17,14 @@ export function csrfHeaders() {
   return { 'Content-Type': 'application/json', [data.headerName]: data.token, Cookie: cookie };
 }
 
-export function login(email) {
+export function login(email, minimumValiditySeconds = 120) {
   const response = http.post(`${BASE}/api/auth/login`, JSON.stringify({
     email, password: PASSWORD,
   }), { headers: csrfHeaders(), tags: { endpoint: 'auth-prepare' }, timeout: '15s' });
   if (response.status !== 200) throw new Error(`테스트 계정 로그인 실패: HTTP ${response.status}`);
   const data = response.json().data;
-  if (!data || !data.accessToken || data.tokenType !== 'Bearer' || data.expiresIn < 120) {
+  if (!data || !data.accessToken || data.tokenType !== 'Bearer'
+      || !Number.isFinite(data.expiresIn) || data.expiresIn < minimumValiditySeconds) {
     throw new Error('Access Token 또는 유효 시간 확인 실패');
   }
   return data.accessToken;

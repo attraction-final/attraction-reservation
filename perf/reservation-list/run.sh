@@ -6,6 +6,8 @@ project_dir="$(cd -- "$script_dir/../.." && pwd)"
 run_id="${1:-}"
 mode="${2:-smoke}"
 p95_ms="${3:-}"
+p99_ms="${P99_MS:-}"
+measurement_seconds="${MEASUREMENT_SECONDS:-60}"
 load_vus="${TEST_VUS:-10}"
 start_mode="${START_MODE:-simultaneous}"
 warmup_seconds="${WARMUP_SECONDS:-20}"
@@ -20,6 +22,14 @@ if [[ $# -lt 1 || $# -gt 3 || ! "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$ \
 fi
 if [[ -n "$p95_ms" && ( "$mode" != load || ! "$p95_ms" =~ ^[1-9][0-9]{0,4}$ ) ]]; then
   echo 'p95_ms는 load에서만 사용할 수 있는 양의 정수입니다.' >&2
+  exit 1
+fi
+if [[ -n "$p99_ms" && ( "$mode" != load || ! "$p99_ms" =~ ^[1-9][0-9]{0,4}$ ) ]]; then
+  echo 'P99_MS는 load에서만 사용할 수 있는 양의 정수입니다.' >&2
+  exit 1
+fi
+if [[ ! "$measurement_seconds" =~ ^[1-9][0-9]{1,2}$ ]] || (( measurement_seconds < 60 || measurement_seconds > 300 )); then
+  echo 'MEASUREMENT_SECONDS는 60~300 사이의 정수(초)여야 합니다.' >&2
   exit 1
 fi
 if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 ]]; then
@@ -80,6 +90,8 @@ export WARMUP_SECONDS="$warmup_seconds"
 export TEST_APP_CPUS="$app_cpus"
 export TEST_POOL_SIZE="$pool_size"
 export P95_MS="$p95_ms"
+export P99_MS="$p99_ms"
+export MEASUREMENT_SECONDS="$measurement_seconds"
 compose() { MSYS_NO_PATHCONV=1 docker compose -f "$compose_file" "$@"; }
 snapshot() {
   curl --fail --silent --show-error http://127.0.0.1:18097/actuator/prometheus |
@@ -158,14 +170,14 @@ fi
   if [[ "$mode" == smoke ]]; then
     echo 'mode=smoke vus=2 iterationsPerVu=5 expectedListRequests=20'
   else
-    echo "mode=load vus=$load_vus warmup=${warmup_seconds}s measurement=60s gracefulStop=25s p95Ms=${p95_ms:-unset}"
+    echo "mode=load vus=$load_vus warmup=${warmup_seconds}s measurement=${measurement_seconds}s gracefulStop=25s p95Ms=${p95_ms:-unset} p99Ms=${p99_ms:-unset}"
     echo 'model=constant-vus thinkSeconds=1 variants=all,reserved'
     echo "warmupStartMode=simultaneous measurementStartMode=$start_mode"
     if [[ "$start_mode" == staggered ]]; then echo 'startSpreadSeconds=5'; else echo 'startSpreadSeconds=0'; fi
-    echo 'latencyWindows=initial0to10s,later10to60s,drain60sPlus classification=requestStart basis=scenarioStart'
+    echo "latencyWindows=initial0to10s,later10to${measurement_seconds}s,drain${measurement_seconds}sPlus classification=requestStart basis=scenarioStart"
     echo 'resourceSampling=enabled targetIntervalSeconds=2 sampledMaxIsNotAnAbsolutePeak=true'
     echo 'measurementLifecycle=stopSamplerBeforeRemovingOwnedK6'
-    echo 'p95 criterion is an experimental target, not a production SLO'
+    echo 'p95/p99 criteria are experimental targets, not a production SLO'
   fi
   echo 'users=200 reservations=100000'
   echo "requestedPoolMax=$pool_size poolMinIdle=10 appRecreatedForPoolComparison=$pool_comparison"

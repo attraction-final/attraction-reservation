@@ -313,6 +313,28 @@ Docker CPU 100%는 약 1 logical CPU 사용량이다. 2 CPU 제한에서는 약 
 load-17·18에서 실제 2 CPU 적용과 기능 검증을 확인했다. 두 실행의 전체/RESERVED p95는 약 12~18ms였다.
 1 CPU 비교·구간별 수치·수집 상태·해석 한계는 [트러블슈팅 기록](../../docs/troubleshooting/reservation-list-load-test.md#21-앱-cpu-제한-1--2-비교와-반복-load-1718)에 정리했다.
 
+### 17. 실험 목표를 적용한 100 VUs·5분 측정
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=100 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-21 load 200
+```
+
+기존 60초 비교를 마치고 100 VUs를 5분간 유지하는 측정이다. 앱 2 CPU·pool max/min 10/10·warm-up 120초와 데이터는 유지한다.
+`MEASUREMENT_SECONDS` 기본값은 60이며 테스트 도구는 60~300의 정수만 허용한다. warm-up 시간과 별도다.
+전체 목록과 RESERVED 목록 각각에 본 측정 전체 p95 ≤ 200ms, p99 ≤ 500ms를 적용한다.
+p95는 기존 세 번째 인자, p99는 선택 환경 변수 `P99_MS`로 지정한다. 미지정한 성능 기준은 적용하지 않는다.
+이는 팀의 운영 SLO가 아닌 앞으로 적용하는 실험 목표다. 기존 실행을 소급해 성능 합격으로 표시하지 않는다.
+기존 p95 비교 연산은 `<`에서 `<=`로 맞췄다. HTTP 오류·응답 불일치 0건 기준은 유지한다.
+
+initial은 [0,10초), later는 [10초,설정된 본 측정 종료), drain은 종료 이후 시작한 요청이다.
+전체 성능 기준에는 초기와 drain 요청도 포함하며 setup/warm-up 요청은 목록 Trend에서 제외한다.
+setup에서 로그인 응답의 토큰 수명이 scenario 시간 + 로그인 대기 여유 60초 + gracefulStop 25초 이상인지 확인한다.
+수명이 부족하면 시작 전에 실패시킨다. 토큰 갱신 부하는 이번 조회 시나리오에 포함하지 않는다.
+메모리·GC·커넥션 대기·CPU 추이도 확인한다. 응답 지연은 구간별 집계이므로 분 단위 악화 여부를 직접 보여주지는 않는다.
+load-21에서 100 VUs·5분 실행과 모든 기능·성능 threshold 통과를 확인했다.
+전체/RESERVED p95는 약 8.60/8.94ms, p99는 약 18.94/20.15ms였고 목록 요청 59,154건의 응답 검증이 모두 통과했다.
+상세 자원·오류·측정 한계는 트러블슈팅 문서 23장에 기록했다. 이 실행으로 장시간 안정성이나 최대 수용량을 확정하지 않는다.
+
 ## 결과 확인
 
 결과는 `perf/reservation-list/results/<RUN_ID>/`에 저장되며 Git에서 제외한다.

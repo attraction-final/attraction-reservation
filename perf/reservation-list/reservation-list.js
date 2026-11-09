@@ -52,8 +52,14 @@ if (!Number.isInteger(warmupSeconds) || warmupSeconds < 1 || warmupSeconds > 600
 const loadUsers = Number(__ENV.TEST_VUS || 10);
 if (![10, 20, 50, 100].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100이어야 합니다.');
 const users = mode === 'smoke' ? 2 : loadUsers;
+const measurementSeconds = Number(__ENV.MEASUREMENT_SECONDS || 60);
+if (!Number.isInteger(measurementSeconds) || measurementSeconds < 60 || measurementSeconds > 300) {
+  throw new Error('MEASUREMENT_SECONDS는 60~300 사이의 정수(초)여야 합니다.');
+}
 const p95 = __ENV.P95_MS ? Number(__ENV.P95_MS) : null;
 if (p95 !== null && (!Number.isFinite(p95) || p95 <= 0)) throw new Error('P95_MS는 양수여야 합니다.');
+const p99 = __ENV.P99_MS ? Number(__ENV.P99_MS) : null;
+if (p99 !== null && (!Number.isFinite(p99) || p99 <= 0)) throw new Error('P99_MS는 양수여야 합니다.');
 const thresholds = {
   checks: ['rate==1'],
   reservation_list_invalid: ['rate==0'],
@@ -63,9 +69,13 @@ const thresholds = {
   'reservation_list_requests{variant:reserved}': [mode === 'smoke' ? 'count==10' : `count>=${users}`],
 };
 // 성능 목표는 load에 명시한 경우에만 적용한다. warm-up의 시간 분포는 합격 기준에서 제외한다.
-if (mode === 'load' && p95 !== null) {
-  thresholds.reservation_list_all_duration = [`p(95)<${p95}`];
-  thresholds.reservation_list_reserved_duration = [`p(95)<${p95}`];
+if (mode === 'load' && (p95 !== null || p99 !== null)) {
+  for (const variant of ['all', 'reserved']) {
+    thresholds[`reservation_list_${variant}_duration`] = [
+      ...(p95 === null ? [] : [`p(95)<=${p95}`]),
+      ...(p99 === null ? [] : [`p(99)<=${p99}`]),
+    ];
+  }
 }
 if (mode === 'load') {
   // 두 주요 구간에 실제 표본이 있어야 한다. drain 발생 여부는 합격 조건으로 강제하지 않는다.
@@ -81,7 +91,7 @@ export const options = {
   scenarios: mode === 'smoke' ? {
     smoke: { executor: 'per-vu-iterations', vus: 2, iterations: 5, maxDuration: '60s', gracefulStop: '5s' },
   } : {
-    [mode]: { executor: 'constant-vus', vus: users, duration: mode === 'warmup' ? `${warmupSeconds}s` : '60s', gracefulStop: '25s' },
+    [mode]: { executor: 'constant-vus', vus: users, duration: `${mode === 'warmup' ? warmupSeconds : measurementSeconds}s`, gracefulStop: '25s' },
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)'],
   thresholds,
@@ -115,7 +125,10 @@ export function setup() {
   }
   // 각 프로세스의 setup에서 로그인한다. warm-up과 load는 같은 계정을 사용하되 새 토큰을 발급한다.
   const selected = accounts.sort((left, right) => left.email.localeCompare(right.email)).slice(0, users);
-  for (const account of selected) account.token = login(account.email);
+  // 로그인 대기(setup 기본 한도 60초)와 종료 대기 25초까지 포함해 토큰 수명을 확인한다.
+  const minimumValiditySeconds = mode === 'smoke' ? 120
+    : (mode === 'warmup' ? warmupSeconds : measurementSeconds) + 60 + 25;
+  for (const account of selected) account.token = login(account.email, minimumValiditySeconds);
   setupFinishedAt.add(Date.now());
   return selected;
 }
@@ -139,7 +152,7 @@ export default function (accounts) {
     const filter = variant === 'reserved' ? '&status=RESERVED' : '';
     // setup이 끝난 뒤 시작하는 scenario가 공통 기준이다. VU마다 서로 다른 0초를 사용하지 않는다.
     const elapsedMs = Date.now() - execution.scenario.startTime;
-    const phase = elapsedMs < 10000 ? 'initial' : elapsedMs < 60000 ? 'later' : 'drain';
+    const phase = elapsedMs < 10000 ? 'initial' : elapsedMs < measurementSeconds * 1000 ? 'later' : 'drain';
     // when: 로그인은 측정 전에 마치고, 실제 Spring Security를 거쳐 조회한다.
     if (__ITER === 0 && variant === 'all') firstRequestAt.add(Date.now());
     const response = http.get(`${BASE}/api/reservations/me?page=0&size=10${filter}`, {

@@ -82,6 +82,8 @@ services:
       START_MODE: "${START_MODE:-simultaneous}"
       WARMUP_SECONDS: "${WARMUP_SECONDS:-20}"
       P95_MS: "${P95_MS:-}"
+      P99_MS: "${P99_MS:-}"
+      MEASUREMENT_SECONDS: "${MEASUREMENT_SECONDS:-60}"
     command: ["run", "--quiet", "reservation-list.js"]
     volumes:
       - ./:/scripts:ro

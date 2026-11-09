@@ -277,7 +277,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 검증
 - [x] 로컬 Grafana 13.3.0 + Loki 3.7.9 + Prometheus: 규칙 6개(ERROR 로그만 일시정지), contact point, 알림 정책이 로드됨 (2026-11-09)
-- [x] 로컬 Loki에 가짜 `REFUND_RETRY_EXHAUSTED`와 일반 ERROR 로그를 넣음: 결제 규칙 쿼리는 `REFUND_RETRY_EXHAUSTED`(pgId)만, ERROR 로그 쿼리는 일반 ERROR만 셈. 결제 규칙이 Firing되어 가짜 webhook 수신기에 Slack 형식 메시지가 감(요약에 이벤트·pgId·건수)
+- [x] 로컬 Loki에 가짜 `REFUND_RETRY_EXHAUSTED`와 일반 ERROR 로그를 넣음: 결제 규칙 쿼리는 `REFUND_RETRY_EXHAUSTED`(pgId)만, ERROR 로그 쿼리는 일반 ERROR만 셈. 결제 규칙이 Firing되어 가짜 webhook 수신기(Slack처럼 `ok` 응답)에 Slack 형식 메시지가 감(요약에 이벤트·pgId·건수). 5분 창이 지나자 `[RESOLVED]` 해제 알림도 옴
 - [x] `deploy-monitoring` Run Command 스크립트를 가짜 aws·docker로 렌더링·실행: `.env`에 두 값이 그대로 쓰이고(`$`, `#` 포함), Slack 형식이 아니면 실패. actionlint(shellcheck 포함) 통과 (기존 `concurrency.queue` 경고만)
 - [ ] 배포 후 contact point 테스트 알림이 Slack에 옴
 - [ ] worker desired 0으로 잠깐 내려 "worker 스케줄러 멈춤" 알림이 오고, 되돌리면 해제 알림이 옴

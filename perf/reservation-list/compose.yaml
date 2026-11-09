@@ -28,7 +28,7 @@ services:
     mem_limit: 1g
     environment:
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
-    command: ["java", "-jar", "/app/app.jar", "--spring.config.additional-location=file:/app/application-perf.yaml"]
+    command: ["java", "-jar", "/app/app.jar", "--spring.config.additional-location=file:/app/application-perf.yaml", "--spring.datasource.hikari.maximum-pool-size=${TEST_POOL_SIZE:-10}", "--spring.datasource.hikari.minimum-idle=10"]
     ports:
       - "127.0.0.1:18096:8080"
       - "127.0.0.1:18097:8081"

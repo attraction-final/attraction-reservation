@@ -8,6 +8,9 @@ mode="${2:-smoke}"
 p95_ms="${3:-}"
 load_vus="${TEST_VUS:-10}"
 start_mode="${START_MODE:-simultaneous}"
+pool_size="${TEST_POOL_SIZE:-10}"
+pool_comparison=0
+if [[ -n "${TEST_POOL_SIZE:-}" ]]; then pool_comparison=1; fi
 if [[ $# -lt 1 || $# -gt 3 || ! "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$ \
   || ( "$mode" != smoke && "$mode" != load ) ]]; then
   echo '사용법: bash perf/reservation-list/run.sh RUN_ID [smoke|load] [p95_ms]' >&2
@@ -27,6 +30,14 @@ if [[ "$start_mode" != simultaneous && "$start_mode" != staggered ]]; then
 fi
 if [[ "$mode" != load && "$start_mode" != simultaneous ]]; then
   echo '분산 시작은 load에서만 지원합니다.' >&2
+  exit 1
+fi
+if [[ "$pool_size" != 10 && "$pool_size" != 20 ]]; then
+  echo 'TEST_POOL_SIZE는 현재 비교 단계에서 10 또는 20만 지원합니다.' >&2
+  exit 1
+fi
+if [[ "$pool_comparison" == 1 && ( "$mode" != load || "$load_vus" != 100 || "$start_mode" != simultaneous ) ]]; then
+  echo 'pool 비교는 100 VUs·동시 시작 load로 조건을 고정합니다.' >&2
   exit 1
 fi
 target="$script_dir/results/$run_id"
@@ -51,6 +62,7 @@ export PERF_GID="$(id -g)"
 export TEST_MODE="$mode"
 export TEST_VUS="$load_vus"
 export START_MODE="$start_mode"
+export TEST_POOL_SIZE="$pool_size"
 export P95_MS="$p95_ms"
 compose() { MSYS_NO_PATHCONV=1 docker compose -f "$compose_file" "$@"; }
 snapshot() {
@@ -103,9 +115,26 @@ cleanup_measurement() {
 }
 
 mkdir -p "$script_dir/results"
-compose up -d mysql redis app
+if [[ "$pool_comparison" == 1 ]]; then
+  # A/B 모두 같은 준비 절차를 거치도록 전용 앱만 재생성한다. DB와 Redis의 데이터는 유지한다.
+  compose up -d --wait --wait-timeout 120 mysql redis
+  compose up -d --force-recreate --no-deps app
+else
+  compose up -d mysql redis app
+fi
 compose run --rm --no-deps -T accounts
 compose run --rm --no-deps -T fixture
+
+# 설정값이 아닌 실제 pool max/min을 확인해 잘못 적용된 설정으로 비교하지 않게 한다.
+snapshot | awk '/^hikaricp_connections_(max|min|idle|active)[{]/' > "$target/pool-config-check.txt"
+if ! awk -v expected="$pool_size" '
+  /^hikaricp_connections_max[{]/ { maxSeen++; maxOk=($NF+0 == expected) }
+  /^hikaricp_connections_min[{]/ { minSeen++; minOk=($NF+0 == 10) }
+  END { exit !(maxSeen == 1 && minSeen == 1 && maxOk && minOk) }
+' "$target/pool-config-check.txt"; then
+  echo '실제 pool max/min이 요청한 값과 다릅니다. pool-config-check.txt를 확인하세요.' >&2
+  exit 1
+fi
 
 # 결과 폴더는 SQL 준비 서비스가 새로 만든다. 이미 있으면 준비 단계에서 중단한다.
 {
@@ -123,6 +152,8 @@ compose run --rm --no-deps -T fixture
     echo 'p95 criterion is an experimental target, not a production SLO'
   fi
   echo 'users=200 reservations=100000'
+  echo "requestedPoolMax=$pool_size poolMinIdle=10 appRecreatedForPoolComparison=$pool_comparison"
+  cat "$target/pool-config-check.txt"
   git_head="$(cd -- "$project_dir" && git rev-parse HEAD)"
   echo "gitHead=$git_head"
   (cd -- "$project_dir" && git status --short)
@@ -136,7 +167,7 @@ compose run --rm --no-deps -T fixture
   MSYS_NO_PATHCONV=1 docker info --format 'dockerNcpu={{.NCPU}} dockerMemoryBytes={{.MemTotal}}'
   for service in app mysql redis; do
     container_id="$(compose ps -q "$service" | tr -d '\r')"
-    MSYS_NO_PATHCONV=1 docker inspect --format '{{.Name}} {{.Image}}' "$container_id"
+    MSYS_NO_PATHCONV=1 docker inspect --format '{{.Name}} {{.Image}} startedAt={{.State.StartedAt}}' "$container_id"
   done
 } > "$target/metadata.txt"
 

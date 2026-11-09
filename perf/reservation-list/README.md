@@ -4,7 +4,7 @@
 smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
 주기적 자원 수집과 20 VUs 측정까지 확인했다. load-02·03의 마지막 Docker 수집은 각 1회 누락됐다.
 수집 종료 순서를 개선한 load-07도 50 VUs 기능 검증을 통과했고 수집·정리 오류는 없었다. 복구·중단 경로는 아직 미검증이다.
-load-10에서 첫 10초의 지연 집중을 확인했다. 다음은 같은 최대 100 VUs에서 측정 시작만 5초에 분산하는 비교 실험이다.
+load-11·12에서 분산 시작의 초기 지연 감소 경향을 관측했다. 다음은 같은 100 VUs 동시 시작에서 테스트 pool max 10/20을 비교한다.
 운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
@@ -252,7 +252,33 @@ START_MODE 기본값은 simultaneous다. staggered에서는 측정용 load의 �
 `reservation_list_vu_started_at_ms`는 기존대로 첫 iteration 진입을 기록한다.
 새 `reservation_list_vu_first_request_at_ms`의 min/max로 실제 첫 요청이 약 5초에 퍼졌는지 확인한다.
 지연이나 CPU 상황에 따라 목표 시각에 정확히 실행된다는 보장은 없으므로 기록된 시각을 사용한다.
-scenario 기준 initial/later/drain 집계는 유지한다. 새 분산 시작 프로필의 실제 실행은 아직 검증 전이다.
+scenario 기준 initial/later/drain 집계는 유지한다. load-11·12에서 실제 분산 폭 약 4.98~4.99초와 기능 검증을 확인했다.
+
+### 14. pool 비교 A: max 10의 새 기준
+
+```bash
+TEST_POOL_SIZE=10 TEST_VUS=100 bash perf/reservation-list/run.sh load-13 load
+```
+
+TEST_POOL_SIZE를 명시하면 DB·Redis가 준비된 뒤 **전용 app만 재생성**한다. 양쪽 모두 새 JVM에서 비교하려는 목적이다.
+TEST_POOL_SIZE는 10/20만 지원하고, 비교는 100 VUs·START_MODE=simultaneous의 load로 제한한다.
+기본 START_MODE는 simultaneous이므로 위 명령에 생략했다. 환경에 staggered를 따로 export했다면 simultaneous로 지정해야 한다.
+minimumIdle은 10으로 고정하고 maximumPoolSize만 10/20으로 변경한다. 프로덕션 설정을 변경하지 않는다.
+명시하지 않은 일반 실행은 max 10을 사용한다. Compose CLI 인자로 설정하므로 app 이미지의 jar를 다시 빌드할 필요는 없다.
+
+가입·데이터 준비 후 실제 Hikari max/min을 확인해 `pool-config-check.txt`에 저장한다. 요청값과 다르면 warm-up/측정을 시작하지 않는다.
+metadata에는 pool 요청값·앱 재생성 여부·컨테이너 생성 시각도 남긴다. warm-up 후 실제 total/idle은 before 메트릭에서 확인한다.
+
+A 결과를 확인한 뒤 B를 진행한다.
+
+```bash
+TEST_POOL_SIZE=20 TEST_VUS=100 bash perf/reservation-list/run.sh load-14 load
+```
+
+warm-up 20초·측정 60초·1초 대기·데이터·CPU/메모리 제한은 유지한다.
+max 20이 항상 연결 20개가 준비돼 있다는 뜻은 아니며 초기 연결 확보 비용도 비교 조건에 포함된다.
+오래 실행한 기존 앱의 결과와 새 앱 B만 비교하지 않는다. 새 A와 B의 initial/later 지연·pool 획득 시간·오류·자원 비용을 함께 본다.
+설정 20을 채택한 변경이 아닌 테스트용 비교다. 실제 실행 검증은 아직 하지 않았다.
 
 ## 결과 확인
 
@@ -264,6 +290,7 @@ scenario 기준 initial/later/drain 집계는 유지한다. 새 분산 시작 �
 | `warmup-summary.json`, `warmup-exit-code.txt` | load의 별도 warm-up 결과와 종료 코드 | 측정 결과와 합산하지 않음. smoke에는 생성하지 않음 |
 | `fixture.jsonl` | 후보 회원 100명의 조건별 DB 기대 결과 200행 | smoke는 2명, load는 선택한 10명/20명/50명/100명 사용. 토큰·비밀번호 없음 |
 | `metadata.txt` | 시각, HEAD·수정 상태, jar/스크립트 hash, 실제 DB 건수·버전·인덱스·앱/DB/Redis image ID | 소스와 jar 일치 여부는 빌드 절차로 별도 관리 |
+| `pool-config-check.txt` | 준비 후 실제 Hikari max/min/idle/active | max/min이 요청 설정과 다르면 측정 중단. warm-up 이후 값은 before 메트릭에서 확인 |
 | `metrics-before.txt`, `metrics-after.txt` | Hikari·JVM·HTTP Prometheus 메트릭 | 전후 누적값/순간값. 구간 최대 CPU·메모리나 요청당 쿼리 수를 증명하지 않음 |
 | `resource-samples.jsonl` | load의 앱·MySQL·Redis·측정용 k6 Docker stats와 주기 시작/종료 시각 | 표본 최대값은 절대적인 순간 최대값이 아님. 시작/종료 경계에는 k6 표본이 없을 수 있음 |
 | `metrics-samples.txt` | load의 주기별 Hikari·JVM·HTTP 지표, scrape 완료 시각 | 여러 scrape를 이어 둔 분석용 텍스트이며 단일 Prometheus scrape 입력으로 쓰지 않음 |
@@ -287,7 +314,7 @@ scenario 기준 initial/later/drain 집계는 유지한다. 새 분산 시작 �
 ## 다음 단계
 
 첫 측정 전에 임시 p95 기준을 선택한다. 첫 10 VUs 결과를 확인한 뒤 부하 단계를 늘릴지 판단한다.
-시간 구간별로 초기 지연 집중을 확인했고 다음은 분산 시작과 비교한다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
+분산 시작의 영향을 두 번 관측했고 다음은 pool max 10/20 비교다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
 Docker stats와 앱 scrape는 동시에 취득한 값이 아니며 기록된 관측 시각을 함께 확인한다.
 Docker 메모리와 JVM heap 사용량은 서로 다른 지표다. 수집기 자체의 CPU·I/O 비용도 있으므로 load-01과의 시간 차이를 최적화 효과로 주장하지 않는다.
 앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로
@@ -308,4 +335,5 @@ docker compose -f perf/reservation-list/compose.yaml down
 - [Docker stats의 형식과 메모리 해석](https://docs.docker.com/reference/cli/docker/container/stats/)
 - [Compose run의 컨테이너 자동 삭제와 label](https://docs.docker.com/reference/cli/docker/compose/run/)
 - [k6 execution의 scenario startTime](https://grafana.com/docs/k6/latest/javascript-api/k6-execution/)
+- [Micrometer Timer의 누적값과 time-window max](https://docs.micrometer.io/micrometer/reference/concepts/timers.html)
 - 현재 ReservationController, SearchReservationListResponse, ReservationCustomRepositoryImpl, AuthController, CsrfController와 Flyway 스키마를 기준으로 작성했다.

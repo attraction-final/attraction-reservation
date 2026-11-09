@@ -50,6 +50,7 @@ public class RefundCommandService {
             List.of(RefundStatus.PROCESSING, RefundStatus.FAILED, RefundStatus.DEAD);
 
     // PG 취소를 보냈고 아직 결과가 확정되지 않은 환불 상태. 같은 결제에 있으면 다음 환불을 점유하지 않는다.
+    // FAILED도 결과를 모를 수 있어 다음 환불을 막지만, 규칙이 달라 RefundRepository.existsBlockingRefund에서 따로 판단한다.
     private static final List<RefundStatus> IN_FLIGHT_STATUSES =
             List.of(RefundStatus.PROCESSING, RefundStatus.PG_PENDING);
 
@@ -70,6 +71,8 @@ public class RefundCommandService {
      * 다른 처리(즉시 시도·스케줄러·다른 인스턴스)가 먼저 점유했으면 빈 값을 반환한다.
      *
      * <p>같은 결제의 다른 환불이 PG 취소 중(PROCESSING)이거나 확정 대기 중(PG_PENDING)이면 점유하지 않는다.
+     * 다른 환불이 재시도 대기 중(FAILED)이어도 PG에 취소가 반영됐는지 모를 수 있으므로, 이 환불이 아직 시작 전(REQUESTED)이면
+     * 점유하지 않는다. FAILED끼리는 id가 작은 쪽부터 처리하고, 처리 중 멈춘 PROCESSING은 FAILED가 있어도 다시 점유한다.
      * 결제 락은 점유 트랜잭션 동안만 유지되므로, 이 확인이 있어야 같은 결제의 환불이 PG 취소 확정까지 한 번에 하나씩 처리된다.
      * 건너뛴 환불은 상태가 그대로라 앞선 환불이 끝난 뒤 스케줄러가 처리한다.
      *
@@ -87,7 +90,8 @@ public class RefundCommandService {
             return Optional.empty();
         }
 
-        if (refundRepository.existsByPaymentIdAndStatusInAndIdNot(payment.getId(), IN_FLIGHT_STATUSES, refundId)) {
+        if (refundRepository.existsBlockingRefund(payment.getId(), refundId, IN_FLIGHT_STATUSES,
+                RefundStatus.FAILED, failedBlockingIdLimit(refund))) {
             return Optional.empty();
         }
 
@@ -287,6 +291,16 @@ public class RefundCommandService {
 
         return paymentRepository.findWithLockById(paymentId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+    }
+
+    // 같은 결제의 FAILED 환불 중 id가 이 값보다 작으면 이 환불의 점유를 막는다.
+    // REQUESTED는 모든 FAILED에, FAILED는 id가 작은 FAILED에 막힌다. 처리 중 멈춘 PROCESSING은 FAILED에 막히지 않는다(null).
+    private Long failedBlockingIdLimit(Refund refund) {
+        return switch (refund.getStatus()) {
+            case REQUESTED -> Long.MAX_VALUE;
+            case FAILED -> refund.getId();
+            default -> null;
+        };
     }
 
     // PG 취소 가능 금액은 결제 금액에서 PG에 반영된(COMPLETED) 환불 금액을 뺀 값이다.

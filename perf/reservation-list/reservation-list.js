@@ -50,7 +50,7 @@ if (!Number.isInteger(warmupSeconds) || warmupSeconds < 1 || warmupSeconds > 600
   throw new Error('WARMUP_SECONDS는 1~600 사이의 정수(초)여야 합니다.');
 }
 const loadUsers = Number(__ENV.TEST_VUS || 10);
-if (![10, 20, 50, 100, 150].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100, 150이어야 합니다.');
+if (![10, 20, 50, 100, 150, 200].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100, 150, 200이어야 합니다.');
 const users = mode === 'smoke' ? 2 : loadUsers;
 const measurementSeconds = Number(__ENV.MEASUREMENT_SECONDS || 60);
 if (!Number.isInteger(measurementSeconds) || measurementSeconds < 60 || measurementSeconds > 300) {

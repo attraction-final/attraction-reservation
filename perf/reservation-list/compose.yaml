@@ -73,7 +73,7 @@ services:
     profiles: [tools]
     user: "${PERF_UID:-1000}:${PERF_GID:-1000}"
     cpus: 1.0
-    mem_limit: 1g
+    mem_limit: 2g
     working_dir: /scripts
     environment:
       RUN_ID: "${RUN_ID:-smoke-02}"

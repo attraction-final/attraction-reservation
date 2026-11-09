@@ -32,8 +32,8 @@ if [[ ! "$measurement_seconds" =~ ^[1-9][0-9]{1,2}$ ]] || (( measurement_seconds
   echo 'MEASUREMENT_SECONDS는 60~300 사이의 정수(초)여야 합니다.' >&2
   exit 1
 fi
-if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 && "$load_vus" != 150 ]]; then
-  echo 'TEST_VUS는 현재 단계에서 10, 20, 50, 100, 150만 지원합니다.' >&2
+if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 && "$load_vus" != 150 && "$load_vus" != 200 ]]; then
+  echo 'TEST_VUS는 현재 단계에서 10, 20, 50, 100, 150, 200만 지원합니다.' >&2
   exit 1
 fi
 if [[ "$start_mode" != simultaneous && "$start_mode" != staggered ]]; then
@@ -52,8 +52,8 @@ if [[ "$pool_size" != 10 && "$pool_size" != 20 ]]; then
   echo 'TEST_POOL_SIZE는 현재 비교 단계에서 10 또는 20만 지원합니다.' >&2
   exit 1
 fi
-if [[ "$pool_comparison" == 1 && ( "$mode" != load || ( "$load_vus" != 100 && "$load_vus" != 150 ) || "$start_mode" != simultaneous ) ]]; then
-  echo 'pool 설정을 명시한 비교는 100/150 VUs·동시 시작 load만 지원합니다.' >&2
+if [[ "$pool_comparison" == 1 && ( "$mode" != load || ( "$load_vus" != 100 && "$load_vus" != 150 && "$load_vus" != 200 ) || "$start_mode" != simultaneous ) ]]; then
+  echo 'pool 설정을 명시한 비교는 100/150/200 VUs·동시 시작 load만 지원합니다.' >&2
   exit 1
 fi
 if [[ "$app_cpus" != 1 && "$app_cpus" != 1.0 && "$app_cpus" != 2 && "$app_cpus" != 2.0 ]]; then
@@ -126,6 +126,12 @@ cleanup_measurement() {
     echo '측정 컨테이너 소유 확인 실패. 컨테이너를 임의로 제거하지 않습니다.' >> "$target/cleanup-errors.txt"
     cleanup_exit=1
   else
+    # 컨테이너 삭제 전에 필요한 상태만 보존한다. 환경 변수·토큰은 기록하지 않는다.
+    # 사용자 중단 시에는 정리용 stop 이전 상태이므로 running=true일 수 있다.
+    MSYS_NO_PATHCONV=1 docker inspect --format \
+      '{"status":{{json .State.Status}},"running":{{.State.Running}},"oomKilled":{{.State.OOMKilled}},"exitCode":{{.State.ExitCode}},"startedAt":{{json .State.StartedAt}},"finishedAt":{{json .State.FinishedAt}},"memoryBytes":{{.HostConfig.Memory}},"nanoCpus":{{.HostConfig.NanoCpus}}}' \
+      "$measurement_container" > "$target/measurement-state-before-cleanup.json" \
+      2>> "$target/cleanup-errors.txt" || cleanup_exit=1
     local running
     running="$(MSYS_NO_PATHCONV=1 docker inspect --format '{{.State.Running}}' \
       "$measurement_container" 2>> "$target/cleanup-errors.txt" | tr -d '\r')" || cleanup_exit=1

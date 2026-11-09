@@ -37,12 +37,12 @@ PowerShell에서 실행할 때도 이 스크립트는 Git Bash 터미널에서 �
 | 대상 | `GET /api/reservations/me?page=0&size=10`, 동일 요청의 `status=RESERVED` 조건 |
 | 데이터 | 회원 200명 × 500건 = 100,000건, 어트랙션 10개, 슬롯 500개 |
 | 상태 | 회원별 RESERVED·COMPLETED·CANCELLED·NO_SHOW 각 125건 |
-| 실제 요청 회원 | smoke는 2명, warm-up/load는 TEST_VUS로 10·20·50·100·150명 선택 (기본 10명) |
+| 실제 요청 회원 | smoke는 2명, warm-up/load는 TEST_VUS로 10·20·50·100·150·200명 선택 (기본 10명) |
 | smoke | 2 VUs × 5 iterations × 2조건 = 목록 조회 20건, iteration마다 1초 대기 |
 | 기능 합격 | 미인증 401, 조회 오류 0, 회원별 ID·순서·DTO·필터·페이지·전체 건수 일치 |
 | 성능 합격 | load에서 p95_ms를 명시한 경우에만 적용. smoke는 성능 합격 기준 없음 |
 | 앱 자원 | CPU 1개, 메모리 1GiB, JVM heap 256~512MiB, Hikari 최대 10개 |
-| MySQL / Redis / 부하용 k6 | CPU 1 / 0.5 / 1개, 메모리 1GiB / 256MiB / 1GiB (k6는 load-22 OOM 후 증설, 이전 실행은 512MiB) |
+| MySQL / Redis / 부하용 k6 | CPU 1 / 0.5 / 1개, 메모리 1GiB / 256MiB / 2GiB (k6는 load-22 후 512MiB→1GiB, load-25 중단 후 2GiB로 증설) |
 | 접근 | 앱 `127.0.0.1:18096`, 관리 포트 `127.0.0.1:18097`, DB/Redis는 내부 네트워크 |
 
 조회용 합성 이력이며 실제 서비스의 사용자 이력 분포를 대표한다고 가정하지 않는다.
@@ -136,7 +136,7 @@ TEST_VUS=20 bash perf/reservation-list/run.sh load-03 load
 
 warm-up 20초·측정 60초·iteration마다 1초 대기·컨테이너 자원 제한·수집 방식은 유지하고 회원 20명으로 늘린다.
 성능 합격 기준은 적용하지 않는다. 변경한 기대 결과 SQL과 새 VU 설정의 실행 검증도 함께 수행한다.
-현재 TEST_VUS는 10·20·50·100·150을 지원한다. 생략하면 10이며 smoke는 계속 2명을 사용한다.
+현재 TEST_VUS는 10·20·50·100·150·200을 지원한다. 생략하면 10이며 smoke는 계속 2명을 사용한다.
 새 실행의 기대 결과는 후보 회원 200명·조건별 2행씩 400행을 추출하고 k6가 필요한 회원 수만 선택한다.
 기존 결과 폴더의 4행/20행 fixture는 과거 실행 자료로 보존하며 새 실행에서 덮어쓰지 않는다.
 
@@ -262,7 +262,7 @@ TEST_POOL_SIZE=10 TEST_VUS=100 bash perf/reservation-list/run.sh load-13 load
 ```
 
 TEST_POOL_SIZE를 명시하면 DB·Redis가 준비된 뒤 **전용 app만 재생성**한다. 양쪽 모두 새 JVM에서 비교하려는 목적이다.
-TEST_POOL_SIZE는 10/20만 지원하고, 이를 명시한 실행은 100/150 VUs·START_MODE=simultaneous의 load로 제한한다.
+TEST_POOL_SIZE는 10/20만 지원하고, 이를 명시한 실행은 100/150/200 VUs·START_MODE=simultaneous의 load로 제한한다.
 기본 START_MODE는 simultaneous이므로 위 명령에 생략했다. 환경에 staggered를 따로 export했다면 simultaneous로 지정해야 한다.
 minimumIdle은 10으로 고정하고 maximumPoolSize만 10/20으로 변경한다. 프로덕션 설정을 변경하지 않는다.
 명시하지 않은 일반 실행은 max 10을 사용한다. Compose CLI 인자로 설정하므로 app 이미지의 jar를 다시 빌드할 필요는 없다.
@@ -361,6 +361,43 @@ k6 메모리 관측 최대는 652.8MiB였다. 종료 부근 `0B / 0B` 표본 1�
 TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=150 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-24 load 200
 ```
 
+load-24 반복도 기능·전체 p95/p99 목표를 충족했다. 초기 전체 목록 p95와 측정 중 pending은 여전히 관측됐다.
+트러블슈팅 문서 26장에 반복 수치와 해석 한계를 기록했다.
+
+### 19. 같은 실험 목표로 200 VUs 확대
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=200 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-25 load 200
+```
+
+150 VUs 실행과 동일한 앱·DB·Redis·k6 자원, pool 10, warm-up 120초·본 측정 300초·p95 200ms/p99 500ms 목표를 유지한다.
+기존 회원 200명을 모두 사용한다. DB 데이터 양과 기대 결과 후보 200명·400행은 바꾸지 않는다.
+VUs 증가에 따라 setup 로그인 시간과 k6 자원 사용도 확인한다. k6 CPU 1·메모리 1GiB는 유지한다.
+load-25는 warm-up을 통과했지만 본 측정 도중 코드 137로 종료됐다. k6 메모리 표본이 1GiB 한도에 도달했고 summary가 없어 전체 성능 목표는 평가하지 못했다.
+이번 실행의 Docker OOM 이벤트는 조회되지 않았다. 코드 137과 메모리 한도 도달만으로 OOM이라고 확정하지 않는다.
+
+### 20. 종료 상태 기록 보강 후 200 VUs 재실행
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=200 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-26 load 200
+```
+
+k6 메모리 한도만 1GiB에서 2GiB로 늘리고 앱·DB·Redis·k6 CPU와 요청 시나리오는 유지한다.
+측정 k6 컨테이너는 소유 label을 검증한 뒤, 정리용 stop/rm 전에 필요한 상태만 `measurement-state-before-cleanup.json`에 저장한다.
+`oomKilled`, `exitCode`, `running`, `status`, 시작·종료 시각과 실제 CPU/메모리 한도를 포함한다. 환경 변수나 전체 inspect 결과는 저장하지 않는다.
+정상 측정 종료 시 exited/running=false 상태를 기대한다. 사용자 중단 때는 정리 전 running=true일 수 있으므로 이 파일을 최종 종료 결과로 오해하지 않는다.
+상태 저장 실패는 cleanup-errors.txt에 남긴다. 기존 측정용 k6에만 적용하며 warm-up은 여전히 --rm이라 이 상태 파일의 대상이 아니다.
+메모리 증설은 부하 발생기 제약 완화이며 API 최적화가 아니다.
+load-26에서 200 VUs·5분 완료와 기능·전체 p95/p99 목표 충족을 확인했다. 전체/RESERVED p95는 약 57.08/65.81ms였다.
+정리 전 상태 파일은 exited/running=false/oomKilled=false/exitCode=0이고 실제 k6 한도는 2GiB였다.
+정상 종료의 상태 기록은 확인했으나 OOM·사용자 중단 경로의 기록은 아직 실제 검증하지 않았다.
+초기 지연·커넥션 대기·상세 자원과 한계는 트러블슈팅 문서 29장에 기록했다. 다음은 같은 조건 반복이다.
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=200 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-27 load 200
+```
+성능 목표를 벗어나거나 부하 발생기 한계가 관측되면 부하를 추가로 늘리기 전에 원인을 분석한다.
+
 ## 결과 확인
 
 결과는 `perf/reservation-list/results/<RUN_ID>/`에 저장되며 Git에서 제외한다.
@@ -369,7 +406,7 @@ TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=150 START_MODE=simultaneous WARMUP_SE
 | --- | --- | --- |
 | `summary.json` | 전체 check, 전체/구간별 invalid·요청 수·duration, setup/VU/scenario/첫 요청 시각 Gauge | 분산 시작에서는 iteration 진입과 실제 첫 요청 시각을 구분. check 자체는 기존 전체 검증을 유지 |
 | `warmup-summary.json`, `warmup-exit-code.txt` | load의 별도 warm-up 결과와 종료 코드 | 측정 결과와 합산하지 않음. smoke에는 생성하지 않음 |
-| `fixture.jsonl` | 후보 회원 200명의 조건별 DB 기대 결과 400행 | smoke는 2명, load는 선택한 10명/20명/50명/100명/150명 사용. 이전 실행은 당시 후보 범위 유지. 토큰·비밀번호 없음 |
+| `fixture.jsonl` | 후보 회원 200명의 조건별 DB 기대 결과 400행 | smoke는 2명, load는 선택한 10명/20명/50명/100명/150명/200명 사용. 이전 실행은 당시 후보 범위 유지. 토큰·비밀번호 없음 |
 | `metadata.txt` | 시각, HEAD·수정 상태, jar/스크립트 hash, 실제 DB 건수·버전·인덱스·앱/DB/Redis image ID | 소스와 jar 일치 여부는 빌드 절차로 별도 관리 |
 | `pool-config-check.txt` | 준비 후 실제 Hikari max/min/idle/active | max/min이 요청 설정과 다르면 측정 중단. warm-up 이후 값은 before 메트릭에서 확인 |
 | `metrics-before.txt`, `metrics-after.txt` | Hikari·JVM·HTTP Prometheus 메트릭 | 전후 누적값/순간값. 구간 최대 CPU·메모리나 요청당 쿼리 수를 증명하지 않음 |
@@ -379,6 +416,7 @@ TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=150 START_MODE=simultaneous WARMUP_SE
 | `sampling-boundary-events.txt` | k6 종료 상태가 확인된 경계 누락·오류와 원문 | k6 표본 누락을 정상 표본으로 세지 않음. 일반 오류와 별도로 확인 |
 | `docker-stats-last-stderr.txt` | 마지막 batch stats의 stderr 진단용 파일 | 경계 이벤트/일반 오류 파일과 함께 해석 |
 | `cleanup-exit-code.txt`, `cleanup-errors.txt` | 이번 실행 소유의 k6 정리 결과 | 정상 정리 코드는 0. API 종료 코드와 별개이며 실패 시 임의로 다른 컨테이너를 제거하지 않음 |
+| `measurement-state-before-cleanup.json` | 측정용 k6의 정리 전 OOMKilled·종료 코드·실제 자원 설정 | 본 측정 컨테이너만 대상. 사용자 중단 시 running=true일 수 있음. 정리 실패와 함께 확인 |
 | `exit-code.txt` | k6 종료 코드, 정상 통과는 0 | 준비 단계 실패나 강제 종료 시 파일 자체가 없을 수 있음 |
 
 목록 측정 지표는 `reservation_list_duration`, `reservation_list_all_duration`,

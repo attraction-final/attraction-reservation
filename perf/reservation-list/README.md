@@ -278,7 +278,38 @@ TEST_POOL_SIZE=20 TEST_VUS=100 bash perf/reservation-list/run.sh load-14 load
 warm-up 20초·측정 60초·1초 대기·데이터·CPU/메모리 제한은 유지한다.
 max 20이 항상 연결 20개가 준비돼 있다는 뜻은 아니며 초기 연결 확보 비용도 비교 조건에 포함된다.
 오래 실행한 기존 앱의 결과와 새 앱 B만 비교하지 않는다. 새 A와 B의 initial/later 지연·pool 획득 시간·오류·자원 비용을 함께 본다.
-설정 20을 채택한 변경이 아닌 테스트용 비교다. 실제 실행 검증은 아직 하지 않았다.
+설정 20을 채택한 변경이 아닌 테스트용 비교다. load-13·14에서 실제 max/min 적용과 기능 검증을 확인했다.
+
+### 15. warm-up 시간 비교: pool 20 고정
+
+```bash
+TEST_POOL_SIZE=20 TEST_VUS=100 START_MODE=simultaneous WARMUP_SECONDS=120 bash perf/reservation-list/run.sh load-15 load
+```
+
+`WARMUP_SECONDS`는 warm-up scenario의 실행 시간(초)이며 기본값은 20이다. 테스트 도구에서 1~600의 정수만 허용한다.
+setup의 로그인 시간과 종료 대기 시간은 별도다. 실제 요청한 warm-up 시간은 metadata의 `warmup=`에 기록한다.
+앱 재생성·pool max 20/min 10·100 VUs·동시 시작·본 측정 60초·자원 제한은 load-14와 동일하게 두고 warm-up만 120초로 늘린다.
+본 측정의 initial/later/drain 구간 정의와 검증은 바꾸지 않는다. smoke에는 warm-up이 없다.
+
+load-14와 이후 측정의 응답 시간·CPU·커넥션 대기를 비교한다. 120초 자체가 충분한 준비 시간을 보장하지 않는다.
+다른 프로그램 사용량을 통제하지 않은 로컬 실험이므로 차이를 warm-up 효과로 확정하지 않고, 필요하면 같은 조건으로 반복한다.
+load-15·16에서 120초 설정과 기능 검증을 확인했다. 측정 결과와 한계는 트러블슈팅 문서에 기록한다.
+
+### 16. 앱 CPU 제한 비교: 1 CPU에서 2 CPU로
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=20 TEST_VUS=100 START_MODE=simultaneous WARMUP_SECONDS=120 bash perf/reservation-list/run.sh load-17 load
+```
+
+`TEST_APP_CPUS`의 기본값은 1.0이며 현재 비교에서는 1/2(또는 1.0/2.0)만 허용한다.
+CPU 옵션을 명시할 때는 `TEST_POOL_SIZE`도 명시해 앱 재생성을 보장한다.
+load-15·16과 pool 20/min 10·100 VUs·120초 warm-up·60초 측정·메모리 제한을 같게 두고 앱 CPU 제한만 2로 변경한다.
+MySQL·Redis·k6의 CPU 설정은 유지한다. 요청한 CPU와 실제 Docker NanoCpus/메모리 설정을 metadata에 기록한다.
+
+이 실험은 CPU 자원 확대에 따른 변화를 보는 용량 비교이며 코드 최적화나 메서드별 CPU profiling은 아니다.
+새 JVM은 인식한 CPU 수에 따라 내부 병렬성도 달라질 수 있다. 다른 프로그램 사용량과 호스트 자원 경쟁도 통제하지 않았다.
+Docker CPU 100%는 약 1 logical CPU 사용량이다. 2 CPU 제한에서는 약 200%까지 사용할 수 있으므로 단순 퍼센트 감소만으로 개선을 판단하지 않는다.
+처리량·p95/p99·커넥션 대기·오류와 실제 CPU 사용량을 함께 비교한다. 2 CPU 실행은 아직 수행하지 않았다.
 
 ## 결과 확인
 

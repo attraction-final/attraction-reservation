@@ -8,6 +8,8 @@ mode="${2:-smoke}"
 p95_ms="${3:-}"
 load_vus="${TEST_VUS:-10}"
 start_mode="${START_MODE:-simultaneous}"
+warmup_seconds="${WARMUP_SECONDS:-20}"
+app_cpus="${TEST_APP_CPUS:-1.0}"
 pool_size="${TEST_POOL_SIZE:-10}"
 pool_comparison=0
 if [[ -n "${TEST_POOL_SIZE:-}" ]]; then pool_comparison=1; fi
@@ -32,12 +34,24 @@ if [[ "$mode" != load && "$start_mode" != simultaneous ]]; then
   echo '분산 시작은 load에서만 지원합니다.' >&2
   exit 1
 fi
+if [[ ! "$warmup_seconds" =~ ^[1-9][0-9]{0,2}$ ]] || (( warmup_seconds > 600 )); then
+  echo 'WARMUP_SECONDS는 1~600 사이의 정수(초)여야 합니다.' >&2
+  exit 1
+fi
 if [[ "$pool_size" != 10 && "$pool_size" != 20 ]]; then
   echo 'TEST_POOL_SIZE는 현재 비교 단계에서 10 또는 20만 지원합니다.' >&2
   exit 1
 fi
 if [[ "$pool_comparison" == 1 && ( "$mode" != load || "$load_vus" != 100 || "$start_mode" != simultaneous ) ]]; then
   echo 'pool 비교는 100 VUs·동시 시작 load로 조건을 고정합니다.' >&2
+  exit 1
+fi
+if [[ "$app_cpus" != 1 && "$app_cpus" != 1.0 && "$app_cpus" != 2 && "$app_cpus" != 2.0 ]]; then
+  echo 'TEST_APP_CPUS는 현재 비교 단계에서 1 또는 2만 지원합니다.' >&2
+  exit 1
+fi
+if [[ -n "${TEST_APP_CPUS:-}" && "$pool_comparison" != 1 ]]; then
+  echo 'CPU 비교에는 TEST_POOL_SIZE를 명시해 앱을 재생성해야 합니다.' >&2
   exit 1
 fi
 target="$script_dir/results/$run_id"
@@ -62,6 +76,8 @@ export PERF_GID="$(id -g)"
 export TEST_MODE="$mode"
 export TEST_VUS="$load_vus"
 export START_MODE="$start_mode"
+export WARMUP_SECONDS="$warmup_seconds"
+export TEST_APP_CPUS="$app_cpus"
 export TEST_POOL_SIZE="$pool_size"
 export P95_MS="$p95_ms"
 compose() { MSYS_NO_PATHCONV=1 docker compose -f "$compose_file" "$@"; }
@@ -142,7 +158,7 @@ fi
   if [[ "$mode" == smoke ]]; then
     echo 'mode=smoke vus=2 iterationsPerVu=5 expectedListRequests=20'
   else
-    echo "mode=load vus=$load_vus warmup=20s measurement=60s gracefulStop=25s p95Ms=${p95_ms:-unset}"
+    echo "mode=load vus=$load_vus warmup=${warmup_seconds}s measurement=60s gracefulStop=25s p95Ms=${p95_ms:-unset}"
     echo 'model=constant-vus thinkSeconds=1 variants=all,reserved'
     echo "warmupStartMode=simultaneous measurementStartMode=$start_mode"
     if [[ "$start_mode" == staggered ]]; then echo 'startSpreadSeconds=5'; else echo 'startSpreadSeconds=0'; fi
@@ -153,6 +169,7 @@ fi
   fi
   echo 'users=200 reservations=100000'
   echo "requestedPoolMax=$pool_size poolMinIdle=10 appRecreatedForPoolComparison=$pool_comparison"
+  echo "requestedAppCpus=$app_cpus"
   cat "$target/pool-config-check.txt"
   git_head="$(cd -- "$project_dir" && git rev-parse HEAD)"
   echo "gitHead=$git_head"
@@ -167,12 +184,12 @@ fi
   MSYS_NO_PATHCONV=1 docker info --format 'dockerNcpu={{.NCPU}} dockerMemoryBytes={{.MemTotal}}'
   for service in app mysql redis; do
     container_id="$(compose ps -q "$service" | tr -d '\r')"
-    MSYS_NO_PATHCONV=1 docker inspect --format '{{.Name}} {{.Image}} startedAt={{.State.StartedAt}}' "$container_id"
+    MSYS_NO_PATHCONV=1 docker inspect --format '{{.Name}} {{.Image}} startedAt={{.State.StartedAt}} nanoCpus={{.HostConfig.NanoCpus}} memoryBytes={{.HostConfig.Memory}}' "$container_id"
   done
 } > "$target/metadata.txt"
 
 if [[ "$mode" == load ]]; then
-  echo "warm-up: 서로 다른 회원 ${load_vus}명으로 20초. 다음 측정과 별도 k6 프로세스입니다."
+  echo "warm-up: 서로 다른 회원 ${load_vus}명으로 ${warmup_seconds}초. 다음 측정과 별도 k6 프로세스입니다."
   echo "warmupStartedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$target/metadata.txt"
   if compose run --rm --no-deps -T -e TEST_MODE=warmup k6; then
     echo 0 > "$target/warmup-exit-code.txt"

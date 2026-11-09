@@ -42,8 +42,13 @@ const mode = __ENV.TEST_MODE || 'smoke';
 if (!['smoke', 'warmup', 'load'].includes(mode)) throw new Error('잘못된 TEST_MODE');
 const requestedStartMode = __ENV.START_MODE || 'simultaneous';
 if (!['simultaneous', 'staggered'].includes(requestedStartMode)) throw new Error('잘못된 START_MODE');
-// 비교 변수는 측정용 load의 시작 방식 하나다. warm-up의 시작 방식은 기존대로 유지한다.
+// warm-up은 측정용 load의 시작 방식과 관계없이 동시 시작한다.
 const startMode = mode === 'load' ? requestedStartMode : 'simultaneous';
+// 기본 준비 시간은 유지하고, 새 JVM의 warm-up 시간 비교 시에만 변경한다.
+const warmupSeconds = Number(__ENV.WARMUP_SECONDS || 20);
+if (!Number.isInteger(warmupSeconds) || warmupSeconds < 1 || warmupSeconds > 600) {
+  throw new Error('WARMUP_SECONDS는 1~600 사이의 정수(초)여야 합니다.');
+}
 const loadUsers = Number(__ENV.TEST_VUS || 10);
 if (![10, 20, 50, 100].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100이어야 합니다.');
 const users = mode === 'smoke' ? 2 : loadUsers;
@@ -76,7 +81,7 @@ export const options = {
   scenarios: mode === 'smoke' ? {
     smoke: { executor: 'per-vu-iterations', vus: 2, iterations: 5, maxDuration: '60s', gracefulStop: '5s' },
   } : {
-    [mode]: { executor: 'constant-vus', vus: users, duration: mode === 'warmup' ? '20s' : '60s', gracefulStop: '25s' },
+    [mode]: { executor: 'constant-vus', vus: users, duration: mode === 'warmup' ? `${warmupSeconds}s` : '60s', gracefulStop: '25s' },
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)'],
   thresholds,

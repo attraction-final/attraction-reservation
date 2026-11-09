@@ -24,7 +24,7 @@ services:
     mem_limit: 256m
   app:
     image: eclipse-temurin:17-jre
-    cpus: 1.0
+    cpus: "${TEST_APP_CPUS:-1.0}"
     mem_limit: 1g
     environment:
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
@@ -80,6 +80,7 @@ services:
       TEST_MODE: "${TEST_MODE:-smoke}"
       TEST_VUS: "${TEST_VUS:-10}"
       START_MODE: "${START_MODE:-simultaneous}"
+      WARMUP_SECONDS: "${WARMUP_SECONDS:-20}"
       P95_MS: "${P95_MS:-}"
     command: ["run", "--quiet", "reservation-list.js"]
     volumes:

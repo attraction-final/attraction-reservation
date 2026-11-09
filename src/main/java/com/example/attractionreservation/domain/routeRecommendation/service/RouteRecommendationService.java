@@ -17,6 +17,7 @@ import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRo
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.UnavailablePath;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.UnavailableReason;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Visit;
+import com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse;
 import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionPath;
 import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionLocationRepository;
@@ -63,6 +64,12 @@ public class RouteRecommendationService {
     private final VisitOrderOptimizer visitOrderOptimizer;
     private final RouteRecommendationProperties properties;
     private final Clock clock;
+
+    // 추천에 고를 수 있는 어트랙션 (삭제되지 않았고 좌표가 있는 어트랙션). 화면이 선택지를 만들 때 쓴다.
+    @Transactional(readOnly = true)
+    public List<RecommendableAttractionResponse> findRecommendableAttractions() {
+        return attractionLocationRepository.findRecommendableAttractions();
+    }
 
     @Transactional(readOnly = true)
     public CreateRouteRecommendationResponse recommend(CreateRouteRecommendationRequest request) {

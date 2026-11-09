@@ -2,15 +2,19 @@ package com.example.attractionreservation.domain.routeRecommendation.controller;
 
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse;
 import com.example.attractionreservation.domain.routeRecommendation.service.RouteRecommendationService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -26,5 +30,12 @@ public class RouteRecommendationController {
     ) {
         CreateRouteRecommendationResponse response = routeRecommendationService.recommend(request);
         return ResponseEntity.ok(ApiResponse.ok("최적 방문 순서를 추천했습니다.", response));
+    }
+
+    // 추천에 고를 수 있는 어트랙션 목록. 좌표가 없는 어트랙션은 추천 요청이 409로 실패하므로 화면이 미리 걸러낸다.
+    @GetMapping("/attractions")
+    public ResponseEntity<ApiResponse<List<RecommendableAttractionResponse>>> findRecommendableAttractions() {
+        return ResponseEntity.ok(ApiResponse.ok(
+                "추천 가능한 어트랙션 목록을 조회했습니다.", routeRecommendationService.findRecommendableAttractions()));
     }
 }

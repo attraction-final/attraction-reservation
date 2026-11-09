@@ -17,6 +17,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -143,6 +144,83 @@ class FlywayMigrationIntegrationTest {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM attractions WHERE name = ?", Integer.class, "회전목마");
         assertThat(count).isEqualTo(3);
+    }
+
+    // validate는 UNIQUE·CHECK 제약을 비교하지 않으므로 V6(attraction_locations)·V7(attraction_paths) 제약은 실제 INSERT로 검증한다.
+    @Test
+    @DisplayName("같은 출발·도착 어트랙션의 이동 구간을 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
+    void insertAttractionPath_DuplicateDirection_ThrowsDuplicateKeyException() {
+        // given
+        long from = insertAttractionAndGetId("범퍼카");
+        long to = insertAttractionAndGetId("썬더폴스");
+        insertAttractionPath(from, to, 141, 3);
+
+        // when & then
+        assertThatThrownBy(() -> insertAttractionPath(from, to, 141, 3))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    @DisplayName("방향이 반대인 이동 구간은 별도 행으로 넣을 수 있다")
+    void insertAttractionPath_ReverseDirection_Success() {
+        // given
+        long a = insertAttractionAndGetId("범퍼카");
+        long b = insertAttractionAndGetId("아마존 익스프레스");
+        insertAttractionPath(a, b, 641, 11);
+
+        // when
+        insertAttractionPath(b, a, 641, 12);
+
+        // then
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM attraction_paths", Integer.class);
+        assertThat(count).isEqualTo(2);
+    }
+
+    // MySQL의 CHECK 위반(오류 코드 3819, SQLState HY000)은 Spring이 DataIntegrityViolationException으로 번역하지 않고
+    // UncategorizedSQLException으로 던진다. 그래서 예외 타입 대신 위반한 제약 이름으로 검증한다.
+    @Test
+    @DisplayName("출발과 도착이 같은 이동 구간은 CHECK 제약 위반이 발생한다")
+    void insertAttractionPath_SameAttraction_ThrowsCheckConstraintViolation() {
+        // given
+        long a = insertAttractionAndGetId("범퍼카");
+
+        // when & then
+        assertThatThrownBy(() -> insertAttractionPath(a, a, 10, 1))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_attraction_paths_not_self");
+    }
+
+    @Test
+    @DisplayName("한 어트랙션의 좌표를 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
+    void insertAttractionLocation_Duplicate_ThrowsDuplicateKeyException() {
+        // given
+        long a = insertAttractionAndGetId("범퍼카");
+        insertAttractionLocation(a, 37.2923658, 127.1995663);
+
+        // when & then
+        assertThatThrownBy(() -> insertAttractionLocation(a, 37.2923658, 127.1995663))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    private long insertAttractionAndGetId(String name) {
+        insertAttraction(name, null);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM attractions WHERE name = ? AND deleted_at IS NULL", Long.class, name);
+    }
+
+    private void insertAttractionPath(long fromId, long toId, int distanceM, int moveMinutes) {
+        jdbcTemplate.update("""
+                INSERT INTO attraction_paths (created_at, updated_at, from_attraction_id, to_attraction_id,
+                    distance_m, move_minutes)
+                VALUES (NOW(6), NOW(6), ?, ?, ?, ?)
+                """, fromId, toId, distanceM, moveMinutes);
+    }
+
+    private void insertAttractionLocation(long attractionId, double latitude, double longitude) {
+        jdbcTemplate.update("""
+                INSERT INTO attraction_locations (created_at, updated_at, attraction_id, latitude, longitude)
+                VALUES (NOW(6), NOW(6), ?, ?, ?)
+                """, attractionId, latitude, longitude);
     }
 
     private void insertAttraction(String name, String deletedAt) {

@@ -32,8 +32,8 @@ if [[ ! "$measurement_seconds" =~ ^[1-9][0-9]{1,2}$ ]] || (( measurement_seconds
   echo 'MEASUREMENT_SECONDS는 60~300 사이의 정수(초)여야 합니다.' >&2
   exit 1
 fi
-if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 ]]; then
-  echo 'TEST_VUS는 현재 단계에서 10, 20, 50, 100만 지원합니다.' >&2
+if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 && "$load_vus" != 150 ]]; then
+  echo 'TEST_VUS는 현재 단계에서 10, 20, 50, 100, 150만 지원합니다.' >&2
   exit 1
 fi
 if [[ "$start_mode" != simultaneous && "$start_mode" != staggered ]]; then
@@ -52,8 +52,8 @@ if [[ "$pool_size" != 10 && "$pool_size" != 20 ]]; then
   echo 'TEST_POOL_SIZE는 현재 비교 단계에서 10 또는 20만 지원합니다.' >&2
   exit 1
 fi
-if [[ "$pool_comparison" == 1 && ( "$mode" != load || "$load_vus" != 100 || "$start_mode" != simultaneous ) ]]; then
-  echo 'pool 비교는 100 VUs·동시 시작 load로 조건을 고정합니다.' >&2
+if [[ "$pool_comparison" == 1 && ( "$mode" != load || ( "$load_vus" != 100 && "$load_vus" != 150 ) || "$start_mode" != simultaneous ) ]]; then
+  echo 'pool 설정을 명시한 비교는 100/150 VUs·동시 시작 load만 지원합니다.' >&2
   exit 1
 fi
 if [[ "$app_cpus" != 1 && "$app_cpus" != 1.0 && "$app_cpus" != 2 && "$app_cpus" != 2.0 ]]; then
@@ -180,6 +180,7 @@ fi
     echo 'p95/p99 criteria are experimental targets, not a production SLO'
   fi
   echo 'users=200 reservations=100000'
+  echo "fixtureCandidateUsers=200 fixtureRows=400 selectedUsers=$([[ "$mode" == smoke ]] && echo 2 || echo "$load_vus")"
   echo "requestedPoolMax=$pool_size poolMinIdle=10 appRecreatedForPoolComparison=$pool_comparison"
   echo "requestedAppCpus=$app_cpus"
   cat "$target/pool-config-check.txt"

@@ -50,7 +50,7 @@ if (!Number.isInteger(warmupSeconds) || warmupSeconds < 1 || warmupSeconds > 600
   throw new Error('WARMUP_SECONDS는 1~600 사이의 정수(초)여야 합니다.');
 }
 const loadUsers = Number(__ENV.TEST_VUS || 10);
-if (![10, 20, 50, 100].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100이어야 합니다.');
+if (![10, 20, 50, 100, 150].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100, 150이어야 합니다.');
 const users = mode === 'smoke' ? 2 : loadUsers;
 const measurementSeconds = Number(__ENV.MEASUREMENT_SECONDS || 60);
 if (!Number.isInteger(measurementSeconds) || measurementSeconds < 60 || measurementSeconds > 300) {
@@ -99,7 +99,7 @@ export const options = {
 
 export function setup() {
   setupStartedAt.add(Date.now());
-  if (fixture.length !== 200) throw new Error('DB 기대 결과는 회원 100명 × 조건 2개의 200행이어야 합니다.');
+  if (fixture.length !== 400) throw new Error('DB 기대 결과는 회원 200명 × 조건 2개의 400행이어야 합니다.');
   const accounts = [];
   for (const row of fixture) {
     if (!['all', 'reserved'].includes(row.variant) || !Array.isArray(row.rows)
@@ -112,9 +112,9 @@ export function setup() {
     if (account.expected[row.variant]) throw new Error('중복 기대 결과');
     account.expected[row.variant] = { total: row.total, rows: row.rows };
   }
-  if (accounts.length !== 100 || accounts.some(account => !account.expected.all || !account.expected.reserved)
-    || new Set(accounts.map(account => account.email)).size !== 100) {
-    throw new Error('서로 다른 회원 100명의 조건별 기대 결과가 필요합니다.');
+  if (accounts.length !== 200 || accounts.some(account => !account.expected.all || !account.expected.reserved)
+    || new Set(accounts.map(account => account.email)).size !== 200) {
+    throw new Error('서로 다른 회원 200명의 조건별 기대 결과가 필요합니다.');
   }
   const response = http.get(`${BASE}/api/reservations/me`, {
     tags: { endpoint: 'auth-preflight' }, timeout: '10s',

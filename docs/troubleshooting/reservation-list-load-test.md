@@ -1075,8 +1075,106 @@ Counter rate에는 setup 등 집계 구간의 영향이 있어 앞선 60초 실�
 
 2 CPU·pool 10·warm-up 120초·본 측정 300초·동일 성능 목표를 유지하고 150 VUs로 확대할 계획이다.
 기존 DB에는 회원 200명·예약 10만 건이 준비돼 있으므로 데이터 양을 늘리지 않고 기대 결과 추출과 조회 계정 후보·VU 허용 범위를 확장한다.
-가입·fixture·기대 결과·인증 setup 시간도 확인한다. 아직 도구는 최대 100 VUs이며 150 VUs 측정은 수행하지 않았다.
+가입·fixture·기대 결과·인증 setup 시간도 확인한다. 첫 150 VUs 시도는 warm-up의 k6 OOM으로 중단돼 본 측정은 수행하지 못했다.
 확대 실행에서 목표를 벗어나면 부하를 계속 올리기 전에 지연·오류·CPU·pool·DB 및 부하 발생기 상태를 분석한다.
+
+## 24. 150 VUs 확대와 warm-up 중단: load-22
+
+기존 DB의 이메일 kan134-0000~0199 회원 200명과 예약 10만 건은 유지하고 기대 결과 후보만 100명에서 200명으로 늘렸다.
+expected.sql은 회원별 전체/RESERVED 두 조건을 추출해 총 400행을 만들고 prepare.sh와 k6 setup에서 개수·회원 유일성·조건별 결과를 검증한다.
+TEST_VUS에 150을 추가하고 pool 설정을 명시한 동시 시작 load에서도 150 VUs를 허용한다. smoke는 계속 회원 2명·조회 20건이다.
+metadata에는 후보 회원 수·fixture 행 수·실제 선택 회원 수도 기록한다.
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=150 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-22 load 200
+```
+
+load-21과 자원·데이터·warm-up·본 측정 시간·성능 목표는 유지하고 활성 VU만 늘린다.
+등록·인증·SQL 기대 결과 추출은 측정 전 준비 과정이며 setup의 로그인 회원 증가로 실행 전체 Counter rate의 분모가 달라질 수 있다.
+프로덕션 코드나 팀원의 perf/order-list는 변경하지 않는다. 기존 결과는 덮어쓰지 않고 새 RUN_ID로 실행한다.
+이 실행 당시 부하 발생기(k6)의 CPU는 1, 메모리 제한은 512MiB였다.
+
+### 확인한 실패와 범위
+
+| 확인 항목 | 결과 |
+| --- | --- |
+| 기대 결과 | 기존 회원 200명의 조건별 400행 생성 |
+| 선택 계정 수 | metadata에 150명 기록 |
+| 앱 자원 / pool | 실제 2 CPU·메모리 1GiB / max·min 10·10 |
+| warm-up 종료 | 137, warmup-exit-code.txt 기록 |
+| Docker 이벤트 | 2026-11-09 20:29:26.799 KST, project=attraction-reservation-perf, service=k6의 container oom |
+| 본 측정 / summary | 시작하지 못함 / warm-up 및 본 측정 summary 미생성 |
+
+Docker 이벤트는 사용자가 제공한 터미널 출력으로 확인했다. k6 OOM과 종료 코드 137이 같은 시점에 발생했다.
+이는 부하 발생기에서 메모리 문제가 발생한 실행이며 대상 API가 150 VUs의 성능 기준을 초과했다는 증거가 아니다.
+warm-up 구간에는 주기적 자원 수집을 시작하지 않아 당시 최대 메모리와 CPU 표본은 없다.
+OOM의 구체적인 메모리 증가 원인이나 JVM·DB 장애까지 확인한 것은 아니다.
+
+### 조치와 재실행: load-23
+
+compose.yaml의 k6 서비스 메모리 제한만 512MiB → 1GiB로 늘렸다. k6 CPU 1, 앱·DB·Redis·accounts의 자원과 시나리오 설정은 유지했다.
+기존 load-22 결과는 보존하고 새 RUN_ID를 사용한다.
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=150 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-23 load 200
+```
+
+재실행에서는 warm-up 완료와 본 측정 summary 생성, 응답 정확성·p95/p99 목표·앱 및 k6 자원·수집/정리 상태를 확인한다.
+부하 발생기 메모리 증설은 API 코드 개선이 아니다. 100 VUs 결과와 비교 시 k6 한도가 달라졌다는 조건 차이를 포함한다.
+load-23에서는 warm-up과 본 측정이 정상 완료됐다. 1GiB 한도로 이번 실행을 완료했다는 사실을 다른 부하·시간에서도 충분하다는 보장으로 해석하지 않는다.
+
+## 25. 150 VUs·5분 재실행 결과: load-23
+
+실제 앱 2 CPU·메모리 1GiB·pool max/min 10/10, 후보 회원 200명·400행 중 선택 150명, warm-up 120초·본 측정 300초를 확인했다.
+2026-11-09 20:40:00~20:45:16 KST는 실행기의 측정 프로세스 구간이며 setup·종료 처리도 포함한다.
+setup 로그인은 약 10.72초였다. k6 메모리 한도는 load-21의 512MiB와 달리 1GiB다.
+
+| 응답 지표 | 전체 목록 | RESERVED 목록 |
+| --- | ---: | ---: |
+| 요청 수 | 43,849 | 43,849 |
+| 평균 / 중앙값 (ms) | 9.15 / 5.72 | 9.31 / 5.66 |
+| p95 (목표 ≤ 200ms) | 18.14 — 충족 | 18.80 — 충족 |
+| p99 (목표 ≤ 500ms) | 80.28 — 충족 | 86.56 — 충족 |
+| 최대 (ms) | 1,701.89 | 607.61 |
+| 첫 10초 p95 / p99 (ms) | 289.62 / 316.97 | 201.63 / 312.63 |
+| 10~300초 p95 / p99 (ms) | 15.75 / 60.49 | 15.99 / 74.71 |
+
+| 검증·자원 항목 | 관측 결과 |
+| --- | --- |
+| 전체 목록 요청 / Counter rate | 87,698건 / 281.32 req/s |
+| 응답 check | 438,491개 통과, 실패 0 |
+| HTTP 오류 / 응답 invalid / 커넥션 timeout | 모두 0 |
+| initial / later / drain 요청 수 | 2,292 / 85,406 / 0 — 합계 일치 |
+| pending 양수 / 관측 최대 | 3/102개 scrape / 5개 |
+| active 커넥션 관측 최대 | 10개 |
+| 앱 CPU 표본 평균 / 관측 최대 | 94.33% / 161.87% |
+| 앱 메모리 첫 / 마지막 / 관측 최대 | 520.7 / 541 / 543 MiB |
+| MySQL CPU 표본 평균 / 관측 최대 | 59.96% / 95.22% |
+| MySQL 메모리 관측 최대 | 692.7 MiB |
+| k6 유효 CPU 표본 평균 / 관측 최대 | 30.91% / 99.07% |
+| k6 메모리 관측 최대 / 한도 | 652.8 MiB / 1GiB |
+| 수집·경계·정리 오류 파일 | 모두 비어 있음 |
+| warm-up / 측정 / 수집 / 정리 종료 코드 | 모두 0 |
+
+앱·MySQL·Redis의 Docker 표본은 각 102개다. k6도 102개 행이 있지만 종료 부근 1개는 `0B / 0B`여서 자원 평균에서 제외했다.
+따라서 k6 CPU 평균은 유효 표본 101개의 산술 평균이며, 자원 행이 존재한다는 이유로 모두 유효하다고 보지 않는다.
+앱 CPU 94.33%는 약 0.94 logical CPU 사용량이며 2 CPU 전체 포화를 뜻하지 않는다.
+
+pending은 20:40:18(5개), 20:41:54(2개), 20:43:20(4개) KST scrape에서 관측됐다. 초기뿐 아니라 측정 중간에도 대기가 있었다.
+초기 p95는 전체 약 290ms·RESERVED 약 202ms로 200ms를 넘었다. 현재 threshold는 본 측정 전체에 적용하므로 전체 p95/p99 목표는 충족했다.
+초기 지연이 해결됐다거나 모든 요청이 200ms 안에 응답했다고 표현하지 않는다.
+
+**판단:** 이 환경의 150 VUs·5분 조회 패턴에서 기능 기준과 전체 p95/p99 실험 목표를 충족했다.
+k6의 652.8MiB 관측치는 이전 512MiB 한도를 넘었지만, load-22 warm-up의 실제 최대 메모리와 증가 원인은 별도로 확인하지 못했다.
+외부 프로그램·호스트 자원 경쟁은 통제하지 않았고 이번은 메모리 증설 후 첫 성공 실행이다. 최대 수용량이나 장시간 안정성은 미검증이다.
+
+### 다음: 같은 150 VUs 반복 (load-24, 아직 미실행)
+
+앱 재생성·2 CPU·pool 10·warm-up 120초·본 측정 300초·k6 메모리 1GiB·성능 목표를 유지하고 재현성을 확인한다.
+
+```bash
+TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=150 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-24 load 200
+```
 
 실행 원본은 Git에서 제외되는 `perf/reservation-list/results/`에 두며, 저장소에는 이 문서의 핵심 조건·지표·판단만 남긴다.
 토큰·인증 헤더·전체 요청/응답 원문을 문서에 포함하지 않는다. 이후 실험 결과는 이 문서에 이어서 갱신한다.

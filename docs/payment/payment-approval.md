@@ -5,10 +5,11 @@ PortOne V2 기반 결제 승인 기능의 구조, 설계 결정, 검증 결과, 
 
 ## 1. 개요
 
-- 결제 승인은 **승인 API**(클라이언트 호출)와 **PG 웹훅**(PortOne 호출) 두 경로로 들어온다.
+- 결제 승인은 **승인 API**(클라이언트 호출), **PG 웹훅**(PortOne 호출), **주문 만료 자동 취소**(KAN-131) 세 경로로 들어온다.
   - 승인 API는 `PaymentFacade.confirmPayment`, 웹훅은 Inbox 저장 후 스케줄러가 `PaymentFacade.syncPayment`로 처리한다.
-  - 두 경로는 PG 조회 → 검증 → 원장 반영 로직(`PaymentFacade.reconcile`)을 함께 쓴다.
-- 두 경로는 같은 결제에 대해 중복·동시에 들어올 수 있으므로, 원장 반영 로직(`PaymentCommandService.approvePayment`)은 **멱등**하고 **동시성에 안전**해야 한다.
+  - 만료 자동 취소(`OrderService.updateExpiredOrdersByCancel`)는 30분이 지난 PENDING 주문을 취소하기 전에 `syncPayment`로 PG 결제 상태를 확인한다. PG에서 결제됐으면 승인되고 만료 취소하지 않는다(4.11).
+  - 세 경로는 PG 조회 → 검증 → 원장 반영 로직(`PaymentFacade.reconcile`)을 함께 쓴다.
+- 세 경로는 같은 결제에 대해 중복·동시에 들어올 수 있으므로, 원장 반영 로직(`PaymentCommandService.approvePayment`)은 **멱등**하고 **동시성에 안전**해야 한다.
 - 결제 성공 여부의 기준은 **PG**(실제로 돈이 움직인 곳), 결제되어야 할 금액과 현재 상태의 기준은 **DB 원장**이다. 승인은 두 값을 비교하는 일이다.
 
 ## 2. 전체 흐름
@@ -17,7 +18,7 @@ PortOne V2 기반 결제 승인 기능의 구조, 설계 결정, 검증 결과, 
 [클라이언트]
   1. 결제 생성 → createPayment가 pgId 반환 (PortOne paymentId로 사용)
   2. PortOne.requestPayment({ storeId, channelKey, paymentId: pgId, totalAmount, ... })
-  3. POST /api/payments/{pgId}/confirm?userId=...   body: { "orderId": ... }
+  3. POST /api/payments/{pgId}/confirm   (JWT 인증)   body: { "orderId": ... }
 
 [서버]
 PaymentController
@@ -29,8 +30,8 @@ PaymentController
           ├─ 이미 FAILED              → PAYMENT_ALREADY_PROCESSED (409)
           ├─ PaymentGateway.getPayment(pgId)                ← PortOne 조회 (트랜잭션 밖)
           │    ├─ PG에 결제 없음       → PAYMENT_PG_PAYMENT_NOT_FOUND (404)
-          │    ├─ PG FAILED           → failPayment → PAYMENT_PG_FAILED (502)
-          │    └─ PG 미완료(READY 등)  → PAYMENT_NOT_PAID (409)
+          │    ├─ PG FAILED           → failPayment → PAYMENT_PG_FAILED (409)
+          │    └─ PG 미완료(READY, CANCELLED 등) → PAYMENT_NOT_PAID (409)
           ├─ 금액 불일치
           │    ├─ failPaymentWithCompensation이 true  → 결제 FAILED·주문 취소·재고 복구·보상 요청 함께 커밋
           │    │                                        (원장 CANCELLED면 실패 처리 없이 보상 요청만)
@@ -44,48 +45,64 @@ PaymentController
                │                        → (Facade) PaymentCompensationProcessor 즉시 1회 시도
                │                        → PAYMENT_ALREADY_CANCELLED (409)
                ├─ 그 밖의 전이 불가    → PAYMENT_INVALID_STATUS_TRANSITION (409)
-               └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 COMPLETED
+               └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 COMPLETED + 티켓 발급
 
 [웹훅]  상세는 payment-webhook-plan.md
 POST /api/payments/webhooks/portone → 서명 검증 → webhook_events 저장 → 200
 WebhookEventScheduler → WebhookEventProcessor
  └─ PaymentFacade.syncPayment(pgId)                         ← 소유자 확인 없음
      ├─ 원장에 없는 pgId              → NOT_OUR_PAYMENT
-     ├─ 이미 PAID                     → ALREADY_DONE
+     ├─ PAID·PARTIALLY_REFUNDED·REFUNDED → REFUND_SYNC_REQUIRED (취소 웹훅일 수 있어 환불 상태 맞추기로 넘김)
      └─ reconcile(payment)의 결과·예외를 PaymentSyncResult로 변환
-        (재시도가 필요한 오류만 예외로 전파)
+        (이미 FAILED면 ALREADY_DONE, 재시도가 필요한 오류만 예외로 전파)
+
+[만료 자동 취소]  KAN-131
+OrderCancelScheduler(1분) → OrderService.updateExpiredOrdersByCancel   ← 트랜잭션 없음(NOT_SUPPORTED)
+ └─ 만료 주문마다 PaymentFacade.syncPayment(pgId)
+     ├─ NOT_PAID, NOT_OUR_PAYMENT, PG에 결제 없음 → OrderCancelProcessor.cancelExpiredOrder로 만료 취소
+     └─ 그 밖의 결과(APPROVED·PG_FAILED·COMPENSATED 등) → 결제 처리 경로가 주문을 정리했으므로 건너뜀
 ```
 
 ## 3. 패키지 구조와 파일
 
 ```text
 domain/payment
-├── controller/PaymentController          POST /api/payments/{pgId}/confirm
+├── controller/PaymentController          GET /api/payments, GET /api/payments/{paymentId},
+│                                         POST /api/payments/{pgId}/confirm
 ├── dto/ConfirmPaymentRequest             orderId
 ├── dto/ConfirmPaymentResponse            id, orderId, pgId, amount, status, paidAt
+├── dto/PaymentResponse, PaymentDetailResponse, SearchPaymentCondition   결제 목록·상세 조회
 ├── dto/PaymentSyncResult                 syncPayment 결과
 ├── facade/PaymentFacade                  PG 호출과 트랜잭션 조율, 금액 검증, 보상 요청
-│                                         confirmPayment(승인 API), syncPayment(웹훅)
+│                                         confirmPayment(승인 API), syncPayment(웹훅·만료 자동 취소)
 ├── facade/WebhookEventProcessor          웹훅 처리 (payment-webhook-plan.md)
 ├── facade/PaymentCompensationProcessor   보상 취소 처리 (payment-compensation.md)
-├── service/PaymentService                createPayment, cancelledByUser, getOwnedPayment, findByPgId
+├── service/PaymentService                createPayment, cancelledByUser, getOwnedPayment, findByPgId,
+│                                         findAllPaymentsByUserId, findPaymentById, lockPaymentByOrderIdIfExists
 ├── service/PaymentCommandService         approvePayment, failPayment, failPaymentWithCompensation (비관적 락)
 ├── service/WebhookEventCommandService    웹훅 저장·점유·결과 기록
 ├── service/PaymentCompensationService    보상 요청 저장·점유·결과 기록
-├── repository/PaymentRepository          findWithLockByOrderId, findWithLockByPgId,
-│                                         findByPgId, findByPgIdAndUserId
+├── repository/PaymentRepository          findWithLockByOrderId, findWithLockByPgId, findWithLockById,
+│                                         findByPgId, findByPgIdAndUserId, findByIdAndOrderUserId,
+│                                         findUserIdByPgId(환불 요청의 회원 잠금용)
+├── repository/PaymentCustomRepository    결제 목록 조회 (QueryDSL)
 ├── repository/WebhookEventRepository, PaymentCompensationRepository
 ├── entity/WebhookEvent, enums/WebhookStatus
 ├── entity/PaymentCompensation, enums/CompensationStatus
 ├── scheduler/WebhookEventScheduler, PaymentCompensationScheduler
 ├── port/PaymentGateway                   PG 연동 인터페이스 (domain 소유)
-├── port/dto/PaymentGatewayResponse       pgId, status, totalAmount(Long), paidAt(Instant)
+├── port/dto/PaymentGatewayResponse       pgId, status, totalAmount(Long), cancelledAmount(Long), paidAt(Instant),
+│                                         cancellations (findCancellation, findRequestedCancellation)
 ├── port/dto/PaymentCancellationResponse
 └── port/enums/GatewayPaymentStatus, GatewayCancellationStatus
 
 domain/order
-├── entity/Order                          markAsPaid, markAsCancelled
-└── entity/enums/OrderStatus              canTransitTo 상태 전이 규칙
+├── entity/Order                          markAsPaid, markAsCancelled, markAsPartiallyRefunded, markAsRefunded
+├── entity/enums/OrderStatus              canTransitTo 상태 전이 규칙
+└── service/OrderService                  updateExpiredOrdersByCancel (만료 취소 전 syncPayment로 PG 확인)
+
+domain/ticket
+└── service/TicketService                 issueTickets (승인 트랜잭션에서 티켓 발급)
 
 infra/portone
 ├── client/PortOneClient                  PaymentGateway 구현 (RestClient)
@@ -102,6 +119,8 @@ global/config/SchedulingConfig            @EnableScheduling
 - `domain → infra` 참조 없음. 포트(`PaymentGateway`)를 domain에 두고 infra가 구현한다.
 - `infra → domain`은 port, port.dto, port.enums만 참조한다. PortOne 응답 DTO는 domain으로 새지 않는다.
 - `payment → order`는 `Payment.order` 연관관계로 주문 상태를 같은 트랜잭션에서 변경한다.
+- `payment → ticket`은 승인 시 `TicketService.issueTickets`를 같은 트랜잭션에서 호출한다.
+- `order → payment`는 `OrderService`가 `PaymentService`(결제 생성·사용자 취소)와 `PaymentFacade`(만료 취소 전 PG 확인, KAN-131)를 호출한다. `PaymentFacade`는 `OrderService`를 참조하지 않으므로 순환하지 않는다.
 
 ## 4. 주요 설계 결정
 
@@ -121,18 +140,20 @@ global/config/SchedulingConfig            @EnableScheduling
 ### 4.3 멱등성
 
 - `approvePayment`: 이미 `PAID`인 결제는 예외 없이 현재 결제 정보를 반환한다. 먼저 도착한 요청이 처리한 것으로 간주한다.
-  - 웹훅 처리에서는 `ALREADY_DONE`으로 끝나 재시도하지 않는다.
+  - 승인 API는 이미 `PAID`면 PG를 조회하지 않고 200으로 현재 결제 정보를 반환한다.
+  - 웹훅 처리에서는 `syncPayment`가 PAID 이후 결제를 `REFUND_SYNC_REQUIRED`로 넘겨 환불 상태만 맞춘다. 이미 `FAILED`인 결제는 `ALREADY_DONE`으로 끝나 재시도하지 않는다.
 - `failPayment`·`failPaymentWithCompensation`: `PENDING`일 때만 실패 처리하고 `true`를 반환한다. 이미 처리된 결제면 상태를 바꾸지 않고 `false`를 반환한다.
   - 금액 불일치 요청이 동시에 들어와도 `true`를 받은 한 요청만 보상 요청을 만든다.
   - 예외: `failPaymentWithCompensation`은 원장이 `CANCELLED`이고 보상 요청이 없으면 실패 처리 없이 보상 요청만 저장하고 `true`를 반환한다.
 - 로컬 `CANCELLED` 결제가 PG에서 결제 완료되면 PG 결제를 보상 취소한다(Outbox).
   - PG 결제창이 열려 있는 동안 사용자가 취소(`cancelledByUser`)하고, 이후 PG에서 결제를 마치면 원장 CANCELLED + PG PAID 조합이 생긴다.
+  - 만료 자동 취소도 결제를 CANCELLED로 만든다. 취소 전에 PG를 확인하므로(KAN-131), 확인한 직후 PG에서 결제된 경우에만 이 조합이 생긴다.
   - `approvePayment`가 락 안에서 `CANCELLED`를 확인하면, **같은 트랜잭션에서 보상 요청을 저장**하고 `CANCELLED` 상태의 결제 정보를 반환한다. Facade가 락 없이 `PENDING`을 읽은 직후 취소가 커밋된 경우도 락 안에서 걸러진다.
   - 원장 확인과 보상 요청이 함께 커밋되므로, 그 사이에 서버가 종료돼 보상 요청이 사라지는 경우가 없다. 보상 요청 저장에 실패하면 예외가 전파되고 트랜잭션이 롤백되어 다음 요청(승인 API 재호출·웹훅 재처리)에서 다시 판단한다.
     - 이전에는 예외로 롤백한 뒤 별도 트랜잭션(`requestCompensationForCancelled`)에서 저장해, 두 트랜잭션 사이에 승인 API 스레드가 종료되면 결제 완료 웹훅에만 복구를 의존했다.
   - Facade는 `CANCELLED` 응답을 받으면 보상 Processor로 즉시 1회 시도한 뒤 `PAYMENT_ALREADY_CANCELLED`를 던진다. 보상 요청이 이미 있던 경우에도 즉시 시도를 호출하지만, Processor가 점유 시 상태를 다시 확인해 완료·처리 중인 요청은 건너뛴다.
   - 결제당 보상 요청은 하나(`pg_id` UNIQUE)라, 이미 있으면 저장하지 않는다. 결제 락 안에서 확인하므로 동시에 들어와도 1건이다.
-  - 웹훅 처리에서는 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다. 승인 API는 `PAYMENT_ALREADY_CANCELLED`(409)로 응답한다.
+  - 웹훅 처리에서는 `COMPENSATED`로 받아 웹훅을 `PROCESSED`로 기록한다. 만료 자동 취소는 미결제가 아니므로 그 주문을 건너뛴다. 승인 API는 `PAYMENT_ALREADY_CANCELLED`(409)로 응답한다.
 
 ### 4.4 동시성 제어: 낙관적 락 → 비관적 락 (KAN-22)
 
@@ -141,6 +162,7 @@ global/config/SchedulingConfig            @EnableScheduling
 - `@EntityGraph`로 order(·user)를 함께 조회해도 Hibernate 7은 `for update of p1_0`을 생성해 **payments 행만 잠근다** (MySQL 컨테이너에서 확인).
 - 락 대기 타임아웃은 Hikari `connection-init-sql`로 설정한다 (4.5 참고).
 - 락 획득 실패(`PessimisticLockingFailureException`)는 `CONCURRENT_UPDATE_CONFLICT`(409)로 응답한다.
+  - 만료 자동 취소는 응답이 없으므로 예외를 잡아 그 주문을 건너뛰고(`ORDER_AUTO_CANCEL_SKIPPED`, INFO) 다음 주문을 처리한다. 남은 주문은 다음 주기에 다시 확인한다.
 
 ### 4.5 MySQL 락 타임아웃: QueryHint는 무시된다
 
@@ -154,11 +176,12 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
 - MySQL `FOR UPDATE`에는 대기 시간 지정 문법이 없어 힌트가 SQL에 반영되지 않는다(기본 50초).
 - 적용 방법:
   - `application.yaml`: `spring.datasource.hikari.connection-init-sql: SET SESSION innodb_lock_wait_timeout = 3`
-  - `application-test.yml`(H2): `SET LOCK_TIMEOUT 3000`으로 덮어쓴다. MySQL 전용 SQL이 H2에서 실패하기 때문.
+  - `application-test.yml`(H2): URL 파라미터 `LOCK_TIMEOUT=3000`으로 같은 3초를 맞추고, `connection-init-sql`은 H2와 MySQL 모두에서 실행되는 `SELECT 1`로 덮어쓴다. MySQL 전용 SQL이 H2에서 실패하기 때문.
 
 ### 4.6 결제·주문 결합도
 
 - 승인·실패 시 주문은 상태만 바꾸므로 별도 서비스 계층 대신 `payment.getOrder().markAsPaid()` / `markAsCancelled()`로 같은 트랜잭션에서 변경한다.
+- 승인 시 티켓은 `TicketService.issueTickets(order)`로 같은 트랜잭션에서 발급한다. 발급 로그는 `TicketIssuedEventListener`가 커밋 뒤(`AFTER_COMMIT`)에 남긴다. 상태 변경이 아니라 로그만 커밋 뒤에 남기므로 아래 원칙과 충돌하지 않는다.
 - 계층을 추가해도 `Payment → Order` 엔티티 연관관계가 남아 있는 한 결합도는 줄지 않는다.
 - 주문 쪽 로직이 늘어나면(좌석 확정, 알림 등) `OrderService` 호출이나 도메인 이벤트(동기 `@EventListener`, 같은 트랜잭션)로 옮긴다.
   - 재고 복구는 `OrderService`가 이미 `PaymentService`를 호출하므로 결제 쪽에서 `OrderService`를 부르면 순환 의존이 된다. 그래서 결제 쪽도 `TicketProductService`를 직접 호출한다(4.11).
@@ -222,6 +245,8 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
   - 전체 취소에서 이미 취소된 결제면 성공으로 간주한다. 같은 결제를 여러 번 전체 취소해도 한 번만 환불된다(보상 재시도의 근거).
   - 부분 취소(`amount`가 있음)에서 이미 취소된 결제면 성공으로 보지 않고 `PAYMENT_ALREADY_CANCELLED`를 던진다. 다른 경로로 전체 취소된 것이라 이번 취소가 반영됐다고 볼 수 없다(KAN-51).
   - `currentCancellableAmount`(4인자 메서드, KAN-51): 이번 취소 전에 PG에 남아 있어야 할 취소 가능 금액. PG 값과 다르면 PG가 거절하고 `PAYMENT_CANCELLABLE_AMOUNT_MISMATCH`를 던진다. 앞선 취소가 이미 반영됐을 수 있어 재시도하면 안 된다. 기존 3인자 호출(보상 취소)은 이 값을 보내지 않는다.
+  - 반환 상태: `SUCCEEDED`(취소 완료), `REQUESTED`(PG가 접수만 함), `UNKNOWN`(결과를 확인하지 못함). `REQUESTED`·`UNKNOWN`이면 다시 취소하지 않고 PG 조회로만 확정한다(`PG_PENDING`). 취소가 거절되면 반환하지 않고 예외를 던진다.
+    - 처리 중 응답 뒤 결과 미확인, 대기 중 인터럽트, 성공 응답을 해석하지 못함, 응답에 취소 내역이 없음은 모두 `UNKNOWN`이다. 요청이 PG에 도달했을 수 있어 실패로 보지 않는다.
   - 그 밖에 취소 여부를 확인할 수 없으면 `PAYMENT_CANCELLATION_FAILED`를 던진다.
 - 금액 비교는 `int`(원장)와 `Long`(PG)의 숫자 비교다. `Objects.equals`는 타입이 달라 항상 false이므로 쓰지 않는다.
 
@@ -233,7 +258,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 |---|---|---|
 | 주문 생성 | `OrderService.createOrder` | 상품을 락으로 조회해 `decreaseStock`. 재고 부족이거나 품절(`OUT_OF_STOCK`)이면 `TICKET_PRODUCT_STOCK_INSUFFICIENT`(409), 그 밖에 판매 중이 아니면(중지·종료·삭제) `ORDER_PRODUCT_NOT_ON_SALE` |
 | 사용자 주문 취소 | `OrderService.updateOrderByCancel` | 조건부 UPDATE(`PENDING` → `CANCELLED`)가 성공한 경우에만 복구 |
-| 만료 자동 취소 | `OrderCancelProcessor.cancelExpiredOrder` | 위와 같이 UPDATE가 성공한 경우에만 복구 |
+| 만료 자동 취소 | `OrderCancelProcessor.cancelExpiredOrder` | 위와 같이 UPDATE가 성공한 경우에만 복구. 취소 전에 `syncPayment`로 PG를 확인해 `NOT_PAID`·`NOT_OUR_PAYMENT`·PG에 결제 없음일 때만 취소한다(KAN-131) |
 | PG 결제 실패·금액 불일치 | `PaymentCommandService.markAsFailedIfPending` | 결제가 `PENDING`이어서 실패 처리한 경우에만 복구 |
 | 환불 완료 | `RefundCommandService.updatePaymentAndOrderStatus` | 환불이 `COMPLETED`가 될 때 **이번 환불의 수량만** 복구 |
 
@@ -243,14 +268,16 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 - 재고가 0이 되면 상품은 `OUT_OF_STOCK`(품절)이 되고, 복구될 때 `ON_SALE`로 돌아온다. 관리자가 중지한 `STOPPED` 상품과 `ENDED`, `DELETED` 상품은 재고가 0이어도 복구로 상태가 바뀌지 않는다. 품절과 수동 중지를 상태로 구분하므로 중지한 상품이 복구 때 다시 열리지 않는다.
 - 아직 관리자 입력(`updateTicketProduct`)에서 `OUT_OF_STOCK`을 직접 지정하거나 재고와 상태가 어긋나게 저장하는 것을 막지 않는다. 관리자 입력 규칙은 상태값 설계가 정리될 때 함께 정한다.
 - 같은 상품이 여러 항목에 들어 있어도 수량을 합산해 처리한다(`Order.getQuantityByTicketProductId`, `Refund.getQuantityByTicketProductId`).
+- 관리자 상품 수정(`updateTicketProduct`)은 상품을 비관적 락(`findByIdWithLock`)으로 조회하고, 요청의 `version`이 다르면 `CONCURRENT_UPDATE_CONFLICT`(409)로 거절한다.
 - 검증: `OrderStockConcurrencyTest`(Testcontainers MySQL)가 동시 주문의 과판매 방지, 상품 순서가 반대인 주문의 데드락, 사용자 취소·만료 취소·결제 실패·결제 승인이 경쟁할 때의 한 번만 복구를 확인한다. 환불은 `RefundCommandServiceTest`, `RefundProcessorConcurrencyTest`가 확인한다.
-- 남은 일: 관리자 상품 수정(`updateTicketProduct`)은 재고를 절대값으로 덮어쓰고 락 조회를 쓰지 않으므로, 주문이 몰리는 중에 수정하면 차감이 덮어써질 수 있다.
 
 ## 5. ErrorCode
 
 | 코드 | 상태 | 상황 |
 |---|---|---|
 | `INVALID_INPUT_VALUE` | 400 | 요청 `orderId`가 결제의 주문과 다름 |
+| `PAYMENT_INVALID_AMOUNT` | 400 | 결제 생성 시 금액이 0원 이하 (`createPayment`) |
+| `PAYMENT_CANCEL_PROHIBITED` | 409 | 사용자·관리자 주문 취소 시 결제가 `PENDING`이 아님 (`cancelledByUser`) |
 | `PAYMENT_NOT_FOUND` | 404 | 결제 없음, 다른 사용자의 결제 |
 | `PAYMENT_PG_PAYMENT_NOT_FOUND` | 404 | PG에 결제 없음 |
 | `PAYMENT_NOT_PAID` | 409 | PG에서 결제 완료 상태가 아님 (READY, PENDING, UNKNOWN 등) |
@@ -280,7 +307,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PaymentCommandServiceTest` | Mockito | 승인 성공·멱등·FAILED 거절·결제 없음, CANCELLED면 같은 트랜잭션에서 보상 요청 저장 후 CANCELLED 반환·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파, 실패 처리 성공·PENDING 아니면 건너뜀·결제 없음, 금액 불일치 시 보상 요청 저장(원장 CANCELLED면 실패 처리 없이 저장) |
 | `PaymentServiceTest` | Mockito | 결제 생성, 사용자 취소, 소유자 결제 조회 |
 | `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 CANCELLED 응답 + 보상 요청 1건 |
-| `PaymentControllerTest` | `@WebMvcTest` | 200(응답 데이터) / 404 / 502 / userId 누락 400 / orderId 누락 400, `ApiResponse` 형식 |
+| `PaymentControllerTest` | `@WebMvcTest` | 승인: 200(응답 데이터) / 404 / PG 실패 409 / 502 / 인증 없음 401 / orderId 누락 400. 목록·단건 조회: 페이지 응답, 상태·정렬 조건 전달, 잘못된 상태·정렬 400, 없는 결제 404, 인증 없음 401. `ApiResponse` 형식 |
 | `PaymentRepositoryTest` | `@DataJpaTest` + H2 | `findByPgIdAndUserId` 쿼리 동작 (본인·다른 사용자·없는 pgId) |
 | `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 앞선 요청 처리 중 응답의 대기 후 같은 키 재시도·처리 중 응답 뒤 결과 미확인(마지막이 처리 중·통신 실패)이면 UNKNOWN·인터럽트 시 UNKNOWN, 이미 취소됨 처리(전체 취소는 성공, 부분 취소는 예외), 취소 가능 금액 전송·불일치 예외, 통신 실패 재시도 |
 | `OrderTest`, `PaymentTest` | 단위 | 상태 전이, `paidAt` null 검증 |
@@ -290,26 +317,24 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 ### 테스트 환경 메모
 
 - `application-test.yml`은 H2를 사용한다. 락 동작은 DB마다 다르므로 동시성 테스트는 `@Import(TestcontainersConfiguration.class)`로 MySQL 컨테이너에서 실행한다. **Docker가 실행 중이어야 한다.**
-  - test 프로필 없이 `@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")`를 사용한다. test 프로필의 H2용 init SQL이 MySQL에서 실패하기 때문.
+  - test 프로필 없이 `@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")`를 사용한다. 기본 설정의 `innodb_lock_wait_timeout = 3`이 그대로 적용되어 운영과 같은 락 대기 시간으로 확인한다.
 - `@DataJpaTest`는 `JpaConfig`(JPA Auditing)를 로드하지 않으므로 `@Import(JpaConfig.class)`가 필요하다.
 
 ## 7. 남은 작업
 
 ### 운영 배포 전 필수
 
-1. **인증 연동**: 지금은 `userId`를 `@RequestParam`으로 받아 소유자 확인을 우회할 수 있다. `@AuthenticationPrincipal` 등으로 교체 전까지 운영 노출 금지.
-2. **웹훅 배포 준비**: `webhook_events` 테이블 생성, PortOne 콘솔에 웹훅 URL 등록, 인증 적용 시 웹훅 경로 `permitAll`. 상세는 [payment-webhook-plan.md 7장](payment-webhook-plan.md#7-남은-작업).
-3. **보상 배포 준비**: `payment_compensations` 테이블 생성, `DEAD` 보상 요청 확인·수동 환불 절차. 상세는 [payment-compensation.md 8장](payment-compensation.md#8-남은-작업).
+1. **웹훅 배포 준비**: PortOne 콘솔에 웹훅 URL 등록. 상세는 [payment-webhook-plan.md 7장](payment-webhook-plan.md#7-남은-작업).
+2. **보상 배포 준비**: `DEAD` 보상 요청 확인·수동 환불 절차. 상세는 [payment-compensation.md 8장](payment-compensation.md#8-남은-작업).
 
 ### 개선 항목
 
-- `PortOneConfig`: `RestClient`를 타입으로만 주입하고 정적 `RestClient.builder()`로 생성 → Boot의 `RestClient.Builder` 주입으로 변경 권장.
 - `io.portone:server-sdk` 의존성은 웹훅 서명 검증(`WebhookVerifier`)에만 사용한다. 결제 조회·취소는 `RestClient`로 직접 호출한다.
 - PG 연동 컨트롤러(`PortOneConfigController`, `PortOneWebhookController`)는 infra에 둔다. `architecture.md`에 이 기준을 추가할지 팀과 정한다.
 - `PAYMENT_INVALID_STATUS_TRANSITION`과 `ORDER_INVALID_STATUS_TRANSITION` 메시지가 같아 구분 불가.
 - 오류 코드 검토: `PAYMENT_INCORRECT_AMOUNT`(400 → 409?). (`PAYMENT_PG_FAILED`는 502 → 409로 변경함)
 - 이름 규칙: `cancelledByUser` → `cancelPaymentByUser`, `getOwnedPayment` → `findOwnedPayment`, `findByPgIdAndUserId` → 파생 쿼리 `findByPgIdAndOrderUserId`.
-- 결제 준비 API 또는 주문 생성 응답에 `paymentId`, `amount`, `orderName` 포함 (`createPayment` 호출처 미정).
+- 주문 생성 응답에 PortOne 결제창용 `orderName` 포함. (`pgId`, `totalAmount`는 `CreateOrderResponse`에 있다)
 
 ### PortOne 문서로 확인 필요
 
@@ -338,4 +363,4 @@ approvePayment (트랜잭션 1개): 원장 CANCELLED + PG PAID면 보상 요청�
 - 보상 판단과 보상 요청 기록이 함께 커밋되므로, 커밋된 보상은 반드시 PG 취소가 시도된다.
 - 같은 결제를 여러 번 전체 취소해도 두 번째부터 "이미 취소됨"으로 성공 처리되어 중복 환불되지 않는다. 멱등 키는 호출마다 새로 만든다(4.9).
 - 웹훅 수신은 Inbox(들어오는 메시지를 잃지 않음), 보상 취소는 Outbox(우리가 결정한 외부 호출을 잃지 않음)다.
-- 승인 단계에 한 번도 도달하지 못한 결제(웹훅 미수신 + 승인 API 미호출)는 Inbox·Outbox로도 잡히지 않는다 → **대사 배치**(PortOne 결제 목록과 원장 비교)를 마지막 안전망으로 둔다.
+- 승인 단계에 한 번도 도달하지 못한 결제(웹훅 미수신 + 승인 API 미호출)는 주문 만료 자동 취소가 취소 전 PG 확인으로 승인한다(KAN-131). 그 확인 직후 결제되고 웹훅도 오지 않은 결제는 여전히 잡히지 않는다 → **대사 배치**(PortOne 결제 목록과 원장 비교)를 마지막 안전망으로 둔다.

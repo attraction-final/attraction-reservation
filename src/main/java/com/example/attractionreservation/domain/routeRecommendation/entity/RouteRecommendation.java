@@ -41,7 +41,7 @@ public class RouteRecommendation extends BaseTimeEntity {
     @Column(name = "end_at", nullable = false)
     private LocalDateTime endAt;
 
-    //추천 계산의 출발위치 -> 지금은 정문으로 고정됨
+    //추천 계산의 출발위치 -> 위치 없이 요청하면 ENTRANCE, 현재 위치를 주면 CURRENT_LOCATION
     @Enumerated(EnumType.STRING)
     @Column(name ="start_location", nullable = false,length = 30)
     private StartLocation startLocation;
@@ -100,12 +100,25 @@ public class RouteRecommendation extends BaseTimeEntity {
        return this.userId.equals(userId);
    }
 
+   //정문에서 출발한 추천 경로를 생성한다.
+   public static RouteRecommendation create(
+           Long userId,
+           Long ticketId,
+           LocalDateTime startAt,
+           LocalDateTime endAt,
+           List<RouteRecommendationStop> stops,
+           List<RouteRecommendationExclusion> exclusions
+   ) {
+       return create(userId, ticketId, startAt, endAt, StartLocation.ENTRANCE, stops, exclusions);
+   }
+
    //계산된 방문 ,제외 목록으로 저장할 추천 경로를 생성한다.
    public static RouteRecommendation create(
            Long userId,
            Long ticketId,
            LocalDateTime startAt,
            LocalDateTime endAt,
+           StartLocation startLocation,
            List<RouteRecommendationStop> stops,
            List<RouteRecommendationExclusion> exclusions
    ) {
@@ -117,7 +130,7 @@ public class RouteRecommendation extends BaseTimeEntity {
        recommendation.ticketId = ticketId;
        recommendation.startAt = startAt;
        recommendation.endAt = endAt;
-       recommendation.startLocation = StartLocation.ENTRANCE;
+       recommendation.startLocation = startLocation;
        recommendation.travelTimeBasis = TravelTimeBasis.MEASURED_PATH;
 
        //전달받은 목록의 배치 순서랑 상관없이 방문 순번으로 정렬함

@@ -2,6 +2,7 @@ package com.example.attractionreservation.domain.routeRecommendation.entity;
 
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
+import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +55,20 @@ public class RouteRecommendationTest {
         assertThat(recommendation.getTotalRideMinutes()).isEqualTo(40);
         assertThat(recommendation.getTotalDurationMinutes()).isEqualTo(160);
         assertThat(recommendation.getEstimatedEndAt()).isEqualTo(at("15:40"));
+    }
+
+    @Test
+    @DisplayName("출발 위치를 지정하지 않으면 정문 출발로, 지정하면 그 값으로 저장한다")
+    void create_StartLocation_DefaultsToEntrance() {
+        // when
+        RouteRecommendation fromEntrance = RouteRecommendation.create(
+                1L, 5001L, at("13:00"), at("18:00"), List.of(safari()), List.of());
+        RouteRecommendation fromCurrentLocation = RouteRecommendation.create(
+                1L, 5001L, at("13:00"), at("18:00"), StartLocation.CURRENT_LOCATION, List.of(safari()), List.of());
+
+        // then
+        assertThat(fromEntrance.getStartLocation()).isEqualTo(StartLocation.ENTRANCE);
+        assertThat(fromCurrentLocation.getStartLocation()).isEqualTo(StartLocation.CURRENT_LOCATION);
     }
 
     @Test

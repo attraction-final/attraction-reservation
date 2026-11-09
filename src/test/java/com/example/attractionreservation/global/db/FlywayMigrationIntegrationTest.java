@@ -221,6 +221,25 @@ class FlywayMigrationIntegrationTest {
         assertThat(basis).isEqualTo("MEASURED_PATH");
     }
 
+    // validate는 MySQL enum의 값 목록을 비교하지 않으므로 V9(start_location 확장)는 실제 INSERT로 검증한다.
+    @Test
+    @DisplayName("추천 경로를 출발 위치 CURRENT_LOCATION으로 저장할 수 있다")
+    void insertRouteRecommendation_CurrentLocationStart_Success() {
+        // when
+        jdbcTemplate.update("""
+                INSERT INTO route_recommendations (created_at, updated_at, start_at, end_at, estimated_end_at,
+                    result_type, start_location, ticket_id, total_duration_minutes, total_move_minutes,
+                    total_ride_minutes, total_selected_attractions, total_wait_minutes, travel_time_basis, user_id)
+                VALUES (NOW(6), NOW(6), NOW(6), NOW(6), NOW(6),
+                    'FULL', 'CURRENT_LOCATION', 1, 60, 10, 20, 1, 30, 'MEASURED_PATH', 1)
+                """);
+
+        // then
+        String startLocation = jdbcTemplate.queryForObject(
+                "SELECT start_location FROM route_recommendations", String.class);
+        assertThat(startLocation).isEqualTo("CURRENT_LOCATION");
+    }
+
     private long insertAttractionAndGetId(String name) {
         insertAttraction(name, null);
         return jdbcTemplate.queryForObject(

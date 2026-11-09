@@ -118,12 +118,23 @@ public record SearchRouteRecommendationResponse(
             int totalSelectedAttractions,
             List<ExcludedAttraction> excludedAttractions
     ) {
+        return none(ticketId, startAt, endAt, StartLocation.ENTRANCE, totalSelectedAttractions, excludedAttractions);
+    }
+
+    public static SearchRouteRecommendationResponse none(
+            Long ticketId,
+            LocalDateTime startAt,
+            LocalDateTime endAt,
+            StartLocation startLocation,
+            int totalSelectedAttractions,
+            List<ExcludedAttraction> excludedAttractions
+    ) {
         return new SearchRouteRecommendationResponse(
                 null,
                 ticketId,
                 startAt,
                 endAt,
-                StartLocation.ENTRANCE,
+                startLocation,
                 TravelTimeBasis.MEASURED_PATH,
                 RouteResultType.NONE,
                 totalSelectedAttractions,

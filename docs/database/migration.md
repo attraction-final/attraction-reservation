@@ -86,3 +86,4 @@ CREATE DATABASE attraction_reservation;
 - 앞으로의 스키마 변경은 `docs/sql/`이 아니라 `db/migration/`에 추가한다.
 - KAN-136 `attraction_locations`, `attraction_paths`는 엔티티와 함께 `V6`, `V7`로 추가했다. 데이터(구간·좌표)는 마이그레이션에 넣지 않고 `docs/sql/kan-136-route-travel-data.sql`로 배포 후 적용한다.
 - KAN-139 `V8`은 `route_recommendations.travel_time_basis` enum에 `MEASURED_PATH`를 추가한다. 이 컬럼은 MySQL enum이라 Java enum에 값을 추가할 때마다 마이그레이션이 필요하다. (`ddl-auto=validate`는 enum 값 목록을 비교하지 않는다)
+- KAN-140 `V9`는 `route_recommendations.start_location` enum에 `CURRENT_LOCATION`을 추가한다. V8과 같은 이유로 Java enum과 함께 추가했다.

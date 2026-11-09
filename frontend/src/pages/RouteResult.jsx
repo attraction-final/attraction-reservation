@@ -45,7 +45,7 @@ export default function RouteResult() {
                 </span>
                 <div className="row gap-12" style={{ alignItems: 'center' }}>
                   <span className="display icon-circle" style={{ width: 32, height: 32, flexShrink: 0, background: 'var(--pink)', color: '#fff', fontSize: 17 }}>{v.order}</span>
-                  <Link to={`/attractions/${v.attractionId}`} className="card row gap-10 grow" style={{ borderRadius: 18, padding: 8 }}>
+                  <Link to={`/attractions/${v.attractionId}`} className="card row gap-10 grow" style={{ borderRadius: 18, padding: 8, color: 'inherit', textDecoration: 'none' }}>
                     <img src={v.image} alt={v.name} style={{ width: 52, height: 52, borderRadius: 12, objectFit: 'cover' }} />
                     <span className="stack grow" style={{ gap: 2 }}>
                       <span className="bold" style={{ fontSize: 15 }}>{v.name}</span>

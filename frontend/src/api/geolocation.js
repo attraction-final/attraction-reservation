@@ -18,15 +18,15 @@ const OPTIONS = {
 
 // GeolocationPositionError.code → 안내 문구
 const MESSAGES = {
-  1: '위치 권한이 거부되어 현재 위치를 알 수 없어요. 브라우저 설정에서 위치를 허용하거나 정문 출발로 추천받아 주세요.',
-  2: '현재 위치를 확인할 수 없어요. 잠시 후 다시 시도하거나 정문 출발로 추천받아 주세요.',
-  3: '현재 위치를 받는 데 시간이 너무 오래 걸려요. 다시 시도하거나 정문 출발로 추천받아 주세요.',
+  1: '위치 권한이 거부되어 현재 위치를 알 수 없어요. 브라우저 설정에서 이 사이트의 위치 권한을 허용한 뒤 다시 시도해 주세요.',
+  2: '현재 위치를 확인할 수 없어요. 실내라면 밖으로 나가 잠시 후 다시 시도해 주세요.',
+  3: '현재 위치를 받는 데 시간이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.',
 };
 
 export function getCurrentLocation() {
   return new Promise((resolve, reject) => {
     if (!('geolocation' in navigator)) {
-      reject(new Error('이 브라우저는 현재 위치 기능을 지원하지 않아요. 정문 출발로 추천받아 주세요.'));
+      reject(new Error('이 브라우저는 현재 위치 기능을 지원하지 않아요. 다른 브라우저에서 시도해 주세요.'));
       return;
     }
     navigator.geolocation.getCurrentPosition(

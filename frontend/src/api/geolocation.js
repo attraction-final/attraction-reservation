@@ -2,8 +2,11 @@
 // 루트 추천을 "현재 위치 출발"로 받을 때 써요. 받은 좌표는 요청에만 쓰고 어디에도 저장하지 않아요.
 //
 // 사용 예)
-//   const { latitude, longitude } = await getCurrentLocation();
+//   const position = await getCurrentLocation();
+//   // { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed, timestamp }
 //
+// - 서버(POST /api/route-recommendations)가 받는 값 그대로예요. accuracy(오차 반경 m)는 서버가 필수로 받아요.
+// - altitude 등 기기에 따라 없는 값은 null 이에요.
 // - 실패하면 Error 를 던지고, error.message 에 사용자에게 보여 줄 안내 문구가 들어 있어요.
 // - HTTPS 또는 localhost 에서만 동작해요. (그 밖에서는 브라우저가 위치를 주지 않아요)
 
@@ -27,9 +30,16 @@ export function getCurrentLocation() {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (position) => resolve({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
+      ({ coords, timestamp }) => resolve({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        accuracy: coords.accuracy,
+        altitude: coords.altitude,
+        altitudeAccuracy: coords.altitudeAccuracy,
+        // 멈춰 있으면 브라우저가 NaN 을 줘요. JSON 에서는 null 이 되지만 명시적으로 바꿔 둬요.
+        heading: Number.isNaN(coords.heading) ? null : coords.heading,
+        speed: coords.speed,
+        timestamp: Math.round(timestamp), // 측정 시각(ms). 서버는 오래된 위치면 경고를 붙여요
       }),
       (error) => reject(new Error(MESSAGES[error.code] ?? MESSAGES[2])),
       OPTIONS,

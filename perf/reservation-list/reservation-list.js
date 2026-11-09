@@ -25,7 +25,7 @@ const vuStartedAt = new Gauge('reservation_list_vu_started_at_ms');
 const mode = __ENV.TEST_MODE || 'smoke';
 if (!['smoke', 'warmup', 'load'].includes(mode)) throw new Error('잘못된 TEST_MODE');
 const loadUsers = Number(__ENV.TEST_VUS || 10);
-if (![10, 20].includes(loadUsers)) throw new Error('TEST_VUS는 10 또는 20이어야 합니다.');
+if (![10, 20, 50].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50이어야 합니다.');
 const users = mode === 'smoke' ? 2 : loadUsers;
 const p95 = __ENV.P95_MS ? Number(__ENV.P95_MS) : null;
 if (p95 !== null && (!Number.isFinite(p95) || p95 <= 0)) throw new Error('P95_MS는 양수여야 합니다.');
@@ -54,7 +54,7 @@ export const options = {
 
 export function setup() {
   setupStartedAt.add(Date.now());
-  if (fixture.length !== 40) throw new Error('DB 기대 결과는 회원 20명 × 조건 2개의 40행이어야 합니다.');
+  if (fixture.length !== 100) throw new Error('DB 기대 결과는 회원 50명 × 조건 2개의 100행이어야 합니다.');
   const accounts = [];
   for (const row of fixture) {
     if (!['all', 'reserved'].includes(row.variant) || !Array.isArray(row.rows)
@@ -67,9 +67,9 @@ export function setup() {
     if (account.expected[row.variant]) throw new Error('중복 기대 결과');
     account.expected[row.variant] = { total: row.total, rows: row.rows };
   }
-  if (accounts.length !== 20 || accounts.some(account => !account.expected.all || !account.expected.reserved)
-    || new Set(accounts.map(account => account.email)).size !== 20) {
-    throw new Error('서로 다른 회원 20명의 조건별 기대 결과가 필요합니다.');
+  if (accounts.length !== 50 || accounts.some(account => !account.expected.all || !account.expected.reserved)
+    || new Set(accounts.map(account => account.email)).size !== 50) {
+    throw new Error('서로 다른 회원 50명의 조건별 기대 결과가 필요합니다.');
   }
   const response = http.get(`${BASE}/api/reservations/me`, {
     tags: { endpoint: 'auth-preflight' }, timeout: '10s',

@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
-import { Counter, Rate, Trend } from 'k6/metrics';
+import { Counter, Gauge, Rate, Trend } from 'k6/metrics';
 import { BASE, login } from './auth.js';
 
 const runId = __ENV.RUN_ID;
@@ -17,19 +17,25 @@ const durations = {
 };
 const invalid = new Rate('reservation_list_invalid');
 const requests = new Counter('reservation_list_requests');
+// CPU 표본과 인증 준비/실제 조회 시작을 구분하기 위한 UTC epoch ms다. 토큰은 기록하지 않는다.
+const setupStartedAt = new Gauge('reservation_list_setup_started_at_ms');
+const setupFinishedAt = new Gauge('reservation_list_setup_finished_at_ms');
+const vuStartedAt = new Gauge('reservation_list_vu_started_at_ms');
 
 const mode = __ENV.TEST_MODE || 'smoke';
 if (!['smoke', 'warmup', 'load'].includes(mode)) throw new Error('잘못된 TEST_MODE');
-const users = mode === 'smoke' ? 2 : 10;
+const loadUsers = Number(__ENV.TEST_VUS || 10);
+if (![10, 20].includes(loadUsers)) throw new Error('TEST_VUS는 10 또는 20이어야 합니다.');
+const users = mode === 'smoke' ? 2 : loadUsers;
 const p95 = __ENV.P95_MS ? Number(__ENV.P95_MS) : null;
 if (p95 !== null && (!Number.isFinite(p95) || p95 <= 0)) throw new Error('P95_MS는 양수여야 합니다.');
 const thresholds = {
   checks: ['rate==1'],
   reservation_list_invalid: ['rate==0'],
-  reservation_list_requests: [mode === 'smoke' ? 'count==20' : 'count>=20'],
+  reservation_list_requests: [mode === 'smoke' ? 'count==20' : `count>=${users * 2}`],
   'http_req_failed{endpoint:reservation-list}': ['rate==0'],
-  'reservation_list_requests{variant:all}': [mode === 'smoke' ? 'count==10' : 'count>=10'],
-  'reservation_list_requests{variant:reserved}': [mode === 'smoke' ? 'count==10' : 'count>=10'],
+  'reservation_list_requests{variant:all}': [mode === 'smoke' ? 'count==10' : `count>=${users}`],
+  'reservation_list_requests{variant:reserved}': [mode === 'smoke' ? 'count==10' : `count>=${users}`],
 };
 // 성능 목표는 load에 명시한 경우에만 적용한다. warm-up의 시간 분포는 합격 기준에서 제외한다.
 if (mode === 'load' && p95 !== null) {
@@ -47,7 +53,8 @@ export const options = {
 };
 
 export function setup() {
-  if (fixture.length !== 20) throw new Error('DB 기대 결과는 회원 10명 × 조건 2개의 20행이어야 합니다.');
+  setupStartedAt.add(Date.now());
+  if (fixture.length !== 40) throw new Error('DB 기대 결과는 회원 20명 × 조건 2개의 40행이어야 합니다.');
   const accounts = [];
   for (const row of fixture) {
     if (!['all', 'reserved'].includes(row.variant) || !Array.isArray(row.rows)
@@ -60,9 +67,9 @@ export function setup() {
     if (account.expected[row.variant]) throw new Error('중복 기대 결과');
     account.expected[row.variant] = { total: row.total, rows: row.rows };
   }
-  if (accounts.length !== 10 || accounts.some(account => !account.expected.all || !account.expected.reserved)
-    || new Set(accounts.map(account => account.email)).size !== 10) {
-    throw new Error('서로 다른 회원 10명의 조건별 기대 결과가 필요합니다.');
+  if (accounts.length !== 20 || accounts.some(account => !account.expected.all || !account.expected.reserved)
+    || new Set(accounts.map(account => account.email)).size !== 20) {
+    throw new Error('서로 다른 회원 20명의 조건별 기대 결과가 필요합니다.');
   }
   const response = http.get(`${BASE}/api/reservations/me`, {
     tags: { endpoint: 'auth-preflight' }, timeout: '10s',
@@ -74,10 +81,13 @@ export function setup() {
   // 각 프로세스의 setup에서 로그인한다. warm-up과 load는 같은 계정을 사용하되 새 토큰을 발급한다.
   const selected = accounts.sort((left, right) => left.email.localeCompare(right.email)).slice(0, users);
   for (const account of selected) account.token = login(account.email);
+  setupFinishedAt.add(Date.now());
   return selected;
 }
 
 export default function (accounts) {
+  // Gauge의 min/max로 각 VU 첫 iteration 시작 시각의 범위를 확인한다.
+  if (__ITER === 0) vuStartedAt.add(Date.now());
   // given: VU마다 다른 회원과 DB에서 계산한 기대 결과를 사용한다.
   const account = accounts[__VU - 1];
   for (const variant of ['all', 'reserved']) {

@@ -11,5 +11,5 @@ mysql --host=mysql --user=perf --default-character-set=utf8mb4 --batch --raw --s
   reservation_perf < /scripts/prepare.sql
 mysql --host=mysql --user=perf --default-character-set=utf8mb4 --batch --raw --skip-column-names \
   reservation_perf < /scripts/expected.sql > "$target/fixture.jsonl"
-test "$(wc -l < "$target/fixture.jsonl")" -eq 20
+test "$(wc -l < "$target/fixture.jsonl")" -eq 40
 echo "기대 결과 준비 완료: $RUN_ID"

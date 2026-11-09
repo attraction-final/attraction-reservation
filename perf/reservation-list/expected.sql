@@ -1,5 +1,5 @@
--- k6가 검증할 회원 10명의 조건별 기대 결과를 JSON Lines 20행으로 추출한다.
--- smoke는 이 중 처음 두 회원만 사용하고 warm-up/load는 10명 모두 사용한다.
+-- k6가 검증할 회원 20명의 조건별 기대 결과를 JSON Lines 40행으로 추출한다.
+-- smoke는 처음 두 회원, warm-up/load는 TEST_VUS에 맞춰 처음 10명 또는 20명을 사용한다.
 -- JSON_ARRAYAGG의 순서를 가정하지 않고 ORDER BY가 명시된 GROUP_CONCAT으로 상위 10건을 만든다.
 SET SESSION group_concat_max_len = 65536;
 WITH variants AS (
@@ -15,7 +15,7 @@ WITH variants AS (
     JOIN attraction_slots s ON s.id = r.attraction_slot_id
     JOIN attractions a ON a.id = s.attraction_id
     CROSS JOIN variants v
-    WHERE u.email REGEXP '^kan134-000[0-9]@example[.]test$'
+    WHERE u.email REGEXP '^kan134-00[01][0-9]@example[.]test$'
       AND (v.variant = 'all' OR r.reservation_status = 'RESERVED')
 )
 SELECT JSON_OBJECT('userId',user_id,'email',email,'variant',variant,'total',MAX(total),

@@ -2,7 +2,9 @@
 
 실제 Spring Boot 앱과 Spring Security를 거쳐 응답 정확성을 확인한다.
 smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
-다음은 같은 부하에서 주기적 자원 수집을 검증하는 단계다. 운영 처리 한계를 판단한 결과는 아니다.
+주기적 자원 수집과 20 VUs 측정까지 확인했다. load-02·03의 마지막 Docker 수집은 각 1회 누락됐다.
+다음은 20 VUs를 유지하고 setup과 VU 시작 시각으로 초기 CPU 표본을 구분하는 실험이다.
+운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
 
@@ -34,7 +36,7 @@ PowerShell에서 실행할 때도 이 스크립트는 Git Bash 터미널에서 �
 | 대상 | `GET /api/reservations/me?page=0&size=10`, 동일 요청의 `status=RESERVED` 조건 |
 | 데이터 | 회원 200명 × 500건 = 100,000건, 어트랙션 10개, 슬롯 500개 |
 | 상태 | 회원별 RESERVED·COMPLETED·CANCELLED·NO_SHOW 각 125건 |
-| 실제 요청 회원 | smoke는 2명, warm-up/load는 서로 다른 10명 |
+| 실제 요청 회원 | smoke는 2명, warm-up/load는 기본 10명 또는 TEST_VUS=20일 때 20명 |
 | smoke | 2 VUs × 5 iterations × 2조건 = 목록 조회 20건, iteration마다 1초 대기 |
 | 기능 합격 | 미인증 401, 조회 오류 0, 회원별 ID·순서·DTO·필터·페이지·전체 건수 일치 |
 | 성능 합격 | load에서 p95_ms를 명시한 경우에만 적용. smoke는 성능 합격 기준 없음 |
@@ -81,7 +83,7 @@ SQL의 `perf_guard` CHECK 위반은 기대한 테스트 데이터와 다르다�
 ```text
 mysql·redis·app 기동
   → 준비용 k6: 앱 준비 확인, 테스트 계정 200명 생성/로그인 확인
-  → MySQL client: prepare.sql 실행, expected.sql로 10명의 기대 결과 20행 저장
+  → MySQL client: prepare.sql 실행, expected.sql로 후보 20명의 기대 결과 40행 저장
   → 실행 환경·측정 전 메트릭 기록
   → smoke k6: setup에서 회원 2명 로그인, VU에서 목록 20회 검증
   → 측정 후 메트릭·종료 코드 기록
@@ -125,15 +127,41 @@ warm-up 뒤에 수집 프로세스가 시작돼 측정용 k6와 병렬로 동작
 목표 간격은 처리 시간을 포함한 2초지만 Docker stats·scrape 시간에 따라 길어질 수 있어 실제 시각을 기록한다.
 HTTP 검증 통과와 수집 성공을 별개로 확인한다. 실행기 종료 시 수집 중단을 요청하고 프로세스를 회수한다.
 
+### 5. 다음 단계: 20 VUs
+
+```bash
+TEST_VUS=20 bash perf/reservation-list/run.sh load-03 load
+```
+
+warm-up 20초·측정 60초·iteration마다 1초 대기·컨테이너 자원 제한·수집 방식은 유지하고 회원 20명으로 늘린다.
+성능 합격 기준은 적용하지 않는다. 변경한 기대 결과 SQL과 새 VU 설정의 실행 검증도 함께 수행한다.
+현재 TEST_VUS는 10 또는 20만 지원한다. 생략하면 10이며 smoke는 계속 2명을 사용한다.
+기대 결과는 항상 후보 회원 20명·조건별 2행씩 40행을 추출하고 k6가 필요한 회원 수만 선택한다.
+기존 결과 폴더의 4행/20행 fixture는 과거 실행 자료로 보존하며 새 실행에서 덮어쓰지 않는다.
+
+### 6. 초기 CPU 표본의 구간 확인
+
+load-03에서 앱 CPU 91.99%는 첫 번째 표본이었다. 자원 수집은 setup 로그인도 포함하므로 목록 조회의 CPU 포화로 단정하지 않는다.
+다음 명령으로 같은 20 VUs 조건을 다시 실행한다.
+
+```bash
+TEST_VUS=20 bash perf/reservation-list/run.sh load-04 load
+```
+
+새 summary의 `reservation_list_setup_started_at_ms`, `reservation_list_setup_finished_at_ms`는 setup 경계,
+`reservation_list_vu_started_at_ms`의 min/max는 VU별 첫 iteration 시작 범위다. 모두 UTC epoch milliseconds다.
+이 시각을 자원 주기의 시작/종료 시각과 대조한다. 서로 다른 도구의 관측 구간이라 시각이 겹친다는 이유만으로 인과관계를 확정하지 않는다.
+기존 load-03에는 이 marker가 없어 정확한 로그인 종료/VU 시작 시각을 소급해 확인할 수 없다.
+
 ## 결과 확인
 
 결과는 `perf/reservation-list/results/<RUN_ID>/`에 저장되며 Git에서 제외한다.
 
 | 파일 | 확인할 내용 | 해석 범위 |
 | --- | --- | --- |
-| `summary.json` | 측정 구간 check 실패, invalid rate, 요청 수, 조건별 duration | 인증·로그인 요청이 포함된 전체 HTTP 지표 대신 목록 전용 지표 사용 |
+| `summary.json` | 측정 구간 check 실패, invalid rate, 요청 수, 조건별 duration, setup/VU 시작 시각 Gauge | 인증·로그인 요청이 포함된 전체 HTTP 지표 대신 목록 전용 지표 사용 |
 | `warmup-summary.json`, `warmup-exit-code.txt` | load의 별도 warm-up 결과와 종료 코드 | 측정 결과와 합산하지 않음. smoke에는 생성하지 않음 |
-| `fixture.jsonl` | 회원 10명의 조건별 DB 기대 결과 20행 | smoke는 처음 두 회원만 사용. 토큰·비밀번호 없음 |
+| `fixture.jsonl` | 후보 회원 20명의 조건별 DB 기대 결과 40행 | smoke는 2명, load는 선택한 10명/20명 사용. 토큰·비밀번호 없음 |
 | `metadata.txt` | 시각, HEAD·수정 상태, jar/스크립트 hash, 실제 DB 건수·버전·인덱스·앱/DB/Redis image ID | 소스와 jar 일치 여부는 빌드 절차로 별도 관리 |
 | `metrics-before.txt`, `metrics-after.txt` | Hikari·JVM·HTTP Prometheus 메트릭 | 전후 누적값/순간값. 구간 최대 CPU·메모리나 요청당 쿼리 수를 증명하지 않음 |
 | `resource-samples.jsonl` | load의 앱·MySQL·Redis·측정용 k6 Docker stats와 주기 시작/종료 시각 | 표본 최대값은 절대적인 순간 최대값이 아님. 시작/종료 경계에는 k6 표본이 없을 수 있음 |
@@ -155,7 +183,7 @@ HTTP 검증 통과와 수집 성공을 별개로 확인한다. 실행기 종료 
 ## 다음 단계
 
 첫 측정 전에 임시 p95 기준을 선택한다. 첫 10 VUs 결과를 확인한 뒤 부하 단계를 늘릴지 판단한다.
-주기적 수집을 추가했으며 실제 실행 검증은 다음 RUN_ID에서 수행한다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
+load-02에서 주기적 수집을 확인했고 다음 RUN_ID에서는 20 VUs로 비교한다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
 Docker stats와 앱 scrape는 동시에 취득한 값이 아니며 기록된 관측 시각을 함께 확인한다.
 Docker 메모리와 JVM heap 사용량은 서로 다른 지표다. 수집기 자체의 CPU·I/O 비용도 있으므로 load-01과의 시간 차이를 최적화 효과로 주장하지 않는다.
 앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로

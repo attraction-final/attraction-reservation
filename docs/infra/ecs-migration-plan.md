@@ -235,47 +235,53 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 
 ### 6단계: 알림 (Grafana Alerting)
 
-현재 상태
+현재 상태 (구현 전)
 - Grafana에는 알림 설정이 없다. provisioning에는 데이터소스(Prometheus, Loki, CloudWatch)와 대시보드 4개만 있다.
 - 미처리 웹훅·환불 적체량을 나타내는 앱 지표가 없다. 적체량 알림은 앱 코드에 gauge를 추가해야 하므로 이번 범위에서 뺀다(범위 밖).
 - Grafana `.env`는 모니터링 인스턴스가 처음 뜰 때 user-data가 SSM에서 한 번 만든다. CD(`deploy-monitoring`)는 `.env`를 건드리지 않는다.
 
 알림 받을 곳: Slack incoming webhook (2026-11-08 결정)
-- webhook URL은 SSM `monitoring/ALERT_WEBHOOK_URL`(SecureString)에 둔다. 값은 저장소에 남기지 않는다.
+- webhook URL은 SSM `monitoring/ALERT_WEBHOOK_URL`(SecureString)에 둔다. 값은 저장소에 남기지 않는다. (2026-11-09 등록, 테스트 메시지 확인)
 
-규칙 (2026-11-09 결정: 서비스 중단과 오류만)
+규칙 (2026-11-09 결정: 서비스 중단과 사람이 처리해야 하는 오류만, 평가 1분)
 
 | 규칙 | 조건 | 데이터 |
 |---|---|---|
-| api 정상 대상 0 | `attraction-app-ecs` `HealthyHostCount` < 1, 2분 | CloudWatch ALB |
-| api 메트릭 끊김 | `up{service="api"}`가 5분 동안 없음. Alloy 사이드카는 essential이 아니라 죽어도 task가 남는다 | Prometheus |
+| api 정상 대상 0 | `attraction-app-ecs` `HealthyHostCount`(Minimum, 60초) < 1, 2분. 지표가 끊겨도 알린다 | CloudWatch ALB |
+| api 메트릭 끊김 | `up{service="api"} == 1`인 대상이 5분 동안 없음. Alloy 사이드카는 essential이 아니라 죽어도 task가 남는다 | Prometheus |
 | worker 스케줄러 멈춤 | worker `tasks_scheduled_execution_seconds_count`가 10분 동안 늘지 않음 (worker task가 없을 때도 잡힌다) | Prometheus |
-| api 5xx | 5분 동안 5xx 비율 5% 초과 그리고 5건 이상 (요청이 적을 때 한두 건으로 울리지 않게) | Prometheus |
-| ERROR 로그 | api·worker `logback_events_total{level="error"}`가 5분 동안 1건 이상. 로깅 규칙 5장의 "ERROR 로그는 알림 대상" 기준 | Prometheus |
+| api 5xx | 5분 동안 5xx 비율 5% 초과 그리고 5건 이상 (요청이 적을 때 한두 건으로 울리지 않게, `/actuator` 제외) | Prometheus |
+| 결제·환불 최종 실패 | `PAYMENT_COMPENSATION_*`, `REFUND_*`, `WEBHOOK_*` ERROR 로그가 5분 안에 1건 이상. 이벤트·`pgId`마다 따로 알린다 | Loki |
+| ERROR 로그 | 위 결제·환불 이벤트를 뺀 api·worker ERROR 로그가 5분 안에 1건 이상. 로깅 규칙 5장의 "ERROR 로그는 알림 대상" 기준. 서비스별로 알린다 | Loki |
 
 - 로그 라우터(Fluent Bit)는 essential이라 죽으면 task가 내려가 "api 정상 대상 0"으로 잡힌다.
+- 결제·환불 최종 실패: 결제 보상 취소(PG 승인 뒤 우리 쪽 실패를 되돌리는 PG 취소)·환불·웹훅의 재시도 소진, PG 거절, 원장·PG 불일치, 배치 실패. 고객 돈이 걸려 있어 일반 ERROR와 나눈다. 고객 카드 거절(`PAYMENT_MARKED_FAILED`, INFO), 자동 보상으로 이어지는 금액 불일치(`PAYMENT_AMOUNT_MISMATCHED`, WARN), PG 호출 한 번의 실패(`PG_CANCEL_*`, WARN)는 넣지 않는다.
+- ERROR 로그는 계획한 `logback_events_total`(Prometheus) 대신 Loki로 센다. 새로 뜬 task는 첫 값이 이미 1 이상이라 `increase()`가 기동 중 ERROR를 놓친다(5단계의 슬롯 생성 실패가 그 경우). Loki는 로그 줄을 세므로 기동 중·이미 내려간 task의 ERROR도 잡는다.
 - 스케줄러 실행 실패(`exception!="none"`)는 따로 두지 않는다. 예외를 잡는 스케줄러는 ERROR 로그로 남기므로 "ERROR 로그"가 잡고, 잡지 않은 예외도 Spring이 ERROR로 남긴다.
 - 응답 지연, DB 커넥션 고갈, RDS·ElastiCache·task 자원 알림은 넣지 않는다. 실제 트래픽이 없어 기준을 정할 수 없고, 자원이 다해 task가 죽으면 위 규칙이 잡는다. 부하가 생기면 추가한다.
 - CD 실패는 GitHub Actions 실패 알림으로 받는다.
-- "ERROR 로그"는 KAN-135(슬롯 자동 생성 실패 수정)가 운영에 반영된 뒤 켠다. 반영 전에 켜면 매일 00:05에 울린다.
+- "ERROR 로그"는 `isPaused: true`로 넣고, KAN-135(슬롯 자동 생성 실패 수정)가 운영에 반영된 뒤 `false`로 바꿔 배포한다. 반영 전에 켜면 매일 00:05에 울린다. "결제·환불 최종 실패"는 슬롯 생성과 무관해 바로 켠다.
 
 알림 정책
 - 채널 하나, 심각도 구분 없음
 - 해제(resolved) 알림을 보낸다
-- 같은 알림은 4시간마다 다시 보낸다
+- 같은 규칙끼리 묶고(첫 대기 30초, 묶음 간격 5분), 같은 알림은 4시간마다 다시 보낸다
 
 변경
-- `deploy/monitoring/grafana/provisioning/alerting/alerts.yml` (새 파일): 규칙 5개, Slack contact point, 알림 정책. webhook URL은 환경변수로 참조한다
-- `deploy/monitoring/compose.yml`: grafana에 webhook 환경변수 전달
-- `deploy/monitoring/user-data.sh`: `.env`를 만들 때 webhook도 SSM에서 받는다
-- `cd.yml` `deploy-monitoring`: Run Command 스크립트가 배포마다 SSM에서 `.env`를 다시 만든다. 이미 떠 있는 인스턴스에도 새 비밀값이 들어가야 하기 때문이다
-- 모니터링 역할(`monitoring-ec2-role`)은 `monitoring/*` SSM 읽기와 CloudWatch 지표 읽기 권한이 있다(구현 때 CloudWatch ALB 지표 조회 확인)
-- 반영은 `deploy/monitoring/`이 바뀐 main 배포 때 CD가 한다
+- `deploy/monitoring/grafana/provisioning/alerting/alerts.yml` (새 파일): 규칙 6개, Slack contact point, 알림 정책. webhook URL은 `$ALERT_WEBHOOK_URL`로 참조한다. 알림 문구 템플릿(`{{ $labels.event }}`)은 환경변수로 해석되지 않아 데이터소스 파일과 달리 `$$`로 쓰지 않는다(로컬에서 확인)
+- `deploy/monitoring/compose.yml`: grafana에 `ALERT_WEBHOOK_URL` 전달, 알림 링크가 운영 주소를 가리키도록 `GF_SERVER_ROOT_URL=https://grafana.xevbn.click`
+- `deploy/monitoring/user-data.sh`: `.env`를 만들 때 webhook도 SSM에서 받는다. Slack webhook 형식이 아니거나 작은따옴표가 있으면 실패
+- `cd.yml` `deploy-monitoring`: Run Command 스크립트가 `s3 sync` 뒤 SSM에서 `.env`를 다시 만든다. 이미 떠 있는 인스턴스에도 새 비밀값이 들어가야 하기 때문이다. 값은 인스턴스 역할로 읽어 GitHub을 거치지 않고 출력하지 않는다. 생성 로직을 별도 스크립트 파일로 빼지 않은 이유: dev의 CD가 그 파일이 아직 없는 main 번들을 배포할 때 실패한다
+- 모니터링 역할(`monitoring-ec2-role`)은 `monitoring/*` SSM 읽기(`ALERT_WEBHOOK_URL` 포함)와 CloudWatch 지표 읽기 권한이 있다(권한 시뮬레이션 allowed, ALB `HealthyHostCount` 1분 지표 확인)
+- 반영은 `deploy/monitoring/`이 바뀐 main 배포 때 CD가 한다. 첫 ECS CD와 같은 dev → main 릴리스다
 
 검증
-- [ ] 로컬 Grafana 13.3.0에 provisioning을 올려 규칙 5개와 contact point가 로드됨
+- [x] 로컬 Grafana 13.3.0 + Loki 3.7.9 + Prometheus: 규칙 6개(ERROR 로그만 일시정지), contact point, 알림 정책이 로드됨 (2026-11-09)
+- [x] 로컬 Loki에 가짜 `REFUND_RETRY_EXHAUSTED`와 일반 ERROR 로그를 넣음: 결제 규칙 쿼리는 `REFUND_RETRY_EXHAUSTED`(pgId)만, ERROR 로그 쿼리는 일반 ERROR만 셈. 결제 규칙이 Firing되어 가짜 webhook 수신기에 Slack 형식 메시지가 감(요약에 이벤트·pgId·건수)
+- [x] `deploy-monitoring` Run Command 스크립트를 가짜 aws·docker로 렌더링·실행: `.env`에 두 값이 그대로 쓰이고(`$`, `#` 포함), Slack 형식이 아니면 실패. actionlint(shellcheck 포함) 통과 (기존 `concurrency.queue` 경고만)
 - [ ] 배포 후 contact point 테스트 알림이 Slack에 옴
 - [ ] worker desired 0으로 잠깐 내려 "worker 스케줄러 멈춤" 알림이 오고, 되돌리면 해제 알림이 옴
+- [ ] KAN-135 반영 뒤 "ERROR 로그" 일시정지 해제
 
 ### 7단계: 정리
 

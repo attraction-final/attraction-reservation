@@ -1,6 +1,7 @@
 package com.example.attractionreservation.domain.routeRecommendation.service;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
 import com.example.attractionreservation.domain.routeRecommendation.RouteFixture;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.GeoPoint;
@@ -286,6 +287,20 @@ class RouteRecommendationServiceTest {
                 .hasMessageContaining("[5]")
                 .extracting("errorCode").isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
         verify(attractionPathRepository, never()).findAllBetween(anyCollection());
+    }
+
+    @Test
+    @DisplayName("운영하지 않는 어트랙션이 있으면 ROUTE_ATTRACTION_NOT_OPERATING, 좌표·구간은 조회하지 않는다")
+    void recommend_notOperatingAttraction() {
+        List<Attraction> attractions = attractions(EXAMPLE_FIVE);
+        attractions.get(1).changeOperationStatus(OperationStatus.MAINTENANCE);
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(attractions);
+
+        assertThatThrownBy(() -> service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("[" + EXAMPLE_FIVE.get(1) + "]")
+                .extracting("errorCode").isEqualTo(ErrorCode.ROUTE_ATTRACTION_NOT_OPERATING);
+        verifyNoInteractions(attractionLocationRepository, attractionPathRepository);
     }
 
     @Test

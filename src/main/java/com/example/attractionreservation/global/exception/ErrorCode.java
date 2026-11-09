@@ -106,6 +106,7 @@ public enum ErrorCode {
     LOCATION_OUT_OF_SERVICE_AREA(HttpStatus.BAD_REQUEST, "현재 위치가 서비스 지역에서 너무 멀어 경로를 추천할 수 없습니다."),
     ATTRACTION_LOCATION_NOT_FOUND(HttpStatus.CONFLICT, "좌표 정보가 등록되지 않은 어트랙션이 있습니다."),
     ROUTE_NO_VALID_ORDER(HttpStatus.CONFLICT, "이용 가능한 이동 경로로 선택한 어트랙션을 모두 방문하는 순서가 없습니다."),
+    ROUTE_ATTRACTION_NOT_OPERATING(HttpStatus.CONFLICT, "운영하지 않는 어트랙션이 있어 경로를 추천할 수 없습니다."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),

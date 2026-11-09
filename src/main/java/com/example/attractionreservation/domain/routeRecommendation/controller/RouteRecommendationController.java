@@ -32,7 +32,7 @@ public class RouteRecommendationController {
         return ResponseEntity.ok(ApiResponse.ok("최적 방문 순서를 추천했습니다.", response));
     }
 
-    // 추천에 고를 수 있는 어트랙션 목록. 좌표가 없는 어트랙션은 추천 요청이 409로 실패하므로 화면이 미리 걸러낸다.
+    // 추천에 고를 수 있는 어트랙션 목록 (운영 중이고 좌표가 있는 어트랙션). 나머지는 추천 요청이 409로 실패하므로 화면이 미리 걸러낸다.
     @GetMapping("/attractions")
     public ResponseEntity<ApiResponse<List<RecommendableAttractionResponse>>> findRecommendableAttractions() {
         return ResponseEntity.ok(ApiResponse.ok(

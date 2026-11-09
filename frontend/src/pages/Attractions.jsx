@@ -8,7 +8,6 @@ import { ATTRACTION_STATUS } from '../api/labels.js';
 const PAGE_SIZE = 10;       // 한 번에 불러올 개수 (백엔드 최대 50)
 const SEARCH_DELAY_MS = 300; // 타자를 멈추고 0.3초 뒤에 검색해요
 
-// 키 제한 필터는 백엔드에 키 정보가 없어서 뺐어요. (MVP: "이용 가능 키 및 나이 제한(추후)")
 const FILTERS = [
   { code: 'ALL', label: '전체' },
   { code: 'AVAILABLE', label: '예약 가능' },
@@ -20,6 +19,10 @@ export function statusOf(a) {
   if (a.status === 'OPERATING' && a.soldOut) return ATTRACTION_STATUS.SOLD_OUT;
   return ATTRACTION_STATUS[a.status];
 }
+// 키 필터: 고른 키로 탈 수 있는 어트랙션만 보여 줘요. (null = 키 상관없이 전체)
+// 값은 지금 어트랙션들의 최소 키(100~140cm)에 맞춰 10cm 간격으로 골랐어요.
+const HEIGHTS = [null, 100, 110, 120, 130, 140];
+
 const BADGE_COLOR = { green: 'var(--green-ink)', pink: 'var(--pink-dark)', gray: 'var(--gray-ink)', orange: 'var(--orange-ink)' };
 
 export default function Attractions() {
@@ -27,6 +30,7 @@ export default function Attractions() {
   const [keyword, setKeyword] = useState('');           // 입력칸에 보이는 글자
   const [searchWord, setSearchWord] = useState('');     // 실제로 서버에 보낼 검색어
   const [sort, setSort] = useState('NAME');
+  const [height, setHeight] = useState(null);           // 고른 키(cm). null 이면 키 필터 없음
 
   const [rides, setRides] = useState([]);               // 지금까지 불러온 어트랙션 (페이지를 이어 붙여요)
   const [page, setPage] = useState(0);                  // 마지막으로 불러온 페이지 번호
@@ -51,7 +55,7 @@ export default function Attractions() {
     setLoading(true);
     setError(null);
     try {
-      const res = await attractionApi.search({ page: nextPage, size: PAGE_SIZE, keyword: searchWord, sort, filter });
+      const res = await attractionApi.search({ page: nextPage, size: PAGE_SIZE, keyword: searchWord, sort, filter, height });
       if (myId !== requestId.current) return; // 더 새로운 요청이 있으면 이 응답은 버려요
       setRides((prev) => (append ? [...prev, ...res.items] : res.items));
       setPage(res.page);
@@ -68,7 +72,7 @@ export default function Attractions() {
   useEffect(() => {
     load(0, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, sort, searchWord]);
+  }, [filter, sort, searchWord, height]);
 
   return (
     <div className="screen">
@@ -93,11 +97,29 @@ export default function Attractions() {
             ))}
             <span className="grow" />
             <select aria-label="정렬" value={sort} onChange={(e) => setSort(e.target.value)}
-              style={{ height: 36, borderRadius: 999, border: '1.5px solid var(--line)', background: '#fff', padding: '0 10px', fontSize: 13 }}>
+                    style={{
+                      height: 36, borderRadius: 999, border: '1.5px solid var(--line)', fontSize: 13,
+                      appearance: 'none',                 // 브라우저 기본 화살표 끄기
+                      padding: '0 30px 0 14px',           // 오른쪽 30px = 직접 그린 화살표 자리
+                      background: `#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235B6782' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center`,
+                    }}>
               <option value="NAME">이름순</option>
               <option value="LATEST">최신순</option>
             </select>
           </div>
+          {/* 키 필터: 칩이 많아서 화면이 좁으면 옆으로 밀어서 볼 수 있어요 */}
+          <div className="row gap-8" style={{ overflowX: 'auto', alignItems: 'center', paddingBottom: 10 }}>
+            <span className="small muted" style={{ flexShrink: 0 }}>탑승 키</span>
+            {HEIGHTS.map((h) => (
+              <button key={h ?? 'ALL'} type="button" className={`chip${height === h ? ' on' : ''}`} aria-pressed={height === h}
+                style={{ flexShrink: 0 }} onClick={() => setHeight(h)}>
+                {h == null ? '전체' : `${h}cm`}
+              </button>
+            ))}
+          </div>
+          {height != null && (
+            <span className="small muted">키 {height}cm로 탈 수 있는 어트랙션만 보여요. 키 정보가 없는 어트랙션은 빠져요.</span>
+          )}
         </div>
 
         {/* 첫 페이지를 불러올 때만 전체 "불러오는 중"을 보여 줘요. (더 보기 중에는 목록을 그대로 둬요) */}

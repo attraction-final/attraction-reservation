@@ -34,6 +34,7 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
     public Page<Attraction> searchAttractions(String keyword,
                                               boolean operatingOnly,
                                               boolean reservableOnly,
+                                              Integer height,
                                               String sort,
                                               LocalDateTime reservableFrom,
                                               LocalDateTime todayEnd,
@@ -45,7 +46,8 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                         attraction.deletedAt.isNull(),
                         nameContains(keyword),
                         operatingOnly(operatingOnly),
-                        reservableOnly(reservableOnly, reservableFrom, todayEnd)
+                        reservableOnly(reservableOnly, reservableFrom, todayEnd),
+                        rideableByHeight(height)
                 )
                 .orderBy(createOrderSpecifiers(sort));
 
@@ -66,7 +68,8 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                         attraction.deletedAt.isNull(),
                         nameContains(keyword),
                         operatingOnly(operatingOnly),
-                        reservableOnly(reservableOnly, reservableFrom, todayEnd)
+                        reservableOnly(reservableOnly, reservableFrom, todayEnd),
+                        rideableByHeight(height)
                 )
                 .fetchOne();
 
@@ -102,6 +105,19 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                                 isReservableSlot(reservableFrom, todayEnd)
                         )
                         .exists());
+    }
+
+    // 이 키로 탈 수 있는 어트랙션만 보기
+    // 1) 최소 키 정보가 있어야 한다 (NULL = "등록된 정보 없음" 이라 탈 수 있는지 모르므로 제외)
+    // 2) 최소 키 <= 내 키
+    // 3) 최대 키가 없거나, 내 키 <= 최대 키
+    private BooleanExpression rideableByHeight(Integer height) {
+        if (height == null) {
+            return null;
+        }
+        return attraction.minHeightCm.isNotNull()
+                .and(attraction.minHeightCm.loe(height))
+                .and(attraction.maxHeightCm.isNull().or(attraction.maxHeightCm.goe(height)));
     }
 
     // 정렬: LATEST(최신순)이면 등록일 내림차순을 맨 앞에, 그다음 이름순 → id순

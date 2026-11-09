@@ -11,6 +11,11 @@ import WithdrawSheet from '../components/WithdrawSheet.jsx';
 import OrderCancelSheet from '../components/OrderCancelSheet.jsx';
 
 
+// 결제 내역: 처음에는 최근 몇 건만 보여 주고, 나머지는 "더 보기"로 펼쳐요.
+const ORDER_PREVIEW = 3;
+// 서버에서 받아 오는 최대 건수 (api/index.js 의 orderApi.mine() size 와 같은 값이어야 해요)
+const ORDER_FETCH_MAX = 20;
+
 // 가입 방식 → 화면에 보여 줄 이름
 const SOCIAL_LABEL = { KAKAO: '카카오', GOOGLE: 'Google' };
 
@@ -25,6 +30,7 @@ export default function MyPage() {
   const [sheet, setSheet] = useState(null);
   const [cancelOrder, setCancelOrder] = useState(null); // 취소 확인창에 띄울 주문
   const [orderMessage, setOrderMessage] = useState(''); // 결제 내역 위에 보여 줄 안내
+  const [showAllOrders, setShowAllOrders] = useState(false); // 결제 내역 "더 보기"를 눌렀는지
   useEffect(() => { if (user) setNickname(user.nickname); }, [user]);
 
   // 가입 방식(GET /api/users/me 의 provider): LOCAL | KAKAO | GOOGLE
@@ -107,7 +113,8 @@ export default function MyPage() {
                 {orderMessage && <div className="toast">{orderMessage}</div>}
                 {orders.error && <span className="error-text" role="alert">{orders.error.message}</span>}
                 {orders.data?.length === 0 && <span className="small muted">결제 내역이 없어요.</span>}
-                {orders.data?.map((o) => (
+                {/* 펼치기 전에는 앞에서부터 ORDER_PREVIEW 건만 (목록은 최신순이라 최근 주문이 보여요) */}
+                {(showAllOrders ? orders.data : orders.data?.slice(0, ORDER_PREVIEW))?.map((o) => (
                   <div key={o.id} className="card row between" style={{ borderRadius: 18, padding: '14px 16px' }}>
                     <span className="stack" style={{ gap: 2 }}>
                       <span className="bold" style={{ fontSize: 15 }}>주문번호 {o.id}</span>
@@ -132,6 +139,17 @@ export default function MyPage() {
                     </span>
                   </div>
                 ))}
+                {/* 더 보기 / 접기: 주문이 ORDER_PREVIEW 건보다 많을 때만 보여요 */}
+                {orders.data?.length > ORDER_PREVIEW && (
+                  <button type="button" className="btn btn-sm btn-outline" style={{ width: '100%' }}
+                    onClick={() => setShowAllOrders((v) => !v)}>
+                    {showAllOrders ? '접기' : `더 보기 (${orders.data.length - ORDER_PREVIEW}건)`}
+                  </button>
+                )}
+                {/* 다 펼쳤는데 딱 최대 건수만큼 왔으면, 더 오래된 주문이 있을 수 있다고 알려 줘요 */}
+                {showAllOrders && orders.data?.length === ORDER_FETCH_MAX && (
+                  <span className="small muted" style={{ textAlign: 'center' }}>최근 결제 {ORDER_FETCH_MAX}건까지 보여요.</span>
+                )}
               </div>
 
               {isAdmin && <Link to="/admin" className="btn btn-outline" style={{ height: 48 }}>관리자 화면으로</Link>}

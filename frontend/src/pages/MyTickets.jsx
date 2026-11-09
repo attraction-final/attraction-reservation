@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import Icon from '../components/Icon.jsx';
 import { BackButton, Badge, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
@@ -101,27 +102,45 @@ export default function MyTickets() {
                 <span className="display" style={{ background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: '4px 12px', fontSize: 20 }}>{TICKET_TYPE[featured.type]}</span>
                 <Badge status={TICKET_STATUS[featured.status]} />
               </div>
-              <div className="stack gap-10" style={{ padding: '12px 14px' }}>
-                <div className="stack gap-4" style={{ fontSize: 13 }}>
-                  <span className="bold">{formatDate(featured.date)}</span>
-                  <span className="muted">입장권번호 {featured.id}</span>
-                  <span className="muted">소유자 {featured.ownerNickname}</span>
-                  <span className="muted">입장 가능 {featured.type === 'AFTERNOON' ? '15:00' : '개장'} ~ 폐장</span>
-                  {featured.orderId && <span className="muted">주문번호 {featured.orderId}</span>}
+              {/* 정보는 중요도 순서로: 날짜(크게) → 입장 가능 시간 → 상태별 할 일 → 번호(작게) */}
+              <div className="stack gap-12" style={{ padding: '16px 16px 14px' }}>
+                <div className="stack" style={{ gap: 2 }}>
+                  <span className="display" style={{ fontSize: 22 }}>{formatDate(featured.date)}</span>
+                  <span className="muted" style={{ fontSize: 14 }}>
+                    {featured.type === 'AFTERNOON' ? '15:00' : '개장'} ~ 폐장 입장
+                  </span>
                 </div>
-                {/* 미사용: 입구에서 보여 줄 입장 코드 / 사용중: 이미 입장 완료 */}
-                {featured.status === 'UNUSED'
-                  ? <EntryCode code={featured.code} />
-                  : <span className="small" style={{ color: 'var(--blue-ink)' }}>입장 처리가 끝났어요. 이제 어트랙션을 예약할 수 있어요.</span>}
-              </div>
-              <div style={{ borderTop: '2px dashed var(--line)', margin: '0 14px' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
-                <Link to="/attractions" className="row bold" style={{ height: 50, justifyContent: 'center', fontSize: 14, textDecoration: 'none' }}>어트랙션 예약</Link>
-                {/* 미사용(UNUSED)이고 결제번호(pgId)가 있을 때만 환불할 수 있어요 */}
-                <button type="button" className="bold" disabled={!canRefund(featured)} onClick={() => openRefund(featured)}
-                  style={{ height: 50, border: 0, background: 'transparent', fontSize: 14, color: canRefund(featured) ? 'var(--orange-ink)' : '#AEB8CB' }}>
-                  환불 요청
-                </button>
+
+                {/* 상태에 따라 "지금 할 수 있는 일" 하나만 보여 줘요 */}
+                {featured.status === 'UNUSED' ? (
+                  <>
+                    {/* 미사용: 입구에서 보여 줄 QR + 입장 코드 */}
+                    <EntryCode code={featured.code} />
+                    {/* 환불은 할 수 있을 때만 버튼을 보여 줘요. (못 누르는 회색 버튼은 숨김) */}
+                    {canRefund(featured) && (
+                      <button type="button" className="bold" onClick={() => openRefund(featured)}
+                        style={{ height: 40, border: 0, background: 'transparent', fontSize: 14, color: 'var(--orange-ink)' }}>
+                        환불 요청
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* 사용중: 입장이 끝났으니 바로 예약하러 가기 */}
+                    <span className="row bold" style={{ gap: 6, fontSize: 14, color: 'var(--blue-ink)' }}>
+                      <Icon name="check" size={16} strokeWidth={2.4} />
+                      입장 완료
+                    </span>
+                    <Link to="/attractions" className="btn btn-primary" style={{ height: 50, fontSize: 17, textDecoration: 'none' }}>
+                      어트랙션 예약하기
+                    </Link>
+                  </>
+                )}
+
+                {/* 문의할 때만 필요한 번호는 맨 아래 작게 */}
+                <span className="muted" style={{ fontSize: 11 }}>
+                  입장권 {featured.id}{featured.orderId ? ` · 주문 ${featured.orderId}` : ''}
+                </span>
               </div>
             </div>
           )}
@@ -199,7 +218,7 @@ function canRefund(t) {
 }
 
 // 입장 코드 상자: 입구(관리자 입장 처리 화면)에서 이 코드를 입력하면 입장이 처리돼요.
-// QR 코드는 나중에 이 code 값으로 그리면 돼요 (예: qrcode.react 라이브러리).
+// QR 코드는 같은 code 값을 그림으로 바꾼 거예요. (직원 화면의 QR 스캔은 아직 없어서, 코드 글자도 같이 보여 줘요)
 function EntryCode({ code }) {
   const [copied, setCopied] = useState(false);
 
@@ -216,14 +235,20 @@ function EntryCode({ code }) {
 
   if (!code) return null;
   return (
-    <div className="row between gap-8" style={{ background: 'var(--soft)', borderRadius: 12, padding: '8px 10px' }}>
-      <span className="stack" style={{ gap: 2, minWidth: 0 }}>
-        <span className="small muted">입장 코드 (입구에서 보여 주세요)</span>
-        <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12, wordBreak: 'break-all', userSelect: 'all' }}>{code}</span>
-      </span>
-      <button type="button" className="btn btn-sm btn-outline" onClick={copy} style={{ flexShrink: 0 }}>
-        {copied ? '복사됨' : '복사'}
-      </button>
+    <div className="stack gap-8" style={{ background: 'var(--soft)', borderRadius: 12, padding: '12px 10px 8px' }}>
+      {/* QR 코드: 흰 바탕 + 여백(marginSize)이 있어야 카메라가 잘 읽어요 */}
+      <div style={{ alignSelf: 'center', background: '#fff', borderRadius: 12, padding: 8, lineHeight: 0 }}>
+        <QRCodeSVG value={code} size={148} level="M" marginSize={2} title="입장 QR 코드" />
+      </div>
+      <div className="row between gap-8">
+        <span className="stack" style={{ gap: 2, minWidth: 0 }}>
+          <span className="small muted">입장 코드 (입구에서 보여 주세요)</span>
+          <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12, wordBreak: 'break-all', userSelect: 'all' }}>{code}</span>
+        </span>
+        <button type="button" className="btn btn-sm btn-outline" onClick={copy} style={{ flexShrink: 0 }}>
+          {copied ? '복사됨' : '복사'}
+        </button>
+      </div>
     </div>
   );
 }

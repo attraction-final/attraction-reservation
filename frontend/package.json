@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@portone/browser-sdk": "^0.1.13",
+    "@zxing/browser": "^0.2.1",
+    "@zxing/library": "^0.23.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"

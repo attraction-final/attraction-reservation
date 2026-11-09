@@ -119,6 +119,7 @@ public class AttractionService {
                 condition.keyword(),
                 condition.operating(),
                 condition.reservable(),
+                condition.height(),
                 condition.sort(),
                 reservableFrom,
                 todayEnd,

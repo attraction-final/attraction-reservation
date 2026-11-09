@@ -25,7 +25,13 @@ public record SearchAttractionCondition(
 
         Boolean reservable,
 
-        Boolean operating
+        Boolean operating,
+
+        // 탑승할 사람의 키(cm). 이 키로 탈 수 있는 어트랙션만 조회한다.
+        // null 이면 키 필터를 쓰지 않는다. (기본값을 넣지 않음)
+        @Min(50)
+        @Max(250)
+        Integer height
 ) {
 
     // record의 기본 생성자에서 검색 조건의 기본값을 설정

@@ -75,7 +75,7 @@ class AttractionRepositoryTest {
     // 자주 쓰는 호출을 짧게 묶은 도우미
     private Page<Attraction> search(String keyword, boolean operatingOnly, boolean reservableOnly, String sort) {
         return attractionRepository.searchAttractions(
-                keyword, operatingOnly, reservableOnly, sort,
+                keyword, operatingOnly, reservableOnly, null, sort,
                 RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 10));
     }
 
@@ -147,9 +147,9 @@ class AttractionRepositoryTest {
     void searchAttractions_Paging_ReturnsPartialContentAndTotalCount() {
         // when
         Page<Attraction> firstPage = attractionRepository.searchAttractions(
-                null, false, false, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 2));
+                null, false, false, null, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 2));
         Page<Attraction> secondPage = attractionRepository.searchAttractions(
-                null, false, false, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(1, 2));
+                null, false, false, null, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(1, 2));
 
         // then
         assertThat(firstPage.getContent())
@@ -167,7 +167,7 @@ class AttractionRepositoryTest {
     void searchAttractions_Unpaged_ReturnsAllContent() {
         // when
         Page<Attraction> result = attractionRepository.searchAttractions(
-                null, false, false, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
+                null, false, false, null, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
 
         // then
         assertThat(result.getContent())
@@ -181,13 +181,69 @@ class AttractionRepositoryTest {
     void searchAttractions_UnpagedWithCondition_ReturnsMatchedOnly() {
         // when
         Page<Attraction> result = attractionRepository.searchAttractions(
-                null, true, false, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
+                null, true, false, null, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
 
         // then
         assertThat(result.getContent())
                 .extracting(Attraction::getName)
                 .containsExactly("롤러코스터", "바이킹"); // 점검중인 회전목마 제외
         assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    // ===== 키 필터 =====
+
+    // 이름으로 찾은 어트랙션에 키 정보를 넣는다. (키 정보를 바꾸는 메서드가 엔티티에 없어서 리플렉션 사용)
+    private void setHeight(String name, Integer minHeightCm, Integer maxHeightCm) {
+        Attraction target = attractionRepository.findAll().stream()
+                .filter(a -> a.getName().equals(name))
+                .findFirst()
+                .orElseThrow();
+        ReflectionTestUtils.setField(target, "minHeightCm", minHeightCm);
+        ReflectionTestUtils.setField(target, "maxHeightCm", maxHeightCm);
+        attractionRepository.saveAndFlush(target);
+    }
+
+    private Page<Attraction> searchByHeight(Integer height) {
+        return attractionRepository.searchAttractions(
+                null, false, false, height, "NAME",
+                RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 10));
+    }
+
+    @Test
+    @DisplayName("키를 넣으면 최소 키 이상이고 최대 키 이하인 어트랙션만 조회하고, 키 정보가 없는 어트랙션은 제외한다")
+    void searchAttractions_Height_ReturnsRideableOnly() {
+        // given
+        setHeight("롤러코스터", 130, 195); // 130 ~ 195cm
+        setHeight("바이킹", 110, null);     // 110cm 이상, 최대 키 없음
+        // 회전목마: 키 정보 없음(NULL) → 키 필터를 쓰면 항상 제외
+
+        // when & then
+        assertThat(searchByHeight(100).getContent()).isEmpty();                 // 둘 다 최소 키 미달
+        assertThat(searchByHeight(120).getContent())
+                .extracting(Attraction::getName)
+                .containsExactly("바이킹");                                     // 롤러코스터는 130 미달
+        assertThat(searchByHeight(130).getContent())
+                .extracting(Attraction::getName)
+                .containsExactly("롤러코스터", "바이킹");                       // 경계값 130 포함
+        assertThat(searchByHeight(200).getContent())
+                .extracting(Attraction::getName)
+                .containsExactly("바이킹");                                     // 롤러코스터는 195 초과
+    }
+
+    @Test
+    @DisplayName("키를 넣지 않으면(null) 키 정보가 없는 어트랙션도 그대로 조회한다")
+    void searchAttractions_NullHeight_DoesNotFilter() {
+        // given
+        setHeight("롤러코스터", 130, 195);
+
+        // when
+        Page<Attraction> result = searchByHeight(null);
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Attraction::getName)
+                .containsExactly("롤러코스터", "바이킹", "회전목마");
+        assertThat(result.getTotalElements()).isEqualTo(3);
     }
 
     @Test

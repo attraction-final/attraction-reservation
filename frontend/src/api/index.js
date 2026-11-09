@@ -159,10 +159,12 @@ export const attractionApi = {
   //  - keyword : 이름 검색어 (빈 값이면 안 보내요)
   //  - sort    : 'NAME'(이름순) | 'LATEST'(최신순)  ← 백엔드 @Pattern 이 이 두 개만 받아요
   //  - filter  : 'ALL' | 'AVAILABLE'(예약 가능) | 'OPERATING'(운영 중)
+  //  - height  : 탑승할 사람의 키(cm). null 이면 키 필터를 쓰지 않아요. (백엔드 허용 범위 50~250)
   // 돌려주는 값: { items, page, totalElements, hasNext }
-  search: async ({ page = 0, size = 10, keyword = '', sort = 'NAME', filter = 'ALL' } = {}) => {
+  search: async ({ page = 0, size = 10, keyword = '', sort = 'NAME', filter = 'ALL', height = null } = {}) => {
     const params = { page, size, sort };
     if (keyword.trim()) params.keyword = keyword.trim();
+    if (height != null) params.height = height;
     if (filter === 'AVAILABLE') params.reservable = true;
     if (filter === 'OPERATING') params.operating = true;
     const res = await http.get(`/attractions${toQuery(params)}`);

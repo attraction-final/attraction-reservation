@@ -84,4 +84,4 @@ CREATE DATABASE attraction_reservation;
 - Flyway 도입 전에는 `docs/sql/`의 SQL을 각자 DB에 직접 실행했다.
 - `V1__init.sql`은 Flyway 도입 시점(2026-11-05)의 운영 스키마이고, `V2`는 `docs/sql/kan-103-…`과 같다.
 - 앞으로의 스키마 변경은 `docs/sql/`이 아니라 `db/migration/`에 추가한다.
-- `docs/sql/`에 있지만 아직 엔티티가 없는 테이블(예: KAN-97 `attraction_paths`, `attraction_locations`)은 V1에 없다. 그 기능을 머지할 때 마이그레이션 파일로 추가한다.
+- KAN-136 `attraction_locations`, `attraction_paths`는 엔티티와 함께 `V6`, `V7`로 추가했다. 데이터(구간·좌표)는 마이그레이션에 넣지 않고 `docs/sql/kan-136-route-travel-data.sql`로 배포 후 적용한다.

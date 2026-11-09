@@ -17,7 +17,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -146,7 +146,7 @@ class FlywayMigrationIntegrationTest {
         assertThat(count).isEqualTo(3);
     }
 
-    // validate는 UNIQUE·CHECK 제약을 비교하지 않으므로 V6(attraction_paths) 제약은 실제 INSERT로 검증한다.
+    // validate는 UNIQUE·CHECK 제약을 비교하지 않으므로 V6(attraction_locations)·V7(attraction_paths) 제약은 실제 INSERT로 검증한다.
     @Test
     @DisplayName("같은 출발·도착 어트랙션의 이동 구간을 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
     void insertAttractionPath_DuplicateDirection_ThrowsDuplicateKeyException() {
@@ -176,15 +176,18 @@ class FlywayMigrationIntegrationTest {
         assertThat(count).isEqualTo(2);
     }
 
+    // MySQL의 CHECK 위반(오류 코드 3819, SQLState HY000)은 Spring이 DataIntegrityViolationException으로 번역하지 않고
+    // UncategorizedSQLException으로 던진다. 그래서 예외 타입 대신 위반한 제약 이름으로 검증한다.
     @Test
     @DisplayName("출발과 도착이 같은 이동 구간은 CHECK 제약 위반이 발생한다")
-    void insertAttractionPath_SameAttraction_ThrowsDataIntegrityViolation() {
+    void insertAttractionPath_SameAttraction_ThrowsCheckConstraintViolation() {
         // given
         long a = insertAttractionAndGetId("범퍼카");
 
         // when & then
         assertThatThrownBy(() -> insertAttractionPath(a, a, 10, 1))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_attraction_paths_not_self");
     }
 
     @Test

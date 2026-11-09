@@ -1,5 +1,5 @@
 -- V7__create_attraction_paths.sql
--- KAN-___ 어트랙션 간 도보 이동 구간 (docs/sql/kan-97 1단계와 같은 구조)
+-- KAN-136 어트랙션 간 도보 이동 구간 (docs/sql/kan-97 1단계와 같은 구조)
 -- 한 행 = 출발 → 도착. 방향마다 실측값이 다르므로 방향별로 저장한다.
 -- boolean은 V1 컨벤션(하이버네이트 매핑)에 맞춰 bit(1)로 쓴다.
 CREATE TABLE `attraction_paths` (

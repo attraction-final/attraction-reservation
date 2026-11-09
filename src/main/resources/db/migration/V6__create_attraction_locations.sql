@@ -1,5 +1,5 @@
 -- V6__create_attraction_locations.sql
--- KAN-___ 어트랙션 좌표 (WGS84). 추천 기능 전용이라 attractions에 컬럼을 추가하지 않고 별도 테이블로 둔다.
+-- KAN-136 어트랙션 좌표 (WGS84). 추천 기능 전용이라 attractions에 컬럼을 추가하지 않고 별도 테이블로 둔다.
 CREATE TABLE `attraction_locations` (
                                         `id` bigint NOT NULL AUTO_INCREMENT,
                                         `created_at` datetime(6) NOT NULL,

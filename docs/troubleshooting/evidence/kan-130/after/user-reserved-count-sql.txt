@@ -1,5 +1,0 @@
-select count(r1_0.id) from reservations r1_0 where r1_0.user_id=? and r1_0.reservation_status=?
-
-JDBC bindings:
-setLong [1, 101]
-setString [2, RESERVED]

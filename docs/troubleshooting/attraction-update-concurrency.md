@@ -1,10 +1,14 @@
 # 어트랙션 일반 수정의 운영 상태·삭제 결과 덮어쓰기 트러블슈팅
 
 > **KAN-102 · 일반 수정과 운영 중단·삭제의 동시성 보호**
->
-> 실제 MySQL에서 삭제가 먼저 commit되어도, 이전에 조회한 엔티티로 일반 수정을 완료하면 삭제 결과가 되돌아가는 문제를 재현했다.
-> 일반 수정에도 기존 비관적 잠금 조회를 적용하고, 삭제·운영 중단과의 두 선행 순서를 검증했다.
-> 관련 테스트 실행 후 생성된 XML에서 51개 Test Suite, 353개 테스트의 통과를 확인했다.
+
+| 항목 | 핵심 내용 |
+| --- | --- |
+| 재현 | 삭제가 먼저 커밋돼도 오래된 일반 수정이 OPERATING·deletedAt=null로 덮어씀 |
+| 원인 | 일반 수정만 일반 조회를 사용하여 상태 변경·삭제의 행 잠금에 참여하지 않음 |
+| 해결 | 일반 수정도 기존 findActiveByIdForUpdate() 사용 |
+| 검증 | 수정·삭제와 수정·운영 중단의 양쪽 선행 순서 4개. 관련 51개 Suite·353개 통과 |
+| 한계 | 수정 전 실제 실패 재현은 삭제 경합. HTTP·Security·실제 Redis·모든 잠금 조합은 미검증 |
 
 ## 1. 문제와 영향
 
@@ -207,15 +211,10 @@ Optional<Attraction> findActiveByIdForUpdate(@Param("attractionId") Long attract
 
 마지막 실행 후 `build/test-results/test`의 XML 51개에서 확인한 결과:
 
-```text
-Test Suite: 51
-Tests:      353
-Failures:   0
-Errors:     0
-Skipped:    0
-
-AttractionUpdateConcurrencyIntegrationTest: 4개 모두 통과
-```
+| 범위 | 테스트 수 | 결과 |
+| --- | ---: | --- |
+| 관련 회귀 51개 Suite | 353 | 실패·오류·건너뜀 0 |
+| 포함된 수정 경합 통합 테스트 | 4 | 모두 통과 |
 
 동시성 테스트 XML의 시작 시각은 **2026-11-03 16:34:21 KST**다. 테스트는 사용자가 실행했고, 문서 작성 시 생성된 리포트를 읽어 확인했다. 전체 프로젝트 테스트의 통과를 의미하지는 않는다.
 

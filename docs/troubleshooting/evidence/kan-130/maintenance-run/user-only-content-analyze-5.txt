@@ -1,8 +1,0 @@
-EXPLAIN	
--> Limit: 10 row(s)  (cost=525 rows=10) (actual time=0.13..0.194 rows=10 loops=1)
-    -> Nested loop inner join  (cost=525 rows=500) (actual time=0.13..0.193 rows=10 loops=1)
-        -> Nested loop inner join  (cost=350 rows=500) (actual time=0.124..0.171 rows=10 loops=1)
-            -> Index lookup on r1_0 using idx_reservations_user_status_id (user_id=101) (reverse)  (cost=175 rows=500) (actual time=0.118..0.124 rows=10 loops=1)
-            -> Single-row index lookup on as1_0 using PRIMARY (id=r1_0.attraction_slot_id)  (cost=0.25 rows=1) (actual time=0.0044..0.00441 rows=1 loops=10)
-        -> Single-row index lookup on a1_0 using PRIMARY (id=as1_0.attraction_id)  (cost=0.25 rows=1) (actual time=0.00199..0.002 rows=1 loops=10)
-	

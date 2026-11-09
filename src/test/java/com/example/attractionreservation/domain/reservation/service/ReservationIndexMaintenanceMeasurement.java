@@ -21,11 +21,10 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-// ReservationListIndexIntegrationTest 전용 보조 코드다. 별도의 테스트나 업무 Service는 아니다.
+// 예약 목록의 인덱스 크기·쓰기 비용을 수집하는 공통 테스트 도우미다. 업무 Service는 아니다.
 // 모든 DDL·DML은 해당 테스트의 MySQL 컨테이너에서만 수행한다.
 final class ReservationIndexMaintenanceMeasurement {
 
-    private static final String INDEX = "idx_reservations_user_status_id";
     private static final int BATCH_SIZE = 1000;
     private static final String COLUMNS = "id,created_at,updated_at,cancel_reason,cancelled_at,"
             + "reservation_number,reservation_status,attraction_slot_id,ticket_id,user_id";
@@ -33,11 +32,20 @@ final class ReservationIndexMaintenanceMeasurement {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final JdbcTemplate statisticsJdbc;
+    private final String issue;
+    private final String indexName;
 
     ReservationIndexMaintenanceMeasurement(JdbcTemplate jdbc, PlatformTransactionManager manager,
                                           MySQLContainer mysql) {
+        this(jdbc, manager, mysql, "KAN-130", "idx_reservations_user_status_id");
+    }
+
+    ReservationIndexMaintenanceMeasurement(JdbcTemplate jdbc, PlatformTransactionManager manager,
+                                          MySQLContainer mysql, String issue, String indexName) {
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(manager);
+        this.issue = issue;
+        this.indexName = indexName;
         // mysql.innodb_index_stats 조회에만 컨테이너 root 계정을 사용한다. 접속 정보는 기록하지 않는다.
         this.statisticsJdbc = new JdbcTemplate(
                 new DriverManagerDataSource(mysql.getJdbcUrl(), "root", mysql.getPassword()));
@@ -48,7 +56,7 @@ final class ReservationIndexMaintenanceMeasurement {
         long initialRows = jdbc.queryForObject("SELECT COUNT(*) FROM reservations", Long.class);
         long lastId = jdbc.queryForObject("SELECT MAX(id) FROM reservations", Long.class);
         assertThat(indexDefinition("reservations")).anySatisfy(index ->
-                assertThat(index.get("indexName")).isEqualTo(INDEX));
+                assertThat(index.get("indexName")).isEqualTo(indexName));
 
         // given: 스키마와 데이터를 복제하고 후보 인덱스 유무만 다르게 한다.
         for (Variant variant : Variant.values()) {
@@ -58,8 +66,8 @@ final class ReservationIndexMaintenanceMeasurement {
         }
         List<Map<String, Object>> withoutIndexes = indexDefinition(Variant.WITHOUT.table);
         List<Map<String, Object>> withIndexes = indexDefinition(Variant.WITH.table);
-        assertThat(withoutIndexes).noneSatisfy(index -> assertThat(index.get("indexName")).isEqualTo(INDEX));
-        assertThat(withIndexes.stream().filter(index -> !INDEX.equals(index.get("indexName"))).toList())
+        assertThat(withoutIndexes).noneSatisfy(index -> assertThat(index.get("indexName")).isEqualTo(indexName));
+        assertThat(withIndexes.stream().filter(index -> !indexName.equals(index.get("indexName"))).toList())
                 .containsExactlyElementsOf(withoutIndexes);
         recordSizes(output.resolve("sizes-at-100000-rows.txt"), initialRows);
 
@@ -101,7 +109,8 @@ final class ReservationIndexMaintenanceMeasurement {
         recordSizes(output.resolve("sizes-after-writes.txt"), finalRows);
         write(output.resolve("trials.csv"), trialsCsv(trials));
         write(output.resolve("summary.txt"), summary(trials));
-        write(output.resolve("method.txt"), "issue=KAN-130\ninitialRowsPerTable=" + initialRows
+        write(output.resolve("method.txt"), "issue=" + issue + "\nindexName=" + indexName
+                + "\ninitialRowsPerTable=" + initialRows
                 + "\nrowsPerOperation=" + BATCH_SIZE + "\nwarmupIterations=1\nmeasuredIterations=" + repetitions
                 + "\nfinalRowsPerTable=" + finalRows
                 + "\norder=without/with on even iteration; with/without on odd iteration"
@@ -117,14 +126,14 @@ final class ReservationIndexMaintenanceMeasurement {
     private void createCopy(Variant variant, long expectedRows) {
         jdbc.execute("CREATE TABLE " + variant.table + " LIKE reservations");
         if (variant == Variant.WITHOUT) {
-            jdbc.execute("ALTER TABLE " + variant.table + " DROP INDEX " + INDEX);
+            jdbc.execute("ALTER TABLE " + variant.table + " DROP INDEX " + indexName);
         }
         // CREATE TABLE LIKE는 FK를 복제하지 않으므로 양쪽에 동일한 참조 관계를 다시 추가한다.
         // https://dev.mysql.com/doc/refman/8.4/en/create-table-like.html
         jdbc.execute("ALTER TABLE " + variant.table
-                + " ADD CONSTRAINT fk_kan130_" + variant.label + "_user FOREIGN KEY (user_id) REFERENCES users(id),"
-                + " ADD CONSTRAINT fk_kan130_" + variant.label + "_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id),"
-                + " ADD CONSTRAINT fk_kan130_" + variant.label + "_slot FOREIGN KEY (attraction_slot_id) REFERENCES attraction_slots(id)");
+                + " ADD CONSTRAINT fk_index_cost_" + variant.label + "_user FOREIGN KEY (user_id) REFERENCES users(id),"
+                + " ADD CONSTRAINT fk_index_cost_" + variant.label + "_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id),"
+                + " ADD CONSTRAINT fk_index_cost_" + variant.label + "_slot FOREIGN KEY (attraction_slot_id) REFERENCES attraction_slots(id)");
         transaction.executeWithoutResult(status -> jdbc.update("INSERT INTO " + variant.table + " (" + COLUMNS
                 + ") SELECT " + COLUMNS + " FROM reservations ORDER BY id"));
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM " + variant.table, Long.class)).isEqualTo(expectedRows);
@@ -139,8 +148,8 @@ final class ReservationIndexMaintenanceMeasurement {
         long attractionId = jdbc.queryForObject("SELECT MAX(id) + 1 FROM attractions", Long.class);
         jdbc.update("INSERT INTO attractions (id,created_at,updated_at,description,duration_minutes,"
                         + "entrance_move_minutes,location,name,operation_status) "
-                        + "VALUES (?,?,?,'쓰기 비용 측정용',1,1,'A구역','KAN-130 쓰기 측정 시설','OPERATING')",
-                attractionId, createdAt, createdAt);
+                        + "VALUES (?,?,?,'쓰기 비용 측정용',1,1,'A구역',?,'OPERATING')",
+                attractionId, createdAt, createdAt, issue + " 쓰기 측정 시설");
         for (int slot = 0; slot < slotCount; slot++) {
             var start = visitDate.atTime(20, 0).plusMinutes(slot);
             jdbc.update("INSERT INTO attraction_slots (id,created_at,updated_at,auto_closed,capacity,ends_at,"
@@ -193,9 +202,9 @@ final class ReservationIndexMaintenanceMeasurement {
 
     private Trial trial(Variant variant, String operation, int iteration, long rowsBefore, double milliseconds) {
         Trial trial = new Trial(variant, operation, iteration, rowsBefore, milliseconds);
-        System.out.printf(Locale.ROOT, "event=RESERVATION_INDEX_WRITE_MEASURED variant=%s operation=%s "
+        System.out.printf(Locale.ROOT, "event=RESERVATION_INDEX_WRITE_MEASURED issue=%s indexName=%s variant=%s operation=%s "
                         + "iteration=%d warmup=%s count=%d rowsBefore=%d durationMs=%.3f%n",
-                variant.label, operation, iteration, iteration == 0, BATCH_SIZE, rowsBefore, milliseconds);
+                issue, indexName, variant.label, operation, iteration, iteration == 0, BATCH_SIZE, rowsBefore, milliseconds);
         return trial;
     }
 
@@ -222,10 +231,10 @@ final class ReservationIndexMaintenanceMeasurement {
         assertThat(sizes).isNotEmpty();
         assertThat(sizes).anySatisfy(size -> {
             assertThat(size.get("tableName")).isEqualTo(Variant.WITH.table);
-            assertThat(size.get("indexName")).isEqualTo(INDEX);
+            assertThat(size.get("indexName")).isEqualTo(indexName);
             assertThat(((Number) size.get("estimatedBytes")).longValue()).isPositive();
         });
-        write(path, "rowsPerTable=" + rowCount + "\npageSizeBytes="
+        write(path, "indexName=" + indexName + "\nrowsPerTable=" + rowCount + "\npageSizeBytes="
                 + statisticsJdbc.queryForObject("SELECT @@innodb_page_size", Long.class)
                 + "\nsource=mysql.innodb_index_stats, stat_name=size\n" + sizes);
     }
@@ -241,7 +250,8 @@ final class ReservationIndexMaintenanceMeasurement {
     }
 
     private String summary(List<Trial> trials) {
-        StringBuilder summary = new StringBuilder("unit=ms per 1000 rows including transaction commit\n");
+        StringBuilder summary = new StringBuilder("issue=" + issue + "\nindexName=" + indexName
+                + "\nunit=ms per 1000 rows including transaction commit\n");
         for (Variant variant : Variant.values()) {
             for (String operation : List.of("insert", "update")) {
                 List<Double> values = trials.stream().filter(trial -> trial.variant() == variant
@@ -269,8 +279,8 @@ final class ReservationIndexMaintenanceMeasurement {
     }
 
     private enum Variant {
-        WITHOUT("without", "kan130_reservations_without_index"),
-        WITH("with", "kan130_reservations_with_index");
+        WITHOUT("without", "reservation_cost_without_index"),
+        WITH("with", "reservation_cost_with_index");
 
         private final String label;
         private final String table;

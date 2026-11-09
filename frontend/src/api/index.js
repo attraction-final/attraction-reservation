@@ -71,8 +71,11 @@ function toAttractionDetail(d) {
     rideMinutes: d.durationMinutes,
     description: d.description,
     status: safeStatus(d.operationStatus),
-    heightLimited: false,
-    heightLimitCm: null,
+    // 키 정보: 백엔드 값이 없으면(null) 화면에서 "정보 없음"으로 보여 준다
+    minHeightCm: d.minHeightCm ?? null,
+    maxHeightCm: d.maxHeightCm ?? null,
+    guardianHeightCm: d.guardianHeightCm ?? null,
+    heightLimited: d.minHeightCm != null || d.maxHeightCm != null,
     soldOut: false,
     nextSlot: null,
   };
@@ -185,6 +188,15 @@ export const attractionApi = {
     ]);
     return res.slots.map((s) => markMine(s, toSlot(s), myReserved));
   },
+};
+
+// ───────── 어트랙션 질문 (Q&A) ✅ ─────────
+export const attractionQuestionApi = {
+  // [POST /api/attractions/questions] { question } → { type, intent, attractionId, attractionName, answer, candidates }
+  //  - 로그인 필요, CSRF 도장은 필요 없어요. (http.js 가 알아서 처리)
+  //  - 되묻기(NEED_CLARIFICATION)·미지원(UNSUPPORTED)도 정상 처리라 200 이에요.
+  //  - 서버에 Jev API 키가 없거나 Jev 가 실패하면 503 이 와요.
+  ask: (question) => http.post('/attractions/questions', { question }),
 };
 
 // ───────── 파크 정보 ─────────

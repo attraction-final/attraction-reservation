@@ -107,6 +107,7 @@ class AdminAttractionControllerTest {
                 .thenReturn(new SearchAttractionResponse(
                         1L, "새이름", "빠른 놀이기구", "A구역", 10, 5,
                         OperationStatus.OPERATING,
+                        null, null, null,  // 키 정보 없음
                         LocalDateTime.of(2026, 11, 2, 10, 0),
                         LocalDateTime.of(2026, 11, 2, 11, 0)
                 ));

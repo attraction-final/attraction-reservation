@@ -75,9 +75,14 @@ export default function AttractionDetail() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
           <InfoTile label="탑승 시간" value={`${a.rideMinutes}분`} />
-          <InfoTile label="위치" value={a.zone} />
-          <InfoTile label="키 제한 (추후)" value={a.heightLimitCm ? `${a.heightLimitCm}cm` : '[N]cm'} dashed />
+          <InfoTile label="위치" value={a.zone} small />
+          <InfoTile label="키 제한" value={heightText(a)} small dashed={!a.heightLimited} />
         </div>
+        {a.guardianHeightCm != null && (
+          <span className="small muted" style={{ marginTop: -6 }}>
+            키 {a.guardianHeightCm}cm 이하는 보호자와 함께 타야 해요.
+          </span>
+        )}
 
         <div className="stack gap-10">
           <div className="row between" style={{ alignItems: 'baseline' }}>
@@ -119,13 +124,30 @@ export default function AttractionDetail() {
   );
 }
 
-function InfoTile({ label, value, dashed }) {
+// small: 글자가 긴 값(위치, 키 제한)은 조금 작게 보여 준다
+function InfoTile({ label, value, dashed, small }) {
   return (
     <div className="stack" style={{ alignItems: 'center', gap: 2, borderRadius: 16, padding: '10px 6px', background: dashed ? '#F7F9FC' : 'var(--soft)', border: dashed ? '1.5px dashed #C9D4E3' : 0 }}>
       <span style={{ fontSize: 11, color: 'var(--muted)' }}>{label}</span>
-      <span className="display" style={{ fontSize: 18 }}>{value}</span>
+      <span
+        className="display"
+        style={{ fontSize: small ? 15 : 18, textAlign: 'center', lineHeight: 1.3, wordBreak: 'keep-all' }}
+      >
+        {value}
+      </span>
     </div>
   );
+}
+
+// 키 제한 문구 만들기
+// 최소+최대: "130~195cm" / 최소만: "110cm 이상" / 최대만: "195cm 이하" / 둘 다 없음: "정보 없음"
+function heightText(a) {
+  const min = a.minHeightCm;
+  const max = a.maxHeightCm;
+  if (min != null && max != null) return `${min}~${max}cm`;
+  if (min != null) return `${min}cm 이상`;
+  if (max != null) return `${max}cm 이하`;
+  return '정보 없음';
 }
 
 // 시간 버튼 하나: 상태에 따라 색이 달라져요.

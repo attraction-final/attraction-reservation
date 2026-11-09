@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
-import { Badge, TabBar } from '../components/ui.jsx';
+import { AskFab, Badge, TabBar } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { attractionApi, parkApi, reservationApi, ticketApi } from '../api/index.js';
 import { TICKET_STATUS, TICKET_TYPE, formatDate } from '../api/labels.js';
@@ -122,7 +122,8 @@ export default function Home() {
             <h2 className="h2">지금 예약 가능한 어트랙션</h2>
             <Link to="/attractions" className="bold" style={{ fontSize: 13, textDecoration: 'none' }}>전체</Link>
           </div>
-          <div className="row gap-12" style={{ overflowX: 'auto', paddingBottom: 6, paddingRight: 16, alignItems: 'stretch' }}>
+          {/* paddingRight 88 = 동그란 버튼 56 + 양옆 여백 16·16 → 끝까지 넘기면 마지막 카드가 버튼 왼쪽에서 멈춰요 */}
+          <div className="row gap-12" style={{ overflowX: 'auto', paddingBottom: 6, paddingRight: 88, alignItems: 'stretch' }}>
             {(rides.data || []).map((a) => (
               <Link key={a.id} to={`/attractions/${a.id}`} className="card card-link" style={{ width: 150, flexShrink: 0, borderRadius: 18, overflow: 'hidden' }}>
                 <img src={a.image} alt={a.name} style={{ width: '100%', height: 96, objectFit: 'cover' }} />
@@ -138,7 +139,10 @@ export default function Home() {
             ))}
           </div>
         </div>
+        {/* 오른쪽 아래 동그란 버튼에 마지막 내용이 가리지 않게 빈 공간을 둬요 */}
+        <div style={{ height: 72 }} />
       </div>
+      <AskFab />
       <TabBar />
     </div>
   );

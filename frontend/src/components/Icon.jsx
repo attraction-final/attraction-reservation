@@ -22,6 +22,8 @@ const PATHS = {
   check: <path d="M5 12l5 5 9-10" />,
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />,
   edit: <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />,
+  // 말풍선 (어트랙션 질문 버튼)
+  chat: <><path d="M4 5.5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-9l-4.5 3.5V17.5H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z" /><path d="M8 10.5h8M8 13.5h5" /></>,
   walk: <><circle cx="13" cy="4" r="2" /><path d="M9 21l2-6 3 3v3M7 12l3-4 4 1 2 4" /></>,
 };
 

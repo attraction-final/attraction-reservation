@@ -6,6 +6,7 @@ import Home from './pages/Home.jsx';
 import Login from './pages/Login.jsx';
 import Attractions from './pages/Attractions.jsx';
 import AttractionDetail from './pages/AttractionDetail.jsx';
+import AttractionQuestion from './pages/AttractionQuestion.jsx';
 import Tickets from './pages/Tickets.jsx';
 import Checkout from './pages/Checkout.jsx';
 import PaymentComplete from './pages/PaymentComplete.jsx';
@@ -36,6 +37,8 @@ export default function App() {
         {/* 소셜 로그인을 마치고 백엔드가 돌려보내 주는 곳 */}
         <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="/attractions" element={<Attractions />} />
+        {/* /attractions/:id 보다 위에 둬야 "ask" 가 id 로 읽히지 않아요 */}
+        <Route path="/attractions/ask" element={<AttractionQuestion />} />
         <Route path="/attractions/:id" element={<AttractionDetail />} />
         <Route path="/tickets" element={<Tickets />} />
         <Route path="/checkout/:orderId" element={<Checkout />} />

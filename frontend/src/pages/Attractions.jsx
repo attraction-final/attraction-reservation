@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
-import { BackButton, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
+import { AskFab, BackButton, Empty, ErrorBox, Loading, TabBar } from '../components/ui.jsx';
 import { attractionApi } from '../api/index.js';
 import { ATTRACTION_STATUS } from '../api/labels.js';
 
@@ -134,7 +134,10 @@ export default function Attractions() {
             </button>
           </div>
         )}
+        {/* 오른쪽 아래 동그란 버튼에 마지막 내용이 가리지 않게 빈 공간을 둬요 */}
+        <div style={{ height: 72 }} />
       </div>
+      <AskFab />
       <TabBar />
     </div>
   );

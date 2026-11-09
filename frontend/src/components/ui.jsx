@@ -64,6 +64,26 @@ export function Empty({ children }) {
   return <div className="state-box">{children}</div>;
 }
 
+// ───────── 어트랙션 질문 버튼 (화면 오른쪽 아래에 떠 있는 동그란 버튼) ─────────
+// 사용법: 화면의 <TabBar /> 바로 위에 <AskFab /> 한 줄만 넣으면 돼요.
+//  - .screen 이 position: relative 라서, 그 안에서 오른쪽 아래에 붙어요.
+//  - bottom 92px = 탭바 높이 76px + 띄우는 간격 16px
+//  - z-index 5 : 예약 취소 같은 아래 시트(.sheet-backdrop, z-index 10)보다는 아래에 있어야 해요.
+export function AskFab() {
+  return (
+    <Link to="/attractions/ask" aria-label="어트랙션에 물어보기" title="어트랙션에 물어보기"
+      style={{
+        position: 'absolute', right: 16, bottom: 92, zIndex: 5,
+        width: 56, height: 56, borderRadius: '50%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--blue)', color: '#fff',
+        boxShadow: '0 6px 16px rgba(47, 111, 219, 0.35)',
+      }}>
+      <Icon name="chat" size={26} strokeWidth={2} />
+    </Link>
+  );
+}
+
 // ───────── 하단 탭바 ─────────
 const USER_TABS = [
   { to: '/', label: '홈', icon: 'home', end: true },

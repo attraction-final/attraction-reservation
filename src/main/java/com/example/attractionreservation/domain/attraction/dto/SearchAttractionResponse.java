@@ -19,6 +19,10 @@ public record SearchAttractionResponse(
         Integer durationMinutes,
         Integer entranceMoveMinutes,
         OperationStatus operationStatus,
+        // 탑승 키 정보 (KAN-117). 모두 NULL 가능: NULL은 "제한 없음"이 아니라 "등록된 정보 없음"
+        Integer minHeightCm,       // 혼자 탈 수 있는 최소 키
+        Integer maxHeightCm,       // 탈 수 있는 최대 키
+        Integer guardianHeightCm,  // 이 키 이하는 보호자와 함께 타야 함
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime createdAt,
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
@@ -34,6 +38,9 @@ public record SearchAttractionResponse(
                 attraction.getDurationMinutes(),
                 attraction.getEntranceMoveMinutes(),
                 attraction.getOperationStatus(),
+                attraction.getMinHeightCm(),
+                attraction.getMaxHeightCm(),
+                attraction.getGuardianHeightCm(),
                 KstTime.toLocalDateTime(attraction.getCreatedAt()),
                 KstTime.toLocalDateTime(attraction.getUpdatedAt())
         );

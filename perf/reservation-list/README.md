@@ -3,7 +3,7 @@
 실제 Spring Boot 앱과 Spring Security를 거쳐 응답 정확성을 확인한다.
 smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
 주기적 자원 수집과 20 VUs 측정까지 확인했다. load-02·03의 마지막 Docker 수집은 각 1회 누락됐다.
-50 VUs의 load-05에서 기능 검증을 통과했고 p99 증가를 관측했다. 다음은 같은 50 VUs 반복 측정이다.
+수집 종료 순서를 개선한 load-07도 50 VUs 기능 검증을 통과했고 수집·정리 오류는 없었다. 복구·중단 경로는 아직 미검증이다.
 운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
@@ -174,6 +174,23 @@ TEST_VUS=50 bash perf/reservation-list/run.sh load-06 load
 load-05의 앱 CPU 97.36%는 VU 시작 전의 첫 표본이었다. 순수 목록 처리의 CPU 최대로 해석하지 않는다.
 단일 반복만으로 원인이나 SLO 충족을 확정하지 않고 앞선 실행과 함께 문서에 기록한다.
 
+### 9. 수집 종료 순서 개선 검증
+
+```bash
+TEST_VUS=50 bash perf/reservation-list/run.sh load-07 load
+```
+
+load-06은 목록 5,960건과 check 29,801회가 통과했지만 마지막 stats에서 이미 삭제된 k6를 조회하는 오류가 발생했다.
+측정용 k6에는 `--rm`을 사용하지 않고, 종료 후 수집기를 회수한 다음 이번 실행 owner label·Compose 소속을 확인해 정리한다.
+동일 이름의 기존 컨테이너가 있으면 중단한다. 사용자 중단 시에도 이번 실행 소유의 k6와 수집기만 정리한다.
+앱·DB·Redis와 기존 데이터는 정리 대상이 아니다.
+
+프로세스가 멈추는 순간 stats 자체가 끝나는 경우도 있어, stopped 상태가 확인된 경우의 경계 오류는 별도 기록한다.
+batch stats 실패 시 앱·DB·Redis를 다시 수집해 전체 서버 표본 누락을 줄이고 복구 표본에는 별도 표시와 시각을 남긴다.
+그 외 오류는 일반 수집 오류로 유지한다. 부하·시간·자원 제한은 이전과 동일하다.
+load-07에서 측정·수집·정리 코드 모두 0, 오류·경계 이벤트 파일 비어 있음, Docker 표본 124개·앱 scrape 31회를 확인했다.
+복구 표본이 없어 복구 분기와 중단 시 cleanup까지 검증한 것은 아니다. 다시 실행할 때는 새로운 RUN_ID를 사용한다.
+
 ## 결과 확인
 
 결과는 `perf/reservation-list/results/<RUN_ID>/`에 저장되며 Git에서 제외한다.
@@ -188,6 +205,9 @@ load-05의 앱 CPU 97.36%는 VU 시작 전의 첫 표본이었다. 순수 목록
 | `resource-samples.jsonl` | load의 앱·MySQL·Redis·측정용 k6 Docker stats와 주기 시작/종료 시각 | 표본 최대값은 절대적인 순간 최대값이 아님. 시작/종료 경계에는 k6 표본이 없을 수 있음 |
 | `metrics-samples.txt` | load의 주기별 Hikari·JVM·HTTP 지표, scrape 완료 시각 | 여러 scrape를 이어 둔 분석용 텍스트이며 단일 Prometheus scrape 입력으로 쓰지 않음 |
 | `sampling-errors.txt`, `sampling-exit-code.txt` | 수집 오류·프로세스 종료 코드 | 종료 코드 0만으로 누락 없는 수집을 보장하지 않음. 오류 파일과 주기·컨테이너별 표본 확인 |
+| `sampling-boundary-events.txt` | k6 종료 상태가 확인된 경계 누락·오류와 원문 | k6 표본 누락을 정상 표본으로 세지 않음. 일반 오류와 별도로 확인 |
+| `docker-stats-last-stderr.txt` | 마지막 batch stats의 stderr 진단용 파일 | 경계 이벤트/일반 오류 파일과 함께 해석 |
+| `cleanup-exit-code.txt`, `cleanup-errors.txt` | 이번 실행 소유의 k6 정리 결과 | 정상 정리 코드는 0. API 종료 코드와 별개이며 실패 시 임의로 다른 컨테이너를 제거하지 않음 |
 | `exit-code.txt` | k6 종료 코드, 정상 통과는 0 | 준비 단계 실패나 강제 종료 시 파일 자체가 없을 수 있음 |
 
 목록 측정 지표는 `reservation_list_duration`, `reservation_list_all_duration`,
@@ -204,7 +224,7 @@ load-05의 앱 CPU 97.36%는 VU 시작 전의 첫 표본이었다. 순수 목록
 ## 다음 단계
 
 첫 측정 전에 임시 p95 기준을 선택한다. 첫 10 VUs 결과를 확인한 뒤 부하 단계를 늘릴지 판단한다.
-50 VUs의 p99 증가를 반복 관측한다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
+load-07의 정상 종료에서 수집·정리 동작을 확인했다. 추가 부하와 병목 분석은 이후 단계이며, 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
 Docker stats와 앱 scrape는 동시에 취득한 값이 아니며 기록된 관측 시각을 함께 확인한다.
 Docker 메모리와 JVM heap 사용량은 서로 다른 지표다. 수집기 자체의 CPU·I/O 비용도 있으므로 load-01과의 시간 차이를 최적화 효과로 주장하지 않는다.
 앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로
@@ -223,4 +243,5 @@ docker compose -f perf/reservation-list/compose.yaml down
 - [k6 lifecycle: setup과 VU 실행 구분](https://grafana.com/docs/k6/latest/using-k6/test-lifecycle/)
 - [k6 handleSummary 결과 저장](https://grafana.com/docs/k6/latest/results-output/end-of-test/custom-summary/)
 - [Docker stats의 형식과 메모리 해석](https://docs.docker.com/reference/cli/docker/container/stats/)
+- [Compose run의 컨테이너 자동 삭제와 label](https://docs.docker.com/reference/cli/docker/compose/run/)
 - 현재 ReservationController, SearchReservationListResponse, ReservationCustomRepositoryImpl, AuthController, CsrfController와 Flyway 스키마를 기준으로 작성했다.

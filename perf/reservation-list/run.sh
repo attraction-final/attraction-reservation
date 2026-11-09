@@ -48,6 +48,10 @@ snapshot() {
     awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_)/'
 }
 sampler_pid=''
+measurement_container="reservation-perf-$run_id"
+measurement_owner="$run_id-$$"
+measurement_started=false
+measurement_cleaned=false
 stop_sampler() {
   if [[ -n "$sampler_pid" ]]; then
     : > "$target/sampling-stop"
@@ -57,6 +61,35 @@ stop_sampler() {
     if [[ "$sampling_exit" -ne 0 ]]; then echo '자원 수집 프로세스가 비정상 종료됐어요. 결과 해석 시 확인해 주세요.' >&2; fi
     sampler_pid=''
   fi
+}
+cleanup_measurement() {
+  stop_sampler
+  if [[ "$measurement_started" != true || "$measurement_cleaned" == true ]]; then return 0; fi
+  measurement_cleaned=true
+  local cleanup_exit=0
+  local identity
+  identity="$(MSYS_NO_PATHCONV=1 docker inspect --format \
+    '{{index .Config.Labels "kan134.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}' \
+    "$measurement_container" 2>> "$target/cleanup-errors.txt" | tr -d '\r')" || cleanup_exit=1
+  # 이번 실행의 label과 Compose 소속이 일치하는 측정용 k6만 정리한다.
+  if [[ "$identity" != "$measurement_owner|attraction-reservation-perf|k6" ]]; then
+    echo '측정 컨테이너 소유 확인 실패. 컨테이너를 임의로 제거하지 않습니다.' >> "$target/cleanup-errors.txt"
+    cleanup_exit=1
+  else
+    local running
+    running="$(MSYS_NO_PATHCONV=1 docker inspect --format '{{.State.Running}}' \
+      "$measurement_container" 2>> "$target/cleanup-errors.txt" | tr -d '\r')" || cleanup_exit=1
+    if [[ "$running" == true ]]; then
+      # 사용자 중단 시에도 이번 테스트의 k6만 종료한다. 앱·DB·Redis에는 적용하지 않는다.
+      MSYS_NO_PATHCONV=1 docker stop --timeout 5 "$measurement_container" \
+        >/dev/null 2>> "$target/cleanup-errors.txt" || cleanup_exit=1
+    fi
+    MSYS_NO_PATHCONV=1 docker rm "$measurement_container" \
+      >/dev/null 2>> "$target/cleanup-errors.txt" || cleanup_exit=1
+  fi
+  printf '%s\n' "$cleanup_exit" > "$target/cleanup-exit-code.txt"
+  if [[ "$cleanup_exit" -ne 0 ]]; then echo '측정 컨테이너 정리 상태를 cleanup-errors.txt에서 확인해 주세요.' >&2; fi
+  return 0
 }
 
 mkdir -p "$script_dir/results"
@@ -73,6 +106,7 @@ compose run --rm --no-deps -T fixture
     echo "mode=load vus=$load_vus warmup=20s measurement=60s gracefulStop=25s p95Ms=${p95_ms:-unset}"
     echo 'model=constant-vus thinkSeconds=1 variants=all,reserved'
     echo 'resourceSampling=enabled targetIntervalSeconds=2 sampledMaxIsNotAnAbsolutePeak=true'
+    echo 'measurementLifecycle=stopSamplerBeforeRemovingOwnedK6'
     echo 'p95 criterion is an experimental target, not a production SLO'
   fi
   echo 'users=200 reservations=100000'
@@ -109,21 +143,26 @@ fi
 snapshot > "$target/metrics-before.txt"
 
 echo "measurementStartedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$target/metadata.txt"
-measurement_container="reservation-perf-$run_id"
+if MSYS_NO_PATHCONV=1 docker inspect "$measurement_container" >/dev/null 2>&1; then
+  echo '동일 이름의 컨테이너가 이미 있습니다. 기존 컨테이너를 변경하지 않고 중단합니다.' >&2
+  exit 1
+fi
+trap cleanup_measurement EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if [[ "$mode" == load ]]; then
-  trap stop_sampler EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
   bash "$script_dir/sample-resources.sh" "$target" "$compose_file" "$measurement_container" &
   sampler_pid=$!
 fi
 echo "$mode 측정 시작"
-if compose run --rm --no-deps -T --name "$measurement_container" k6; then
+measurement_started=true
+# 종료된 컨테이너를 수집기 회수 전까지 보존한다. --rm을 사용하면 마지막 stats와 삭제가 경합한다.
+if compose run --no-deps -T --name "$measurement_container" --label "kan134.owner=$measurement_owner" k6; then
   exit_code=0
 else
   exit_code=$?
 fi
-stop_sampler
+cleanup_measurement
 echo "measurementFinishedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$target/metadata.txt"
 if ! snapshot > "$target/metrics-after.txt"; then
   echo '메트릭 수집 실패. 앱 관리 포트를 확인하세요.' > "$target/metrics-after.txt"

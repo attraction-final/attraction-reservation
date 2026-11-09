@@ -13,6 +13,8 @@ errors="$target/sampling-errors.txt"
 : > "$errors"
 : > "$target/resource-samples.jsonl"
 : > "$target/metrics-samples.txt"
+: > "$target/sampling-boundary-events.txt"
+stats_stderr="$target/docker-stats-last-stderr.txt"
 
 base_ids=()
 ids_text="$(docker_cmd compose -f "$compose_file" ps -q app mysql redis)"
@@ -53,9 +55,37 @@ while [[ ! -e "$target/sampling-stop" ]]; do
   fi
 
   format='{"kind":"dockerStats","sample":'"$sample"',"sampleStartedAt":"'"$started_at"'","stats":{{json .}}}'
-  if ! docker_cmd stats --no-stream --format "$format" "${ids[@]}" \
-    >> "$target/resource-samples.jsonl" 2>> "$errors"; then
-    echo "sample=$sample at=$started_at source=dockerStats result=failed" >> "$errors"
+  if stats_text="$(docker_cmd stats --no-stream --format "$format" "${ids[@]}" 2> "$stats_stderr")"; then
+    [[ -z "$stats_text" ]] || printf '%s\n' "$stats_text" >> "$target/resource-samples.jsonl"
+    # stopped 컨테이너는 stats가 0으로 끝나도 출력에 없을 수 있다. 누락을 성공 표본으로 세지 않는다.
+    if [[ "$k6_running" == true && "$stats_text" != *\"Name\":\"$k6_name\"* ]]; then
+      state="$(docker_cmd inspect --format '{{.State.Status}}' "$k6_name" 2>/dev/null | tr -d '\r' || true)"
+      if [[ "$state" == exited || "$state" == dead ]]; then
+        echo "sample=$sample at=$started_at event=K6_SAMPLE_MISSING_AT_BOUNDARY state=$state" >> "$target/sampling-boundary-events.txt"
+      else
+        echo "sample=$sample at=$started_at source=k6StatsMissing result=failed state=${state:-unknown}" >> "$errors"
+      fi
+    fi
+  else
+    state="$(docker_cmd inspect --format '{{.State.Status}}' "$k6_name" 2>/dev/null | tr -d '\r' || true)"
+    if [[ "$k6_running" == true && ( "$state" == exited || "$state" == dead ) ]]; then
+      # 종료 경계의 원문은 별도로 보존한다. 다른 오류를 경계 오류로 간주하지 않는다.
+      {
+        echo "sample=$sample at=$started_at event=K6_STOPPED_DURING_STATS state=$state"
+        cat "$stats_stderr"
+      } >> "$target/sampling-boundary-events.txt"
+      # batch 전체 실패로 서버 표본까지 잃지 않도록 실행 중인 앱·DB·Redis를 다시 조회한다.
+      recovered_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      recovery_format='{"kind":"dockerStats","sample":'"$sample"',"sampleStartedAt":"'"$recovered_at"'","recoveredAfterK6Stop":true,"stats":{{json .}}}'
+      if recovered="$(docker_cmd stats --no-stream --format "$recovery_format" "${base_ids[@]}" 2>> "$errors")"; then
+        [[ -z "$recovered" ]] || printf '%s\n' "$recovered" >> "$target/resource-samples.jsonl"
+      else
+        echo "sample=$sample at=$recovered_at source=baseStatsRecovery result=failed" >> "$errors"
+      fi
+    else
+      cat "$stats_stderr" >> "$errors"
+      echo "sample=$sample at=$started_at source=dockerStats result=failed state=${state:-unknown}" >> "$errors"
+    fi
   fi
   printf '{"kind":"cycleEnd","sample":%s,"finishedAt":"%s"}\n' \
     "$sample" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$target/resource-samples.jsonl"

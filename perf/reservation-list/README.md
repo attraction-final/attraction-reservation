@@ -1,10 +1,10 @@
-# KAN-134 내 예약 목록 HTTP smoke 테스트
+# KAN-134 내 예약 목록 HTTP 부하 테스트
 
 실제 Spring Boot 앱과 Spring Security를 거쳐 응답 정확성을 확인한다.
 smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
 주기적 자원 수집과 20 VUs 측정까지 확인했다. load-02·03의 마지막 Docker 수집은 각 1회 누락됐다.
 수집 종료 순서를 개선한 load-07도 50 VUs 기능 검증을 통과했고 수집·정리 오류는 없었다. 복구·중단 경로는 아직 미검증이다.
-분산 시작·pool·warm-up·CPU 조건 비교 후 load-21의 100 VUs·5분 측정이 실험 목표를 충족했다. 다음은 150 VUs 확대 측정이다.
+분산 시작·pool·warm-up·CPU 조건 비교 후 100 VUs 1회, 150/200 VUs 각 2회의 5분 측정이 기능·전체 지연 실험 목표를 충족해 현재 단계를 마무리했다.
 운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
@@ -391,11 +391,16 @@ k6 메모리 한도만 1GiB에서 2GiB로 늘리고 앱·DB·Redis·k6 CPU와 �
 load-26에서 200 VUs·5분 완료와 기능·전체 p95/p99 목표 충족을 확인했다. 전체/RESERVED p95는 약 57.08/65.81ms였다.
 정리 전 상태 파일은 exited/running=false/oomKilled=false/exitCode=0이고 실제 k6 한도는 2GiB였다.
 정상 종료의 상태 기록은 확인했으나 OOM·사용자 중단 경로의 기록은 아직 실제 검증하지 않았다.
-초기 지연·커넥션 대기·상세 자원과 한계는 트러블슈팅 문서 29장에 기록했다. 다음은 같은 조건 반복이다.
+초기 지연·커넥션 대기·상세 자원과 한계는 트러블슈팅 문서 29장에 기록했다. 아래 반복도 load-27에서 완료했다.
 
 ```bash
 TEST_APP_CPUS=2 TEST_POOL_SIZE=10 TEST_VUS=200 START_MODE=simultaneous WARMUP_SECONDS=120 MEASUREMENT_SECONDS=300 P99_MS=500 bash perf/reservation-list/run.sh load-27 load 200
 ```
+
+load-27도 기능·전체 p95/p99 목표를 충족했고 oomKilled=false/exitCode=0이었다. 전체/RESERVED p95는 약 59.37/69.89ms였다.
+최대 35개 pending과 초기 전체 목록 약 2.75초 응답은 남아 있다. 이번 측정 단계는 200 VUs에서 마무리한다.
+반복 결과는 트러블슈팅 문서 30장, 최종 비교표·조건 차이·결론·후속 과제는 31장에 정리했다.
+최대 수용량·장시간 안정성·운영 보장이나 프로덕션 코드 최적화 결과로 표현하지 않는다.
 성능 목표를 벗어나거나 부하 발생기 한계가 관측되면 부하를 추가로 늘리기 전에 원인을 분석한다.
 
 ## 결과 확인

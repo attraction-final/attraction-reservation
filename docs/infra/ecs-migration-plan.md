@@ -286,8 +286,9 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 ### 7단계: 정리
 
 시작 조건
-- 5·6단계 검증이 끝났다.
-- 전환 뒤 새 CD로 main 배포가 한 번 이상 성공했다(ASG로 롤백할 일이 없다). 실제 사용자가 없으므로 관찰 기간은 두지 않는다.
+- PR #238 머지 후 dev → main 릴리스로 새 CD의 첫 배포가 성공해 api·worker가 main SHA로 바뀌었다(ASG로 롤백할 일이 없다). 실제 사용자가 없으므로 관찰 기간은 두지 않는다.
+- 6단계 알림을 운영에서 확인했다(테스트 알림, worker 멈춤·해제 알림).
+- 5단계는 2026-11-08에 끝났고, 그 뒤 ASG는 desired 0으로 롤백용으로만 남아 있다.
 
 A. AWS 정리 (롤백 경로 제거)
 
@@ -296,10 +297,11 @@ A. AWS 정리 (롤백 경로 제거)
 | ASG `attraction-reservation-app` (desired 0) | 삭제 |
 | Launch Template `attraction-reservation-app` | 삭제 |
 | TG `attraction-final` (5단계 이후 리스너 규칙에서 참조하지 않음) | 삭제 |
-| IAM `ec2-role`과 instance profile | 정책을 떼어 낸 뒤 삭제 (IAM 쓰기 권한이 있는 계정에서 실행). 앱 EC2만 쓰고, 붙어 있는 S3 정책은 배포 번들 버킷용이라 앱 코드는 S3를 쓰지 않는다. ECS task 역할에 S3 권한을 옮길 필요가 없다 |
+| IAM `ec2-role`과 instance profile | 정책을 떼어 낸 뒤 삭제 (IAM 쓰기 권한이 있는 계정에서 실행, 스크립트로 전달). 앱 EC2만 쓰고, 붙어 있는 S3 정책은 배포 번들 버킷용이라 앱 코드는 S3를 쓰지 않는다. ECS task 역할에 S3 권한을 옮길 필요가 없다 |
 | `github-actions-role` 인라인 정책 `cd-deploy-asg` | 4단계 PR 머지 직후 지우지 않았으면 삭제 |
 | S3 앱 실행 구성 `attraction-reservation/<SHA>/` | 삭제. `attraction-reservation/monitoring/`은 남긴다 |
 | 저장소 Actions 변수 `ASG_NAME` | 삭제 |
+| SSM `/attraction-reservation/prod/LOKI_URL` | 삭제. EC2 Alloy만 쓰던 값이고 ECS는 저장소 변수 `LOKI_HOST`(프라이빗 DNS)를 쓴다. `PROMETHEUS_URL`은 ECS Alloy 사이드카가 쓰므로 남긴다 |
 | ECR 저장소 3개(앱, `-fluent-bit`, `-alloy`) | lifecycle 정책 추가: 최근 30개 이미지만 남긴다. 지금은 정책이 없어 계속 쌓인다. 30개면 `workflow_dispatch` 롤백에 충분하다 |
 
 - app SG `sg-0dfee6a3408712b64`는 ECS task가 계속 쓰므로 남긴다.
@@ -310,13 +312,15 @@ B. 저장소 정리 (PR 하나)
 |---|---|
 | `deploy/compose.yml`, `deploy/user-data.sh`, `deploy/alloy/config.alloy` | 삭제 |
 | `.github/workflows/cd.yml` | `deploy-app`에서 S3 실행 구성 확인·업로드 step, 관련 주석, `BUNDLE_PREFIX` 제거. `ARTIFACT_BUCKET`은 `deploy-monitoring`이 계속 쓴다 |
-| `github-actions-role` 인라인 정책 `cd-deploy-bundle-s3` | 모니터링 번들만 올리므로 `attraction-reservation/monitoring/*`로 범위를 좁힌다 |
+| `github-actions-role` 인라인 정책 `cd-deploy-bundle-s3` | 모니터링 번들만 올리므로 `attraction-reservation/monitoring/*`로 범위를 좁힌다 (IAM 쓰기라 스크립트로 전달) |
 | `src/main/resources/application-prod.yml` | `deploy/compose.yml`, `deploy/alloy`를 가리키는 주석 2곳을 ECS 기준으로 |
 | `deploy/monitoring/prometheus.yml` | 1행 주석을 `deploy/ecs/alloy` 기준으로 |
+| `deploy/monitoring/compose.yml` | 상단 주석의 "앱 인스턴스의 Alloy", "보안 그룹에서 앱 인스턴스에만 연다"를 ECS task(Fluent Bit·Alloy 사이드카, app SG) 기준으로 |
+| `deploy/monitoring/user-data.sh` | "앱의 LOKI_URL, PROMETHEUS_URL이 이 주소를 가리킨다"를 ECS 기준으로 (Loki는 `loki.attraction.internal`, Prometheus는 SSM `PROMETHEUS_URL`) |
 | `docs/database/migration.md` | "ASG Instance Refresh"를 ECS 롤링 배포로 (새 task를 먼저 띄우고 기존 task를 나중에 내리는 점은 같다) |
 | 로깅 규칙 10장 (`docs/logging/logging.md`, `.claude/rules/logging.md`) | Alloy·docker.sock·docker-proxy·json-file 설명을 FireLens(Fluent Bit)·Alloy 사이드카 기준으로. rules 파일은 git에 올리지 않으므로 로컬에서 맞춘다 |
 | [ecs-migration-rationale.md](ecs-migration-rationale.md) | 상태를 "채택"으로, 9장 결과 측정 표를 4단계 배포 시간·서킷 브레이커 결과로 채운다 |
-| 이 문서 | 7단계 완료 표시와 전체 결과 요약 |
+| 이 문서 | 7단계 완료 표시와 전체 결과 요약, 4장 결정 항목을 "결정"으로 정리 |
 
 순서
 1. B를 PR로 만든다.
@@ -328,6 +332,7 @@ B. 저장소 정리 (PR 하나)
 - [ ] ECR lifecycle 정책이 3개 저장소에 적용됨 (`get-lifecycle-policy`)
 - [ ] B 머지 후 다음 main 배포가 S3 업로드 없이 성공, `deploy-monitoring`이 좁힌 권한으로 성공
 - [ ] 저장소에 앱 배포용 `compose.yml`·`user-data.sh`·`docker-proxy`·`Instance Refresh` 언급이 남지 않음 (모니터링 스택 `deploy/monitoring/` 제외)
+- [ ] 7단계 작업 동안 Slack 알림이 오지 않음 (오면 정리가 서비스에 영향을 준 것)
 
 ## 4. 결정할 것
 
@@ -335,7 +340,7 @@ B. 저장소 정리 (PR 하나)
 |---|---|---|
 | 로그 경로 | FireLens → Loki | 대안: CloudWatch Logs (대시보드·`traceId` 링크 재작성, 비용 증가) |
 | ShedLock | 이번에는 넣지 않음 | worker 1개 + 배포 시 겹치지 않음 + 멱등 처리. worker를 늘릴 때 검토 |
-| task 크기 | api·worker 모두 실측 후 확정 | 가안 1 vCPU / 2GB |
+| task 크기 | 1 vCPU / 2GB로 확정 (2026-11-09) | 실제 트래픽이 없어 지금 실측해도 기준이 되지 않는다. 실측·조정은 범위 밖 |
 | api task 수 | 전환 후 2개 이상 (여러 AZ) | 단일 장애점 제거. 전환과 별개로 필요 |
 
 ## 5. 범위 밖
@@ -345,4 +350,6 @@ B. 저장소 정리 (PR 하나)
 - `TicketExpirationScheduler`의 `SKIP LOCKED` 적용과 로그 형식 정리 (worker를 여러 개로 늘릴 때 함께 진행)
 - 미처리 웹훅·환불 적체량 지표(gauge)와 알림 (앱 코드 변경이 필요)
 - 슬롯 자동 생성 실패 수정: KAN-135로 분리
-- 모니터링 주소를 프라이빗 DNS 이름으로 통일: EC2 Alloy의 Loki 주소, SSM `LOKI_URL`·`PROMETHEUS_URL`(EC2와 함께 쓰는 값이라 이번에 바꾸지 않음. Prometheus 레코드도 그때 만든다)
+- 모니터링 주소를 프라이빗 DNS 이름으로 통일: SSM `PROMETHEUS_URL`(IP). Loki는 ECS에서 이미 `loki.attraction.internal`을 쓰고 `LOKI_URL`은 7단계에서 지운다. Prometheus 레코드도 그때 만든다
+- task 크기 실측과 조정 (부하가 생긴 뒤)
+- Grafana 대시보드(애플리케이션 개요, 스케줄러)에 `service`(api·worker) 변수 추가와 범례 정리. 지금도 동작은 하지만 범례가 task ID라 api·worker를 구분하기 어렵다

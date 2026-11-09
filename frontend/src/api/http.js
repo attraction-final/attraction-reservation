@@ -94,7 +94,7 @@ export async function request(method, path, body) {
     if (ok) ({ res, json } = await send(method, path, body));
   }
 
-  if (!res.ok) throw new ApiError(errorMessage(json, res.status), res.status);
+  if (!res.ok) throw new ApiError(errorMessage(json, res.status), res.status, json?.code ?? null);
   return json?.data ?? null; // 포장지 벗기고 알맹이(data)만 돌려줘요
 }
 

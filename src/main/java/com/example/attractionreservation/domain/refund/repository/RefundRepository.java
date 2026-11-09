@@ -24,8 +24,22 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
     @Query("SELECT r.payment.id FROM Refund r WHERE r.id = :id")
     Optional<Long> findPaymentIdById(@Param("id") Long id);
 
-    // 같은 결제에서 다른 환불이 PG 취소 중이거나 확정 대기 중인지 확인한다. 같은 결제의 환불을 한 번에 하나씩 처리하기 위해 쓴다.
-    boolean existsByPaymentIdAndStatusInAndIdNot(Long paymentId, Collection<RefundStatus> statuses, Long id);
+    // 같은 결제에서 이 환불의 점유를 막는 다른 환불이 있는지 확인한다. 같은 결제의 환불을 한 번에 하나씩 처리하기 위해 쓴다.
+    // PG 취소 중이거나 확정 대기 중(inFlight)인 환불은 항상 막는다.
+    // FAILED 환불은 PG에 취소가 반영됐는지 모를 수 있어 id가 failedIdLimit보다 작으면 막는다.
+    // failedIdLimit은 이 환불의 상태로 정한다(RefundCommandService.failedBlockingIdLimit). null이면 FAILED에 막히지 않는다.
+    @Query("""
+    SELECT COUNT(other) > 0
+    FROM Refund other
+    WHERE other.payment.id = :paymentId AND other.id <> :refundId
+      AND (other.status IN :inFlight
+           OR (other.status = :failed AND other.id < :failedIdLimit))
+    """)
+    boolean existsBlockingRefund(@Param("paymentId") Long paymentId,
+                                 @Param("refundId") Long refundId,
+                                 @Param("inFlight") Collection<RefundStatus> inFlight,
+                                 @Param("failed") RefundStatus failed,
+                                 @Param("failedIdLimit") Long failedIdLimit);
 
     // PG 취소 결과를 조회로 확인할 차례인 환불. 조건은 Refund.isPgCheckable과 같다.
     // 한 번에 확인하는 건수가 작으므로 확인 시각이 오래 지난 것부터 고른다. 결과 기록이 실패해 확인 시각이 그대로인 건이
@@ -52,7 +66,7 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
 
     // 처리 대상 후보. 점유는 결제와 환불 행을 잠근 뒤 상태를 다시 확인해 결정한다.
     // 조건은 Refund.isProcessable과 같다(REQUESTED는 시각과 무관하게 대상).
-    // 같은 결제의 다른 환불이 PG 취소 중이거나 확정 대기 중(inFlight)이면 claim에서 건너뛸 후보이므로 처음부터 뺀다.
+    // 같은 결제의 다른 환불이 점유를 막으면(existsBlockingRefund와 같은 규칙) claim에서 건너뛸 후보이므로 처음부터 뺀다.
     // 그런 후보가 배치 앞쪽을 차지해 다른 결제의 환불이 밀리지 않게 하기 위해서다. 최종 판단은 claim의 락 안에서 한다.
     @Query("""
     SELECT r.id
@@ -63,7 +77,10 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
       AND NOT EXISTS (
           SELECT other.id
           FROM Refund other
-          WHERE other.payment = r.payment AND other.id <> r.id AND other.status IN :inFlight)
+          WHERE other.payment = r.payment AND other.id <> r.id
+            AND (other.status IN :inFlight
+                 OR (other.status = :failed
+                     AND (r.status = :requested OR (r.status = :failed AND other.id < r.id)))))
     ORDER BY r.id
     """)
     List<Long> findProcessableIds(@Param("requested") RefundStatus requested,

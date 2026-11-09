@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -87,6 +88,61 @@ class RouteSearcherTest {
         assertEquals(List.of(2L, 1L), visitedIds(result));
         assertEquals(List.of(10, 10), moveMinutes(result));
         assertEquals(40, result.totalDurationMinutes());
+    }
+
+    //출발지별 첫 이동 시간
+
+    @Test
+    @DisplayName("현재 위치에서 가까운 어트랙션이 첫 방문지가 된다")
+    void search_FirstMoveMinutes_ClosestAttractionFirst() {
+        //given
+        // 구간 데이터가 없으면 동점 → ID가 작은 A가 먼저 온다. 현재 위치에서는 B가 2분, A가 15분 거리다.
+        CandidateAttraction a = attraction(1L, "A", 10, everyFiveMinutes(100L));
+        CandidateAttraction b = attraction(2L, "B", 10, everyFiveMinutes(200L));
+
+        //when
+        RouteSearchResult result = routeSearcher.search(
+                at("13:00"), at("18:00"), List.of(a, b), TravelTimeTable.empty(), Map.of(1L, 15, 2L, 2));
+
+        //then
+        // B는 13:02 도착 → 13:05 슬롯, A는 정문 기준 10분 이동
+        assertEquals(List.of(2L, 1L), visitedIds(result));
+        assertEquals(List.of(2, 10), moveMinutes(result));
+    }
+
+    @Test
+    @DisplayName("첫 이동 시간이 없는 어트랙션은 정문 기준 시간을 쓰고, 두 번째 이동에는 첫 이동 시간을 쓰지 않는다")
+    void search_FirstMoveMinutesMissing_UsesEntranceMinutes() {
+        //given
+        CandidateAttraction a = attraction(1L, "A", 10, everyFiveMinutes(100L));
+        CandidateAttraction b = attraction(2L, "B", 10, everyFiveMinutes(200L));
+
+        //when
+        // A만 첫 이동 시간이 있다(1분). B는 맵에 없어 첫 방문이면 10분, A 다음이면 구간 없음 → 10분
+        RouteSearchResult result = routeSearcher.search(
+                at("13:00"), at("18:00"), List.of(a, b), TravelTimeTable.empty(), Map.of(1L, 1));
+
+        //then
+        assertEquals(List.of(1L, 2L), visitedIds(result));
+        assertEquals(List.of(1, 10), moveMinutes(result));
+    }
+
+    @Test
+    @DisplayName("첫 이동 시간 맵이 비어 있으면 기존 탐색 결과와 같다")
+    void search_EmptyFirstMoveMinutes_SameAsBefore() {
+        //given
+        CandidateAttraction a = attraction(1L, "A", 10, everyFiveMinutes(100L));
+        CandidateAttraction b = attraction(2L, "B", 7, everyFiveMinutes(200L));
+        TravelTimeTable travelTimes = TravelTimeTable.from(List.of(
+                new TravelTimeTable.PathTime(1L, 2L, 30, true),
+                new TravelTimeTable.PathTime(2L, 1L, 5, true)));
+
+        //when
+        RouteSearchResult before = routeSearcher.search(at("13:00"), at("18:00"), List.of(a, b), travelTimes);
+        RouteSearchResult after = routeSearcher.search(at("13:00"), at("18:00"), List.of(a, b), travelTimes, Map.of());
+
+        //then
+        assertEquals(before, after);
     }
 
 

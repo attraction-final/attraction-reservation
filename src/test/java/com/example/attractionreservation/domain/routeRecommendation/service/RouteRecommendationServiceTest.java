@@ -12,11 +12,14 @@ import com.example.attractionreservation.domain.routeRecommendation.algorithm.Ca
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionPath;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
+import com.example.attractionreservation.domain.routeRecommendation.entity.enums.TravelTimeBasis;
+import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionPathRepository;
 import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
 import com.example.attractionreservation.domain.user.entity.User;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
@@ -55,6 +58,7 @@ import org.springframework.data.domain.Sort;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.lenient;
@@ -88,6 +92,8 @@ class RouteRecommendationServiceTest {
     private RouteRecommendationService routeRecommendationService;
     @Mock
     private ReservationRepository reservationRepository;
+    @Mock
+    private AttractionPathRepository attractionPathRepository;
 
     @BeforeEach
     void setUp() {
@@ -98,6 +104,7 @@ class RouteRecommendationServiceTest {
                 attractionRepository,
                 attractionSlotRepository,
                 reservationRepository,
+                attractionPathRepository,
                 new CandidateSelector(),
                 new RouteSearcher(),
                 FIXED_CLOCK
@@ -216,6 +223,48 @@ class RouteRecommendationServiceTest {
         assertThat(response.estimatedEndAt()).isEqualTo(at("15:50"));
         assertThat(response.excludedAttractions()).isEmpty();
         verify(routeRecommendationRepository).save(any(RouteRecommendation.class));
+    }
+
+    @Test
+    @DisplayName("직전 어트랙션에서의 실측 이동 시간이 길어 다음 슬롯에 늦으면 그 어트랙션은 경로에서 빠진다")
+    void createRouteRecommendation_LongMeasuredPath_ExcludesLateAttraction() {
+        // given
+        // T익스프레스 15:00~15:10 → 사파리 슬롯 15:30. 정문 기준(10분)이면 15:20 도착이라 둘 다 방문할 수 있다.
+        // 실측 구간이 25분이면 15:35 도착이라 사파리 슬롯에 늦는다.
+        givenUsableTicket();
+        givenTwoReachableAttractions();
+        givenSaveReturnsArgument();
+        when(attractionPathRepository.findAllBetween(anyCollection())).thenReturn(List.of(
+                AttractionPath.of(101L, 102L, 1500, 25, false, true)));
+
+        // when
+        SearchRouteRecommendationResponse response = routeRecommendationService
+                .createRouteRecommendation(USER_ID, request("14:00", "18:00", 102L, 101L));
+
+        // then
+        assertThat(response.resultType()).isEqualTo(RouteResultType.PARTIAL);
+        assertThat(response.travelTimeBasis()).isEqualTo(TravelTimeBasis.MEASURED_PATH);
+        assertThat(response.visits())
+                .extracting(SearchRouteRecommendationResponse.Visit::attractionId)
+                .containsExactly(101L);
+        verify(attractionPathRepository).findAllBetween(anyCollection()); // 추천 1건당 1번
+    }
+
+    @Test
+    @DisplayName("후보가 1개면 어트랙션 간 이동이 없으므로 구간을 조회하지 않는다")
+    void createRouteRecommendation_SingleCandidate_DoesNotQueryPaths() {
+        // given
+        givenUsableTicket();
+        Attraction a = attraction(101L, "T익스프레스", 10, 10);
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(List.of(a));
+        givenSlots(101L, slot(9001L, a, "15:00"));
+        givenSaveReturnsArgument();
+
+        // when
+        routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L));
+
+        // then
+        verifyNoInteractions(attractionPathRepository);
     }
 
     @Test

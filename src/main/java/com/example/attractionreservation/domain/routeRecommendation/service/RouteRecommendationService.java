@@ -8,6 +8,7 @@ import com.example.attractionreservation.domain.reservation.entity.Reservation; 
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;     // ★ 추가
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;   // ★ 추가
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.AttractionView;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateAttraction;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelection;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.Exclusion;
@@ -15,6 +16,8 @@ import com.example.attractionreservation.domain.routeRecommendation.algorithm.Ro
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.SlotState;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.SlotView;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.TravelTimeTable;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.TravelTimeTable.PathTime;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse.ExcludedAttraction;
@@ -22,6 +25,7 @@ import com.example.attractionreservation.domain.routeRecommendation.entity.Route
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
+import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionPathRepository;
 import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
@@ -64,6 +68,7 @@ public class RouteRecommendationService {
     private final AttractionRepository attractionRepository;
     private final AttractionSlotRepository attractionSlotRepository;
     private final ReservationRepository reservationRepository;
+    private final AttractionPathRepository attractionPathRepository;
     private final CandidateSelector candidateSelector;
     private final RouteSearcher routeSearcher;
     private final Clock clock;
@@ -84,7 +89,8 @@ public class RouteRecommendationService {
         Map<Long, List<SlotView>> slotsByAttractionId = findSlotsByAttraction(attractionIds, ticket.getValidDate());
 
         CandidateSelection selection = candidateSelector.select(attractions, slotsByAttractionId, startAt, endAt, now);
-        RouteSearchResult route = routeSearcher.search(startAt, endAt, selection.candidates());
+        TravelTimeTable travelTimes = findTravelTimesBetween(selection.candidates());
+        RouteSearchResult route = routeSearcher.search(startAt, endAt, selection.candidates(), travelTimes);
         List<Exclusion> exclusions = collectExclusionsInRequestOrder(attractions, selection, route);
 
         if (route.isEmpty()) {
@@ -209,6 +215,25 @@ public class RouteRecommendationService {
                         attraction.isOperating(),
                         attraction.getEntranceMoveMinutes()))
                 .toList();
+    }
+
+    // 후보 어트랙션끼리의 실측 이동 구간을 쿼리 1번으로 읽어 조회표로 만든다.
+    // 후보가 1개 이하면 어트랙션 간 이동이 없으므로 조회하지 않는다.
+    private TravelTimeTable findTravelTimesBetween(List<CandidateAttraction> candidates) {
+        if (candidates.size() < 2) {
+            return TravelTimeTable.empty();
+        }
+        List<Long> candidateIds = candidates.stream()
+                .map(CandidateAttraction::attractionId)
+                .toList();
+        List<PathTime> paths = attractionPathRepository.findAllBetween(candidateIds).stream()
+                .map(path -> new PathTime(
+                        path.getFromAttractionId(),
+                        path.getToAttractionId(),
+                        path.getMoveMinutes(),
+                        path.isActive()))
+                .toList();
+        return TravelTimeTable.from(paths);
     }
 
     private Map<Long, List<SlotView>> findSlotsByAttraction(List<Long> attractionIds, LocalDate visitDate) {

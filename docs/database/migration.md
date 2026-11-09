@@ -85,3 +85,4 @@ CREATE DATABASE attraction_reservation;
 - `V1__init.sql`은 Flyway 도입 시점(2026-11-05)의 운영 스키마이고, `V2`는 `docs/sql/kan-103-…`과 같다.
 - 앞으로의 스키마 변경은 `docs/sql/`이 아니라 `db/migration/`에 추가한다.
 - KAN-136 `attraction_locations`, `attraction_paths`는 엔티티와 함께 `V6`, `V7`로 추가했다. 데이터(구간·좌표)는 마이그레이션에 넣지 않고 `docs/sql/kan-136-route-travel-data.sql`로 배포 후 적용한다.
+- KAN-137 `V8`은 `route_recommendations.travel_time_basis` enum에 `MEASURED_PATH`를 추가한다. 이 컬럼은 MySQL enum이라 Java enum에 값을 추가할 때마다 마이그레이션이 필요하다. (`ddl-auto=validate`는 enum 값 목록을 비교하지 않는다)

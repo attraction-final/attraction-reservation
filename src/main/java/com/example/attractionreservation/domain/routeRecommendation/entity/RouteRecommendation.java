@@ -46,7 +46,7 @@ public class RouteRecommendation extends BaseTimeEntity {
     @Column(name ="start_location", nullable = false,length = 30)
     private StartLocation startLocation;
 
-    //추천 계산에 적용한 이동 시간 기준 ->지금은 각 어트랙션의 정문 기준 이동 시간을 사용하는 ENTRANCE_FIXED로 고정함
+    //추천 계산에 적용한 이동 시간 기준 -> 새 추천은 MEASURED_PATH (기존 데이터는 ENTRANCE_FIXED)
     @Enumerated(EnumType.STRING)
     @Column(name ="travel_time_basis", nullable = false, length = 30)
     private TravelTimeBasis travelTimeBasis;
@@ -118,7 +118,7 @@ public class RouteRecommendation extends BaseTimeEntity {
        recommendation.startAt = startAt;
        recommendation.endAt = endAt;
        recommendation.startLocation = StartLocation.ENTRANCE;
-       recommendation.travelTimeBasis =TravelTimeBasis.ENTRANCE_FIXED;
+       recommendation.travelTimeBasis = TravelTimeBasis.MEASURED_PATH;
 
        //전달받은 목록의 배치 순서랑 상관없이 방문 순번으로 정렬함
        stops.stream()

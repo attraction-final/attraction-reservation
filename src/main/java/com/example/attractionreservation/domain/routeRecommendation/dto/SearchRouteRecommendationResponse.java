@@ -124,7 +124,7 @@ public record SearchRouteRecommendationResponse(
                 startAt,
                 endAt,
                 StartLocation.ENTRANCE,
-                TravelTimeBasis.ENTRANCE_FIXED,
+                TravelTimeBasis.MEASURED_PATH,
                 RouteResultType.NONE,
                 totalSelectedAttractions,
                 0,

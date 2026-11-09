@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(OutputCaptureExtension.class)
@@ -142,6 +143,48 @@ class GlobalExceptionHandlerTest {
         assertThat(output).contains("DataIntegrityViolationException: 제약 조건 위반");
     }
 
+    // ===== 응답 본문의 code =====
+
+    @Test
+    @DisplayName("비즈니스 예외 응답에는 ErrorCode 이름이 code로 들어간다")
+    void handleBusinessException_ResponseHasCode() throws Exception {
+        mockMvc.perform(get("/test/not-found"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value("ATTRACTION_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value(ErrorCode.ATTRACTION_NOT_FOUND.getMessage()));
+    }
+
+    @Test
+    @DisplayName("서비스가 메시지를 직접 만든 비즈니스 예외도 code는 ErrorCode 이름이다")
+    void handleBusinessException_CustomMessage_ResponseHasCode() throws Exception {
+        mockMvc.perform(get("/test/custom-message"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ATTRACTION_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("어트랙션을 찾을 수 없습니다. attractionIds=[9]"));
+    }
+
+    @Test
+    @DisplayName("요청 본문 검증 실패 응답의 code는 INVALID_INPUT_VALUE이고 필드별 이유는 data에 그대로 있다")
+    void handleMethodArgumentNotValid_ResponseHasCode() throws Exception {
+        mockMvc.perform(post("/test/validation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name": ""}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT_VALUE"))
+                .andExpect(jsonPath("$.data.name").exists());
+    }
+
+    @Test
+    @DisplayName("예상하지 못한 예외 응답의 code는 INTERNAL_SERVER_ERROR다")
+    void handleException_ResponseHasCode() throws Exception {
+        mockMvc.perform(get("/test/unexpected"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_SERVER_ERROR"));
+    }
+
     private String logLine(CapturedOutput output, String event) {
         return output.getAll().lines()
                 .filter(line -> line.contains(event))
@@ -162,6 +205,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/not-found/{value}")
         void notFoundWithPath() {
             throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND);
+        }
+
+        @GetMapping("/test/custom-message")
+        void customMessage() {
+            throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND, "어트랙션을 찾을 수 없습니다. attractionIds=[9]");
         }
 
         @GetMapping("/test/bad-gateway")

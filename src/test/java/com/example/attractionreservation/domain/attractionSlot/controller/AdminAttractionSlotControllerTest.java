@@ -187,7 +187,8 @@ class AdminAttractionSlotControllerTest {
     void deleteAttractionSlot_unauthenticated_returnsUnauthorized() throws Exception {
         mockMvc.perform(delete("/api/admin/slots/{slotId}", 31L))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.success").value(false));
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
 
         verifyNoInteractions(attractionSlotService);
     }
@@ -198,7 +199,8 @@ class AdminAttractionSlotControllerTest {
         mockMvc.perform(delete("/api/admin/slots/{slotId}", 31L)
                         .with(authenticatedAs("USER")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.success").value(false));
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
 
         verifyNoInteractions(attractionSlotService);
     }

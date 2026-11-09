@@ -281,6 +281,16 @@ public class RouteRecommendationControllerTest {
                 // 목록 안에 null
                 """
                 {"ticketId": 5001, "startAt": "2026-10-20T13:00:00", "endAt": "2026-10-20T18:00:00", "attractionIds": [101, null]}
+                """,
+                // 위도 범위(-90~90) 밖
+                """
+                {"ticketId": 5001, "startAt": "2026-10-20T13:00:00", "endAt": "2026-10-20T18:00:00", "attractionIds": [101],
+                 "latitude": 90.1, "longitude": 127.2}
+                """,
+                // 경도 범위(-180~180) 밖
+                """
+                {"ticketId": 5001, "startAt": "2026-10-20T13:00:00", "endAt": "2026-10-20T18:00:00", "attractionIds": [101],
+                 "latitude": 37.29, "longitude": -180.5}
                 """
         );
     }
@@ -320,7 +330,8 @@ public class RouteRecommendationControllerTest {
     @EnumSource(value = ErrorCode.class, names = {
             "INVALID_ATTRACTION_SELECTION", "INVALID_TIME_RANGE",
             "TICKET_NOT_FOUND", "TICKET_NOT_OWNED", "TICKET_NOT_AVAILABLE",
-            "ATTRACTION_NOT_FOUND", "ROUTE_RECOMMENDATION_BLOCKED"})
+            "ATTRACTION_NOT_FOUND", "ROUTE_RECOMMENDATION_BLOCKED",
+            "INVALID_CURRENT_LOCATION", "CURRENT_LOCATION_OUT_OF_PARK"})
     @DisplayName("서비스 검증 실패를 ErrorCode 의 HTTP 상태로 반환한다")
     void createRouteRecommendation_rejected_returnsExpectedError(ErrorCode errorCode) throws Exception {
         // given

@@ -11,6 +11,7 @@ import com.example.attractionreservation.domain.routeRecommendation.algorithm.At
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateAttraction;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelection;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.Coordinate;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.Exclusion;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearchResult;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
@@ -18,13 +19,17 @@ import com.example.attractionreservation.domain.routeRecommendation.algorithm.Sl
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.SlotView;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.TravelTimeTable;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.TravelTimeTable.PathTime;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.WalkingTimeCalculator;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse.ExcludedAttraction;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
+import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
+import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
+import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionLocationRepository;
 import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionPathRepository;
 import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
 import com.example.attractionreservation.domain.ticket.entity.Ticket;
@@ -69,8 +74,10 @@ public class RouteRecommendationService {
     private final AttractionSlotRepository attractionSlotRepository;
     private final ReservationRepository reservationRepository;
     private final AttractionPathRepository attractionPathRepository;
+    private final AttractionLocationRepository attractionLocationRepository;
     private final CandidateSelector candidateSelector;
     private final RouteSearcher routeSearcher;
+    private final WalkingTimeCalculator walkingTimeCalculator;
     private final Clock clock;
 
     @Transactional
@@ -79,6 +86,8 @@ public class RouteRecommendationService {
         List<Long> attractionIds = request.attractionIds();
 
         validateNoDuplicateAttraction(attractionIds);
+        Coordinate currentLocation = findCurrentLocation(request); // null = 정문 출발
+        StartLocation startLocation = currentLocation == null ? StartLocation.ENTRANCE : StartLocation.CURRENT_LOCATION;
         Ticket ticket = findUsableTicket(request.ticketId(), userId);
         LocalDateTime startAt = correctStartAt(request.startAt(), now);
         LocalDateTime endAt = request.endAt();
@@ -90,16 +99,18 @@ public class RouteRecommendationService {
 
         CandidateSelection selection = candidateSelector.select(attractions, slotsByAttractionId, startAt, endAt, now);
         TravelTimeTable travelTimes = findTravelTimesBetween(selection.candidates());
-        RouteSearchResult route = routeSearcher.search(startAt, endAt, selection.candidates(), travelTimes);
+        Map<Long, Integer> firstMoveMinutes = findFirstMoveMinutes(currentLocation, selection.candidates());
+        RouteSearchResult route = routeSearcher.search(
+                startAt, endAt, selection.candidates(), travelTimes, firstMoveMinutes);
         List<Exclusion> exclusions = collectExclusionsInRequestOrder(attractions, selection, route);
 
         if (route.isEmpty()) {
-            return SearchRouteRecommendationResponse.none(
-                    ticket.getId(), startAt, endAt, attractionIds.size(), toExcludedAttractions(exclusions));
+            return SearchRouteRecommendationResponse.none(ticket.getId(), startAt, endAt, startLocation,
+                    attractionIds.size(), toExcludedAttractions(exclusions));
         }
 
         RouteRecommendation recommendation = RouteRecommendation.create(
-                userId, ticket.getId(), startAt, endAt, toStops(route), toExclusionEntities(exclusions));
+                userId, ticket.getId(), startAt, endAt, startLocation, toStops(route), toExclusionEntities(exclusions));
         return SearchRouteRecommendationResponse.from(routeRecommendationRepository.save(recommendation));
     }
 
@@ -140,6 +151,22 @@ public class RouteRecommendationService {
         if (new HashSet<>(attractionIds).size() != attractionIds.size()) {
             throw new BusinessException(ErrorCode.INVALID_ATTRACTION_SELECTION);
         }
+    }
+
+    // 위도·경도가 둘 다 없으면 null(정문 출발). 하나만 있거나 공원 범위 밖이면 400.
+    // 위·경도 값 범위(-90~90, -180~180)는 요청 DTO의 Bean Validation이 먼저 확인한다.
+    private Coordinate findCurrentLocation(CreateRouteRecommendationRequest request) {
+        if (request.latitude() == null && request.longitude() == null) {
+            return null;
+        }
+        if (request.latitude() == null || request.longitude() == null) {
+            throw new BusinessException(ErrorCode.INVALID_CURRENT_LOCATION);
+        }
+        Coordinate location = new Coordinate(request.latitude(), request.longitude());
+        if (!walkingTimeCalculator.isInsidePark(location)) {
+            throw new BusinessException(ErrorCode.CURRENT_LOCATION_OUT_OF_PARK);
+        }
+        return location;
     }
 
     private Ticket findUsableTicket(Long ticketId, Long userId) {
@@ -234,6 +261,22 @@ public class RouteRecommendationService {
                         path.isActive()))
                 .toList();
         return TravelTimeTable.from(paths);
+    }
+
+    // 현재 위치 → 후보 어트랙션별 첫 이동 시간을 좌표로 계산한다. 좌표는 쿼리 1번으로 읽는다.
+    // 위치 없이 요청했거나 후보가 없으면 조회하지 않는다. 좌표가 없는 어트랙션은 맵에서 빠져 정문 기준 시간을 쓴다.
+    private Map<Long, Integer> findFirstMoveMinutes(Coordinate currentLocation, List<CandidateAttraction> candidates) {
+        if (currentLocation == null || candidates.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> candidateIds = candidates.stream()
+                .map(CandidateAttraction::attractionId)
+                .toList();
+        return attractionLocationRepository.findAllByAttractionIdIn(candidateIds).stream()
+                .collect(Collectors.toMap(
+                        AttractionLocation::getAttractionId,
+                        location -> walkingTimeCalculator.minutesBetween(
+                                currentLocation, new Coordinate(location.getLatitude(), location.getLongitude()))));
     }
 
     private Map<Long, List<SlotView>> findSlotsByAttraction(List<Long> attractionIds, LocalDate visitDate) {

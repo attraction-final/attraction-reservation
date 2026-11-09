@@ -1,0 +1,116 @@
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+import { SharedArray } from 'k6/data';
+import { Counter, Rate, Trend } from 'k6/metrics';
+import { BASE, login } from './auth.js';
+
+const runId = __ENV.RUN_ID;
+if (!runId || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/.test(runId)) {
+  throw new Error('유효한 RUN_ID가 필요합니다. run.sh를 사용하세요.');
+}
+const fixture = new SharedArray('expected', () =>
+  open(`/results/${runId}/fixture.jsonl`).trim().split(/\r?\n/).map(row => JSON.parse(row)));
+const duration = new Trend('reservation_list_duration', true);
+const durations = {
+  all: new Trend('reservation_list_all_duration', true),
+  reserved: new Trend('reservation_list_reserved_duration', true),
+};
+const invalid = new Rate('reservation_list_invalid');
+const requests = new Counter('reservation_list_requests');
+
+// 2명 × 5회 × 2조건 = 조회 20건. 성능 합격 기준은 아직 설정하지 않는다.
+export const options = {
+  scenarios: {
+    smoke: { executor: 'per-vu-iterations', vus: 2, iterations: 5, maxDuration: '60s', gracefulStop: '5s' },
+  },
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)'],
+  thresholds: {
+    checks: ['rate==1'],
+    reservation_list_invalid: ['rate==0'],
+    reservation_list_requests: ['count==20'],
+    'http_req_failed{endpoint:reservation-list}': ['rate==0'],
+    'reservation_list_requests{variant:all}': ['count==10'],
+    'reservation_list_requests{variant:reserved}': ['count==10'],
+  },
+};
+
+export function setup() {
+  if (fixture.length !== 4) throw new Error('DB 기대 결과는 회원 2명 × 조건 2개의 4행이어야 합니다.');
+  const accounts = [];
+  for (const row of fixture) {
+    if (!['all', 'reserved'].includes(row.variant) || !Array.isArray(row.rows)
+      || row.rows.length !== 10 || row.total < 10) throw new Error('DB 기대 결과 형식 확인 실패');
+    let account = accounts.find(item => item.userId === row.userId);
+    if (!account) {
+      account = { userId: row.userId, email: row.email, expected: {} };
+      accounts.push(account);
+    }
+    if (account.expected[row.variant]) throw new Error('중복 기대 결과');
+    account.expected[row.variant] = { total: row.total, rows: row.rows };
+  }
+  if (accounts.length !== 2 || accounts.some(account => !account.expected.all || !account.expected.reserved)
+    || accounts[0].email === accounts[1].email) {
+    throw new Error('서로 다른 회원 2명의 조건별 기대 결과가 필요합니다.');
+  }
+  const response = http.get(`${BASE}/api/reservations/me`, {
+    tags: { endpoint: 'auth-preflight' }, timeout: '10s',
+    responseCallback: http.expectedStatuses(401),
+  });
+  if (!check(response, { '인증 없는 목록 조회는 401': r => r.status === 401 })) {
+    throw new Error('인증 사전 검증 실패');
+  }
+  // 로그인은 setup에서 한 번씩 수행한다. 토큰은 setup 데이터로만 전달하고 파일/로그에 남기지 않는다.
+  for (const account of accounts) account.token = login(account.email);
+  return accounts;
+}
+
+export default function (accounts) {
+  // given: VU마다 다른 회원과 DB에서 계산한 기대 결과를 사용한다.
+  const account = accounts[__VU - 1];
+  for (const variant of ['all', 'reserved']) {
+    const expected = account.expected[variant];
+    const filter = variant === 'reserved' ? '&status=RESERVED' : '';
+    // when: 로그인은 측정 전에 마치고, 실제 Spring Security를 거쳐 조회한다.
+    const response = http.get(`${BASE}/api/reservations/me?page=0&size=10${filter}`, {
+      headers: { Authorization: `Bearer ${account.token}` }, timeout: '10s',
+      tags: { endpoint: 'reservation-list', variant },
+    });
+    let body;
+    try { body = response.json(); } catch (_) { body = null; }
+    const data = body && body.data;
+    const rows = data && Array.isArray(data.content) ? data.content : [];
+    // then: 건수뿐 아니라 소유 회원의 ID·정렬·필터·DTO 매핑까지 비교한다.
+    const valid = check(response, {
+      'HTTP 200': r => r.status === 200,
+      '공통 성공 응답': () => body !== null && body.success === true,
+      '첫 페이지와 전체 건수': () => !!data && data.number === 0 && data.size === 10
+        && data.totalElements === expected.total && data.totalPages === Math.ceil(expected.total / 10),
+      '회원별 예약 ID·정렬·DTO 일치': () => rows.length === 10 && rows.every((row, index) =>
+        Object.keys(expected.rows[index]).every(key => row[key] === expected.rows[index][key])),
+      '상태 필터 일치': () => variant !== 'reserved' || (rows.length === 10 && rows.every(row => row.status === 'RESERVED')),
+    }, { variant });
+    requests.add(1, { variant });
+    invalid.add(!valid, { variant });
+    duration.add(response.timings.duration, { variant });
+    durations[variant].add(response.timings.duration);
+  }
+  sleep(1);
+}
+
+export function handleSummary(data) {
+  // k6 버전에 따라 setup_data도 전달되므로 집계 필드만 명시적으로 선택한다.
+  // 로그인 토큰이 들어 있는 setup_data와 요청/응답 원문은 저장하지 않는다.
+  const summary = { metrics: data.metrics, root_group: data.root_group,
+    options: data.options, state: data.state };
+  const count = data.metrics.reservation_list_requests?.values.count ?? 0;
+  const failed = data.metrics.checks?.values.fails ?? 0;
+  const lines = [`smoke 목록 요청: ${count}/20, 실패한 check: ${failed}`];
+  for (const variant of ['all', 'reserved']) {
+    const values = data.metrics[`reservation_list_${variant}_duration`]?.values;
+    if (values && Number.isFinite(values.med)) lines.push(`${variant}: med=${values.med.toFixed(2)}ms p95=${values['p(95)'].toFixed(2)}ms p99=${values['p(99)'].toFixed(2)}ms`);
+  }
+  return {
+    stdout: lines.join('\n') + '\n',
+    [`/results/${runId}/summary.json`]: JSON.stringify(summary, null, 2),
+  };
+}

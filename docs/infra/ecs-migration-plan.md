@@ -225,7 +225,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 발견한 문제: 슬롯 자동 생성이 항상 실패 (앱 코드, 전환과 무관)
 - `Cannot execute statement in a READ ONLY transaction` (`select a1_0.id from attractions ... for update`)
 - `AttractionRepository.findAllActiveIds()`에 `@Lock(PESSIMISTIC_WRITE)`가 붙어 있는데, 호출하는 `AttractionSlotGenerationService.findTargetAttractionIds()`가 `@Transactional(readOnly = true)`라 MySQL이 `FOR UPDATE`를 거부한다. 어트랙션별 잠금은 `generateSlots()`의 `findActiveByIdForUpdate()`가 이미 한다.
-- 어트랙션이 0건이라 지금은 피해가 없다. KAN-123 코드 문제라 이 전환과 별도 티켓으로 고친다.
+- 어트랙션이 0건이라 지금은 피해가 없다. KAN-135(PR #247)에서 `@Lock`을 제거하고 MySQL 회귀 테스트를 추가했다. 운영 확인은 dev → main 릴리스 뒤 worker 기동 로그로 한다.
 
 롤백
 - ALB 기본 규칙을 `attraction-final`로 되돌리고 worker desired 0 → ASG min 1 / desired 1. 인스턴스는 `APP_VERSION`(main SHA)의 S3 실행 구성으로 뜬다(4단계에서 S3 업로드를 유지한 이유). 이전 버전이 아니라 main SHA로 돌아간다.
@@ -257,7 +257,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - 스케줄러 실행 실패(`exception!="none"`)는 따로 두지 않는다. 예외를 잡는 스케줄러는 ERROR 로그로 남기므로 "ERROR 로그"가 잡고, 잡지 않은 예외도 Spring이 ERROR로 남긴다.
 - 응답 지연, DB 커넥션 고갈, RDS·ElastiCache·task 자원 알림은 넣지 않는다. 실제 트래픽이 없어 기준을 정할 수 없고, 자원이 다해 task가 죽으면 위 규칙이 잡는다. 부하가 생기면 추가한다.
 - CD 실패는 GitHub Actions 실패 알림으로 받는다.
-- "ERROR 로그"는 슬롯 자동 생성 실패(5단계에서 발견)를 먼저 고친 뒤 켠다. 고치지 않으면 매일 00:05에 울린다.
+- "ERROR 로그"는 KAN-135(슬롯 자동 생성 실패 수정)가 운영에 반영된 뒤 켠다. 반영 전에 켜면 매일 00:05에 울린다.
 
 알림 정책
 - 채널 하나, 심각도 구분 없음
@@ -338,5 +338,5 @@ B. 저장소 정리 (PR 하나)
 - ElastiCache 복제본, RDS Multi-AZ
 - `TicketExpirationScheduler`의 `SKIP LOCKED` 적용과 로그 형식 정리 (worker를 여러 개로 늘릴 때 함께 진행)
 - 미처리 웹훅·환불 적체량 지표(gauge)와 알림 (앱 코드 변경이 필요)
-- 슬롯 자동 생성 실패 수정 (5단계에서 발견, `findAllActiveIds()`의 `@Lock` 제거)
+- 슬롯 자동 생성 실패 수정: KAN-135로 분리
 - 모니터링 주소를 프라이빗 DNS 이름으로 통일: EC2 Alloy의 Loki 주소, SSM `LOKI_URL`·`PROMETHEUS_URL`(EC2와 함께 쓰는 값이라 이번에 바꾸지 않음. Prometheus 레코드도 그때 만든다)

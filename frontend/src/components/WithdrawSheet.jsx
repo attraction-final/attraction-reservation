@@ -7,14 +7,14 @@ import { useAuth } from '../context/AuthContext.jsx';
  *
  * 탈퇴는 되돌릴 수 없어서 "안내를 확인했어요" 체크를 해야 버튼이 눌려요.
  * 안내 문구는 백엔드 UserWithdrawalService.java 가 실제로 하는 일과 맞춰 적었어요.
- *  - 미사용 입장권이 있으면 탈퇴 불가 (409)
+ *  - 미사용 입장권이 있거나(USER_WITHDRAWAL_UNUSED_TICKET), 환불이 끝나지 않았으면(USER_WITHDRAWAL_INCOMPLETE_REFUND) 탈퇴 불가 (둘 다 409)
  *  - 이용 예정 예약은 자동 취소
  *  - 탈퇴하면 상태가 WITHDRAWN 이 되어 로그인이 막혀요 (AuthService 가 ACTIVE 만 통과)
  */
 export default function WithdrawSheet({ onClose, onDone }) {
   const { withdraw } = useAuth();
   const [agreed, setAgreed] = useState(false);
-  const [error, setError] = useState(null); // ApiError 객체를 그대로 담아요 (status 를 보려고)
+  const [error, setError] = useState(null); // ApiError 객체를 그대로 담아요 (code 를 보려고)
   const [working, setWorking] = useState(false);
 
   async function submit() {
@@ -31,8 +31,11 @@ export default function WithdrawSheet({ onClose, onDone }) {
 
   const close = () => { if (!working) onClose(); };
 
-  // 409 = 미사용 입장권 때문에 막힘 → 입장권 화면으로 가는 길을 같이 보여 줘요
-  const blockedByTicket = error?.status === 409;
+  // 같은 409라도 원인이 둘이라 서버 에러 code 로 구분해요.
+  // - 미사용 입장권 → 입장권 화면으로 가는 길을 같이 보여 줘요 (환불은 거기서 해요)
+  // - 환불 처리 중 → 기다리면 되니까 결제 내역에서 확인하라고 안내해요
+  const blockedByTicket = error?.code === 'USER_WITHDRAWAL_UNUSED_TICKET';
+  const blockedByRefund = error?.code === 'USER_WITHDRAWAL_INCOMPLETE_REFUND';
 
   return (
     <div className="sheet-backdrop" onClick={close}>
@@ -55,6 +58,11 @@ export default function WithdrawSheet({ onClose, onDone }) {
           <Link to="/my/tickets" className="bold" style={{ fontSize: 13, color: 'var(--blue-ink)' }}>
             내 입장권 보러 가기
           </Link>
+        )}
+        {blockedByRefund && (
+          <span className="small muted">
+            환불이 끝나면 다시 탈퇴할 수 있어요. 진행 상황은 마이페이지의 결제 내역에서 확인해 주세요.
+          </span>
         )}
 
         <div className="row gap-10" style={{ marginTop: 6 }}>

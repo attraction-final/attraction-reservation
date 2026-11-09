@@ -79,6 +79,7 @@ services:
       RUN_ID: "${RUN_ID:-smoke-02}"
       TEST_MODE: "${TEST_MODE:-smoke}"
       TEST_VUS: "${TEST_VUS:-10}"
+      START_MODE: "${START_MODE:-simultaneous}"
       P95_MS: "${P95_MS:-}"
     command: ["run", "--quiet", "reservation-list.js"]
     volumes:

@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
+import execution from 'k6/execution';
 import { Counter, Gauge, Rate, Trend } from 'k6/metrics';
 import { BASE, login } from './auth.js';
 
@@ -21,9 +22,28 @@ const requests = new Counter('reservation_list_requests');
 const setupStartedAt = new Gauge('reservation_list_setup_started_at_ms');
 const setupFinishedAt = new Gauge('reservation_list_setup_finished_at_ms');
 const vuStartedAt = new Gauge('reservation_list_vu_started_at_ms');
+const scenarioStartedAt = new Gauge('reservation_list_scenario_started_at_ms');
+const firstRequestAt = new Gauge('reservation_list_vu_first_request_at_ms');
+// load의 전체 지표를 유지하면서 요청 시작 시각으로 구간을 나눈다.
+const phaseMetrics = {};
+for (const phase of ['initial', 'later', 'drain']) {
+  phaseMetrics[phase] = {};
+  for (const variant of ['all', 'reserved']) {
+    const prefix = `reservation_list_${phase}_${variant}`;
+    phaseMetrics[phase][variant] = {
+      duration: new Trend(`${prefix}_duration`, true),
+      requests: new Counter(`${prefix}_requests`),
+      invalid: new Rate(`${prefix}_invalid`),
+    };
+  }
+}
 
 const mode = __ENV.TEST_MODE || 'smoke';
 if (!['smoke', 'warmup', 'load'].includes(mode)) throw new Error('잘못된 TEST_MODE');
+const requestedStartMode = __ENV.START_MODE || 'simultaneous';
+if (!['simultaneous', 'staggered'].includes(requestedStartMode)) throw new Error('잘못된 START_MODE');
+// 비교 변수는 측정용 load의 시작 방식 하나다. warm-up의 시작 방식은 기존대로 유지한다.
+const startMode = mode === 'load' ? requestedStartMode : 'simultaneous';
 const loadUsers = Number(__ENV.TEST_VUS || 10);
 if (![10, 20, 50, 100].includes(loadUsers)) throw new Error('TEST_VUS는 10, 20, 50, 100이어야 합니다.');
 const users = mode === 'smoke' ? 2 : loadUsers;
@@ -41,6 +61,16 @@ const thresholds = {
 if (mode === 'load' && p95 !== null) {
   thresholds.reservation_list_all_duration = [`p(95)<${p95}`];
   thresholds.reservation_list_reserved_duration = [`p(95)<${p95}`];
+}
+if (mode === 'load') {
+  // 두 주요 구간에 실제 표본이 있어야 한다. drain 발생 여부는 합격 조건으로 강제하지 않는다.
+  for (const phase of ['initial', 'later']) {
+    for (const variant of ['all', 'reserved']) {
+      const prefix = `reservation_list_${phase}_${variant}`;
+      thresholds[`${prefix}_requests`] = ['count>0'];
+      thresholds[`${prefix}_invalid`] = ['rate==0'];
+    }
+  }
 }
 export const options = {
   scenarios: mode === 'smoke' ? {
@@ -87,13 +117,26 @@ export function setup() {
 
 export default function (accounts) {
   // Gauge의 min/max로 각 VU 첫 iteration 시작 시각의 범위를 확인한다.
-  if (__ITER === 0) vuStartedAt.add(Date.now());
+  if (__ITER === 0) {
+    vuStartedAt.add(Date.now());
+    scenarioStartedAt.add(execution.scenario.startTime);
+    if (startMode === 'staggered') {
+      // VU ID 순서로 공통 scenario 시작부터 0~5초에 균등 배치한다. 매 iteration마다 쉬는 것은 아니다.
+      const targetStart = execution.scenario.startTime + (__VU - 1) * 5000 / (users - 1);
+      const remainingMs = targetStart - Date.now();
+      if (remainingMs > 0) sleep(remainingMs / 1000);
+    }
+  }
   // given: VU마다 다른 회원과 DB에서 계산한 기대 결과를 사용한다.
   const account = accounts[__VU - 1];
   for (const variant of ['all', 'reserved']) {
     const expected = account.expected[variant];
     const filter = variant === 'reserved' ? '&status=RESERVED' : '';
+    // setup이 끝난 뒤 시작하는 scenario가 공통 기준이다. VU마다 서로 다른 0초를 사용하지 않는다.
+    const elapsedMs = Date.now() - execution.scenario.startTime;
+    const phase = elapsedMs < 10000 ? 'initial' : elapsedMs < 60000 ? 'later' : 'drain';
     // when: 로그인은 측정 전에 마치고, 실제 Spring Security를 거쳐 조회한다.
+    if (__ITER === 0 && variant === 'all') firstRequestAt.add(Date.now());
     const response = http.get(`${BASE}/api/reservations/me?page=0&size=10${filter}`, {
       headers: { Authorization: `Bearer ${account.token}` }, timeout: '10s',
       tags: { endpoint: 'reservation-list', variant },
@@ -116,6 +159,11 @@ export default function (accounts) {
     invalid.add(!valid, { variant });
     duration.add(response.timings.duration, { variant });
     durations[variant].add(response.timings.duration);
+    if (mode === 'load') {
+      phaseMetrics[phase][variant].duration.add(response.timings.duration);
+      phaseMetrics[phase][variant].requests.add(1);
+      phaseMetrics[phase][variant].invalid.add(!valid);
+    }
   }
   sleep(1);
 }
@@ -127,10 +175,24 @@ export function handleSummary(data) {
     options: data.options, state: data.state };
   const count = data.metrics.reservation_list_requests?.values.count ?? 0;
   const failed = data.metrics.checks?.values.fails ?? 0;
-  const lines = [`${mode} 목록 요청: ${count}${mode === 'smoke' ? '/20' : ''}, 실패한 check: ${failed}`];
+  const lines = [`${mode} startMode=${startMode} 목록 요청: ${count}${mode === 'smoke' ? '/20' : ''}, 실패한 check: ${failed}`];
   for (const variant of ['all', 'reserved']) {
     const values = data.metrics[`reservation_list_${variant}_duration`]?.values;
     if (values && Number.isFinite(values.med)) lines.push(`${variant}: med=${values.med.toFixed(2)}ms p95=${values['p(95)'].toFixed(2)}ms p99=${values['p(99)'].toFixed(2)}ms`);
+  }
+  if (mode === 'load') {
+    for (const phase of ['initial', 'later', 'drain']) {
+      for (const variant of ['all', 'reserved']) {
+        const prefix = `reservation_list_${phase}_${variant}`;
+        const values = data.metrics[`${prefix}_duration`]?.values;
+        const phaseCount = data.metrics[`${prefix}_requests`]?.values.count ?? 0;
+        if (values && phaseCount > 0) {
+          lines.push(`${phase}/${variant}: count=${phaseCount} p95=${values['p(95)'].toFixed(2)}ms p99=${values['p(99)'].toFixed(2)}ms`);
+        } else {
+          lines.push(`${phase}/${variant}: count=0`);
+        }
+      }
+    }
   }
   return {
     stdout: lines.join('\n') + '\n',

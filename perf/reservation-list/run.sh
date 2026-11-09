@@ -7,6 +7,7 @@ run_id="${1:-}"
 mode="${2:-smoke}"
 p95_ms="${3:-}"
 load_vus="${TEST_VUS:-10}"
+start_mode="${START_MODE:-simultaneous}"
 if [[ $# -lt 1 || $# -gt 3 || ! "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$ \
   || ( "$mode" != smoke && "$mode" != load ) ]]; then
   echo '사용법: bash perf/reservation-list/run.sh RUN_ID [smoke|load] [p95_ms]' >&2
@@ -18,6 +19,14 @@ if [[ -n "$p95_ms" && ( "$mode" != load || ! "$p95_ms" =~ ^[1-9][0-9]{0,4}$ ) ]]
 fi
 if [[ "$load_vus" != 10 && "$load_vus" != 20 && "$load_vus" != 50 && "$load_vus" != 100 ]]; then
   echo 'TEST_VUS는 현재 단계에서 10, 20, 50, 100만 지원합니다.' >&2
+  exit 1
+fi
+if [[ "$start_mode" != simultaneous && "$start_mode" != staggered ]]; then
+  echo 'START_MODE는 simultaneous 또는 staggered여야 합니다.' >&2
+  exit 1
+fi
+if [[ "$mode" != load && "$start_mode" != simultaneous ]]; then
+  echo '분산 시작은 load에서만 지원합니다.' >&2
   exit 1
 fi
 target="$script_dir/results/$run_id"
@@ -41,6 +50,7 @@ export PERF_UID="$(id -u)"
 export PERF_GID="$(id -g)"
 export TEST_MODE="$mode"
 export TEST_VUS="$load_vus"
+export START_MODE="$start_mode"
 export P95_MS="$p95_ms"
 compose() { MSYS_NO_PATHCONV=1 docker compose -f "$compose_file" "$@"; }
 snapshot() {
@@ -105,6 +115,9 @@ compose run --rm --no-deps -T fixture
   else
     echo "mode=load vus=$load_vus warmup=20s measurement=60s gracefulStop=25s p95Ms=${p95_ms:-unset}"
     echo 'model=constant-vus thinkSeconds=1 variants=all,reserved'
+    echo "warmupStartMode=simultaneous measurementStartMode=$start_mode"
+    if [[ "$start_mode" == staggered ]]; then echo 'startSpreadSeconds=5'; else echo 'startSpreadSeconds=0'; fi
+    echo 'latencyWindows=initial0to10s,later10to60s,drain60sPlus classification=requestStart basis=scenarioStart'
     echo 'resourceSampling=enabled targetIntervalSeconds=2 sampledMaxIsNotAnAbsolutePeak=true'
     echo 'measurementLifecycle=stopSamplerBeforeRemovingOwnedK6'
     echo 'p95 criterion is an experimental target, not a production SLO'

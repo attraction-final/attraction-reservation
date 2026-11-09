@@ -4,7 +4,7 @@
 smoke 회귀와 warm-up을 분리한 첫 10 VUs 부하 측정을 완료했다. 기능 검증은 통과했으며 성능 합격 기준은 미설정이었다.
 주기적 자원 수집과 20 VUs 측정까지 확인했다. load-02·03의 마지막 Docker 수집은 각 1회 누락됐다.
 수집 종료 순서를 개선한 load-07도 50 VUs 기능 검증을 통과했고 수집·정리 오류는 없었다. 복구·중단 경로는 아직 미검증이다.
-100 VUs의 load-08도 기능 검증을 통과했으며, 시작 직후 한 표본에서 active 10·pending 18을 관측했다. 다음은 같은 100 VUs 반복이다.
+load-10에서 첫 10초의 지연 집중을 확인했다. 다음은 같은 최대 100 VUs에서 측정 시작만 5초에 분산하는 비교 실험이다.
 운영 처리 한계를 판단한 결과는 아니다.
 
 확인한 실행 결과와 구성 오류 조치는 [KAN-134 실험 기록](../../docs/troubleshooting/reservation-list-load-test.md)에 정리한다.
@@ -213,13 +213,54 @@ TEST_VUS=100 bash perf/reservation-list/run.sh load-09 load
 load-08은 오류 없이 종료했지만 pending > 0은 30개 표본 중 1개였으므로 지속적인 pool 부족이라고 확정하지 않는다.
 관측된 대기는 connection 획득 대기다. row lock 대기나 지연의 직접 원인으로 혼동하지 않는다.
 
+### 12. 100 VUs를 유지하고 시간 구간별 지연 확인
+
+```bash
+TEST_VUS=100 bash perf/reservation-list/run.sh load-10 load
+```
+
+부하·계정·데이터·pool·측정 시간은 유지하고 load의 전체 지표에 다음 구간별 지표를 추가했다.
+기준은 setup 종료 뒤 실행되는 k6 scenario의 공통 startTime이다. scenario 시작 시각도 Gauge로 남긴다.
+
+| phase | 요청 시작 시각 기준 범위 | 의미 |
+| --- | --- | --- |
+| initial | 0초 이상~10초 미만 | 시작 직후 요청 |
+| later | 10초 이상~60초 미만 | 이후 요청. 완전히 안정된 구간이라고 가정하지 않음 |
+| drain | 60초 이상 | 완료 대기 중 진행 중 iteration이 시작한 추가 요청 |
+
+각 구간의 all/reserved별 duration·requests·invalid 지표를 `reservation_list_<phase>_<variant>_*`로 저장한다.
+기존 전체 지표도 유지한다. initial/later의 두 조회 조건은 각각 표본이 있어야 하며 응답 검증 실패율은 0이어야 한다.
+drain 요청은 발생을 강제하지 않는다. 구간별 요청 수의 합과 전체 요청 수도 결과 확인 시 비교한다.
+예를 들어 9.9초에 시작해 10.2초에 끝난 요청은 initial이다. 응답 완료 시각 기준으로 옮기지 않는다.
+구간별 p99를 단순 평균해 전체 p99로 계산하지 않는다. 구간별 요청률이 필요하면 k6 Counter rate의 전체 실행 분모와 구분한다.
+이 변경은 집계만 분리한 실험이며 초기 요청을 분산하거나 제거한 부하 변경이 아니다. 구간별 지표는 load-10에서 검증했다.
+
+load-10에서 구간별 집계와 전체 요청 수 일치를 확인했다. initial은 조건별 900건, later는 조건별 4,939건이었고 drain은 0건이었다.
+전체/RESERVED의 initial p99는 366.65/403.08ms, later p99는 39.35/14.12ms였다. 원인을 확정한 결과는 아니다.
+
+### 13. 100 VUs 첫 요청을 5초에 분산하는 비교
+
+```bash
+START_MODE=staggered TEST_VUS=100 bash perf/reservation-list/run.sh load-11 load
+```
+
+START_MODE 기본값은 simultaneous다. staggered에서는 측정용 load의 첫 요청만 VU ID 순으로 scenario 시작 0~5초에 배치한다.
+그 이후 전체·RESERVED 조회와 1초 대기는 그대로 반복한다. warm-up은 START_MODE와 관계없이 기존 동시 시작을 유지한다.
+100 VUs·60초는 유지하지만 처음 5초의 실제 요청 활동은 점진적으로 늘어나므로 총 요청 수·요청률이 달라질 수 있다.
+이는 시작 방식의 비교 실험이며 동일한 요청 도착 패턴에서 앱을 개선한 실험이 아니다.
+
+`reservation_list_vu_started_at_ms`는 기존대로 첫 iteration 진입을 기록한다.
+새 `reservation_list_vu_first_request_at_ms`의 min/max로 실제 첫 요청이 약 5초에 퍼졌는지 확인한다.
+지연이나 CPU 상황에 따라 목표 시각에 정확히 실행된다는 보장은 없으므로 기록된 시각을 사용한다.
+scenario 기준 initial/later/drain 집계는 유지한다. 새 분산 시작 프로필의 실제 실행은 아직 검증 전이다.
+
 ## 결과 확인
 
 결과는 `perf/reservation-list/results/<RUN_ID>/`에 저장되며 Git에서 제외한다.
 
 | 파일 | 확인할 내용 | 해석 범위 |
 | --- | --- | --- |
-| `summary.json` | 측정 구간 check 실패, invalid rate, 요청 수, 조건별 duration, setup/VU 시작 시각 Gauge | 인증·로그인 요청이 포함된 전체 HTTP 지표 대신 목록 전용 지표 사용 |
+| `summary.json` | 전체 check, 전체/구간별 invalid·요청 수·duration, setup/VU/scenario/첫 요청 시각 Gauge | 분산 시작에서는 iteration 진입과 실제 첫 요청 시각을 구분. check 자체는 기존 전체 검증을 유지 |
 | `warmup-summary.json`, `warmup-exit-code.txt` | load의 별도 warm-up 결과와 종료 코드 | 측정 결과와 합산하지 않음. smoke에는 생성하지 않음 |
 | `fixture.jsonl` | 후보 회원 100명의 조건별 DB 기대 결과 200행 | smoke는 2명, load는 선택한 10명/20명/50명/100명 사용. 토큰·비밀번호 없음 |
 | `metadata.txt` | 시각, HEAD·수정 상태, jar/스크립트 hash, 실제 DB 건수·버전·인덱스·앱/DB/Redis image ID | 소스와 jar 일치 여부는 빌드 절차로 별도 관리 |
@@ -246,7 +287,7 @@ load-08은 오류 없이 종료했지만 pending > 0은 30개 표본 중 1개였
 ## 다음 단계
 
 첫 측정 전에 임시 p95 기준을 선택한다. 첫 10 VUs 결과를 확인한 뒤 부하 단계를 늘릴지 판단한다.
-100 VUs에서 초기 connection 대기를 처음 관측했고 다음은 같은 조건 반복이다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
+시간 구간별로 초기 지연 집중을 확인했고 다음은 분산 시작과 비교한다. 요청별 SQL 수·DB 실행 계획 수집은 아직 포함하지 않는다.
 Docker stats와 앱 scrape는 동시에 취득한 값이 아니며 기록된 관측 시각을 함께 확인한다.
 Docker 메모리와 JVM heap 사용량은 서로 다른 지표다. 수집기 자체의 CPU·I/O 비용도 있으므로 load-01과의 시간 차이를 최적화 효과로 주장하지 않는다.
 앱·DB·k6가 같은 PC의 Docker 자원을 공유하므로
@@ -266,4 +307,5 @@ docker compose -f perf/reservation-list/compose.yaml down
 - [k6 handleSummary 결과 저장](https://grafana.com/docs/k6/latest/results-output/end-of-test/custom-summary/)
 - [Docker stats의 형식과 메모리 해석](https://docs.docker.com/reference/cli/docker/container/stats/)
 - [Compose run의 컨테이너 자동 삭제와 label](https://docs.docker.com/reference/cli/docker/compose/run/)
+- [k6 execution의 scenario startTime](https://grafana.com/docs/k6/latest/javascript-api/k6-execution/)
 - 현재 ReservationController, SearchReservationListResponse, ReservationCustomRepositoryImpl, AuthController, CsrfController와 Flyway 스키마를 기준으로 작성했다.

@@ -61,7 +61,7 @@ while [[ ! -e "$target/sampling-stop" ]]; do
     {
       echo "# sample=$sample scrapeCompletedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       printf '%s\n' "$scrape" |
-        awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_)/'
+        awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_|reservation_create_slot_(lookup|postlookup)_)/'
     } >> "$target/metrics-samples.txt"
   else
     echo "sample=$sample at=$started_at source=prometheus result=failed" >> "$errors"

@@ -400,6 +400,28 @@ pool2k-01은 실제 max/min 20/20에서 2,000건 성공·DB 정합성을 통과�
 pool pending 최대는 190에서 180으로 줄었지만, 슬롯 대기 양수 표본의 트랜잭션은 8~9개에서 18~19개로 늘었다(lock2k-04와 비교).
 수집 오류·커넥션 timeout·k6 OOM은 없었다. 이번 실행에서 지연 개선은 확인되지 않았으며 단일 실행으로 항상 느리다고 단정하지 않는다. 기본 pool 10은 유지한다.
 
+## KAN-155 구간 측정 기준값
+
+KAN-155의 Timer를 시작 전·주기·종료 후 Prometheus 파일에 수집하도록 필터를 보강했다. metadata의 수집 활성화 표시는 필터 설정이며 앱에서 실제 지표가 생성됐다는 보장은 아니다.
+현재 소스로 bootJar를 다시 만든 뒤 기존 pool 10·k6 2 CPU·잠금 관측 조건에서 집중 기준값을 측정한다.
+
+```bash
+./gradlew bootJar
+PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh base155-01 single
+```
+
+실제 KST 10:00 이상~21:10 미만에 실행한다. 아직 이 기준값은 측정하지 않았다.
+
+| Prometheus 지표 접두어 | result 값 | 측정 구간 |
+| --- | --- | --- |
+| reservation_create_slot_lookup_seconds | success / failure | 슬롯 조회 호출 전부터 정상 반환 또는 예외까지. 잠금 대기·쿼리·엔티티 조회를 포함한다. |
+| reservation_create_slot_postlookup_seconds | committed / rolledback / unknown | 조회 지표 기록 직후부터 트랜잭션 afterCompletion callback까지. 정확한 DB 잠금 보유 시간이 아니다. |
+
+종료 후 실제 count/sum과 결과 tag를 확인한다. 평균은 같은 tag의 시작 전후 sum 차이 / count 차이로 계산하며 단위는 초다.
+첫 2,000건 성공 기준 실행은 lookup success와 postlookup committed의 count 증가가 각각 2,000인지 확인한다. 누락된 지표를 0으로 간주하지 않는다.
+현재 Timer에는 histogram/percentile 설정이 없으므로 구간별 p95/p99를 제공한다고 가정하지 않는다. k6 API 지연 분포와 구분한다.
+부하 실행은 사용자가 수행하고, 측정 추가 전 KAN-150 결과와 코드/JAR 조건이 달라졌음을 기록한다. 성능 개선 전 기준값이며 아직 로직 최적화는 하지 않았다.
+
 ## 마무리 및 후속 작업
 
 KAN-150은 예약 생성 부하의 정합성 검증·병목 진단으로 마무리한다. 최종 기본 pool 10·측정 k6 2 CPU 조건에서 2,000명 집중·매진·분산을 각각 두 번 확인했다.

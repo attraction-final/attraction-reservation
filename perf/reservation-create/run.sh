@@ -55,7 +55,7 @@ mysql() { compose exec -T -e MYSQL_PWD=perf-local-only mysql mysql -uperf --defa
 sql_file() { { printf "SET @run_id='%s'; SET @scenario='%s'; SET @users=%s;\n" "$run_id" "$scenario" "$users"; cat "$1"; } | mysql; }
 snapshot() {
   curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18107/actuator/prometheus |
-    awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_)/'
+    awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_|reservation_create_slot_(lookup|postlookup)_)/'
 }
 
 compose up -d --wait --wait-timeout 120 mysql redis
@@ -83,6 +83,7 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
   echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
   echo "appCpus=2 appMemory=1GiB poolMax=$pool_size poolMin=$pool_size generatorCpus=$k6_cpus generatorMemory=2GiB"
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
+  echo 'reservationStageMetricCollection=enabled lookupIncludesQueryAndWait=true postlookupEndsAt=afterCompletion'
   echo "dbLockSampling=$db_locks dbLockSamplingMode=currentWaitEdges"
   echo "setupData=tokenArray fixtureData=sharedArray launchDiagnostics=enabled requestTargetOffsetMs=$(( users >= 2000 ? 5000 : 1500 ))"
   echo "setupTimeoutSeconds=$(( users >= 2000 ? 240 : users >= 500 ? 120 : 60 )) minimumTokenValiditySeconds=$(( (users >= 2000 ? 240 : users >= 500 ? 120 : 60) + 120 ))"

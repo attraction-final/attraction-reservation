@@ -25,6 +25,10 @@ const rejectionDuration = new Trend('reservation_create_rejection_duration', tru
 const requestStartedAt = new Gauge('reservation_create_request_started_at_ms');
 const setupStartedAt = new Gauge('reservation_create_setup_started_at_ms');
 const setupFinishedAt = new Gauge('reservation_create_setup_finished_at_ms');
+const vuReadyAt = new Gauge('reservation_create_vu_ready_at_ms');
+const scenarioStartedAt = new Gauge('reservation_create_scenario_started_at_ms');
+const lateVus = new Counter('reservation_create_late_vus');
+const payloadChars = new Gauge('reservation_create_setup_payload_chars');
 export const options = {
   setupTimeout: `${setupTimeoutSeconds}s`,
   scenarios: { [scenario]: { executor: 'per-vu-iterations', vus: users, iterations: 1, maxDuration: '90s', gracefulStop: '10s' } },
@@ -48,19 +52,30 @@ export function setup() {
   }
   // 실제 서버 시간을 바꾸지 않는다. 토큰은 setup 메모리에서만 전달한다.
   // setup 대기 + scenario 최대 90초 + gracefulStop 10초 + 여유 20초를 확보한다.
-  const accounts = fixture.map(account => ({ ...account, token: login(account.email, setupTimeoutSeconds + 120) }));
+  // 회원/티켓/슬롯은 SharedArray에서 읽고, setup에서는 토큰만 전달한다.
+  // 토큰 배열 자체는 VU별 전달 대상이다. 전체 복제 비용을 제거했다고 가정하지 않는다.
+  const tokens = fixture.map(account => login(account.email, setupTimeoutSeconds + 120));
+  // 문자열 길이만 집계하며 토큰 내용이나 setup_data는 파일로 저장하지 않는다.
+  payloadChars.add(JSON.stringify(tokens).length);
   setupFinishedAt.add(Date.now());
-  return accounts;
+  return tokens;
 }
 
-export default function (accounts) {
-  const account = accounts[__VU - 1];
+export default function (tokens) {
+  const readyAt = Date.now();
+  const target = execution.scenario.startTime + 1500;
+  vuReadyAt.add(readyAt);
+  scenarioStartedAt.add(execution.scenario.startTime);
+  lateVus.add(readyAt > target ? 1 : 0);
+  const account = fixture[__VU - 1];
+  const token = tokens[__VU - 1];
+  if (typeof token !== 'string' || !token) throw new Error('VU별 토큰 배정 확인 실패');
   // 공통 목표 시각에 요청을 모은다. 실제 동시성은 요청 시작 Gauge 범위로 확인한다.
-  const remaining = execution.scenario.startTime + 1500 - Date.now();
+  const remaining = target - Date.now();
   if (remaining > 0) sleep(remaining / 1000);
   requestStartedAt.add(Date.now());
   const response = http.post(`${BASE}/api/reservations`, JSON.stringify({ ticketId: account.ticketId, slotId: account.slotId }), {
-    headers: { Authorization: `Bearer ${account.token}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     timeout: '30s', tags: { endpoint: 'reservation-create' },
     responseCallback: scenario === 'sold-out' ? http.expectedStatuses(201,409) : http.expectedStatuses(201),
   });

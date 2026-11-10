@@ -6,8 +6,9 @@
 # Grafana는 ALB(grafana.xevbn.click, Cognito 인증)에서만 접근하도록 보안 그룹으로 제한한다.
 # SSM 포트 포워딩은 비상 접속용으로 남긴다.
 #
-# 인스턴스가 준비할 값 (.env)
-#   GRAFANA_ADMIN_PASSWORD   Parameter Store에서 읽는다.
+# 인스턴스가 준비할 값 (.env). user-data가 처음 만들고, CD(deploy-monitoring)가 배포마다 다시 만든다.
+#   GRAFANA_ADMIN_PASSWORD   Parameter Store monitoring/GRAFANA_ADMIN_PASSWORD
+#   ALERT_WEBHOOK_URL        Parameter Store monitoring/ALERT_WEBHOOK_URL (Slack 알림, provisioning/alerting)
 #
 #   docker compose up -d
 
@@ -53,7 +54,8 @@ services:
     mem_limit: 512m
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
-      GF_SERVER_ROOT_URL: https://grafana.xevbn.click
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:?}
+      GF_SERVER_ROOT_URL: https://grafana.xevbn.click   # 알림 메시지의 Grafana 링크 주소 (ALB 호스트 규칙)
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     volumes:

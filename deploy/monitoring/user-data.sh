@@ -6,7 +6,7 @@
 #   1. Docker와 compose 플러그인을 설치한다.
 #   2. Parameter Store의 MONITORING_VERSION에 해당하는 실행 구성을 S3의 monitoring/<SHA>/ 에서 받는다.
 #   3. 데이터 디렉터리(/data)를 만들고 컨테이너 사용자에 맞춰 소유자를 바꾼다.
-#   4. Grafana 관리자 비밀번호로 .env를 만들고 docker compose로 실행한다.
+#   4. Grafana 관리자 비밀번호와 Slack webhook으로 .env를 만들고 docker compose로 실행한다.
 #
 # 인스턴스를 띄울 때 지정할 값
 #   - AMI: Amazon Linux 2023 arm64 (aws cli v2 기본 포함), 타입 t4g.medium
@@ -22,8 +22,9 @@
 #     주의: 새 환경에서 첫 모니터링 배포가 실패하면(인스턴스가 아직 없을 때 등) CD가 이 값을 none으로 남긴다.
 #           이 상태로는 인스턴스가 기동하지 못하므로, S3 monitoring/<SHA>/ 에 번들이 있는 SHA로 직접 고친 뒤 띄운다.
 #   ${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD  Grafana admin 비밀번호
+#   ${SSM_PREFIX}/monitoring/ALERT_WEBHOOK_URL       Slack incoming webhook (Grafana 알림)
 #
-# 이후 설정 변경은 CD(deploy-monitoring)가 SSM Run Command로 반영한다.
+# 이후 설정 변경은 CD(deploy-monitoring)가 SSM Run Command로 반영한다. .env도 CD가 배포마다 다시 만든다.
 #
 # 비밀값이 출력되지 않도록 set -x를 쓰지 않는다.
 
@@ -74,16 +75,26 @@ chown -R 472:0 /data/grafana            # grafana/grafana
 
 # 4) 실행
 umask 077
-GRAFANA_ADMIN_PASSWORD=$(aws ssm get-parameter --name "${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD" \
-  --with-decryption --query 'Parameter.Value' --output text)
+read_secret() {
+  aws ssm get-parameter --name "${SSM_PREFIX}/monitoring/$1" --with-decryption --query 'Parameter.Value' --output text
+}
+GRAFANA_ADMIN_PASSWORD=$(read_secret GRAFANA_ADMIN_PASSWORD)
+ALERT_WEBHOOK_URL=$(read_secret ALERT_WEBHOOK_URL)
 # 작은따옴표로 감싸야 Compose가 $, # 를 해석하지 않는다. 감쌀 수 없는 작은따옴표는 거부한다.
-case "$GRAFANA_ADMIN_PASSWORD" in
+case "${GRAFANA_ADMIN_PASSWORD}${ALERT_WEBHOOK_URL}" in
   *\'*)
-    echo "GRAFANA_ADMIN_PASSWORD에 작은따옴표가 있어 .env에 쓸 수 없습니다." >&2
+    echo "GRAFANA_ADMIN_PASSWORD 또는 ALERT_WEBHOOK_URL에 작은따옴표가 있어 .env에 쓸 수 없습니다." >&2
     exit 1
     ;;
 esac
-printf "GRAFANA_ADMIN_PASSWORD='%s'\n" "$GRAFANA_ADMIN_PASSWORD" > .env
+case "$ALERT_WEBHOOK_URL" in
+  https://hooks.slack.com/services/*) ;;
+  *)
+    echo "ALERT_WEBHOOK_URL이 Slack incoming webhook 형식이 아닙니다." >&2
+    exit 1
+    ;;
+esac
+printf "GRAFANA_ADMIN_PASSWORD='%s'\nALERT_WEBHOOK_URL='%s'\n" "$GRAFANA_ADMIN_PASSWORD" "$ALERT_WEBHOOK_URL" > .env
 umask 022
 
 docker compose up -d

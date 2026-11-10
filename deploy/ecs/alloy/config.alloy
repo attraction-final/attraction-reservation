@@ -1,0 +1,37 @@
+// 같은 task의 app 컨테이너에서 actuator 메트릭을 수집해 Prometheus로 보낸다.
+// 로그는 FireLens(Fluent Bit)가 보낸다. (deploy/ecs/fluent-bit)
+//
+// 같은 시계열이 task끼리 겹치지 않도록 instance에 ECS task ID를 붙이고,
+// api와 worker를 나눠 볼 수 있도록 service(api·worker)를 붙인다.
+
+// ECS가 모든 컨테이너에 넣어 주는 메타데이터 주소에서 task 정보를 읽는다.
+// task ID는 task가 끝날 때까지 바뀌지 않으므로 자주 읽지 않는다.
+remote.http "task_metadata" {
+  url            = sys.env("ECS_CONTAINER_METADATA_URI_V4") + "/task"
+  poll_frequency = "1h"
+}
+
+// awsvpc 모드에서는 task 안의 컨테이너가 localhost를 함께 쓴다.
+prometheus.scrape "app" {
+  targets = [{
+    "__address__" = "localhost:8081",
+    // TaskARN 형식: arn:aws:ecs:<리전>:<계정>:task/<클러스터>/<task ID>
+    "instance"    = string.split(encoding.from_json(remote.http.task_metadata.content)["TaskARN"], "/")[2],
+  }]
+  job_name        = "attraction-reservation"
+  metrics_path    = "/actuator/prometheus"
+  scrape_interval = "15s"
+  forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = sys.env("PROMETHEUS_URL")
+  }
+
+  external_labels = {
+    app = "attraction-reservation",
+    env = sys.env("APP_ENV"),
+    service = sys.env("SERVICE"),
+  }
+}

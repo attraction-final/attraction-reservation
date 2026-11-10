@@ -1,0 +1,233 @@
+# Grafana가 기동할 때 알림 규칙, Slack contact point, 알림 정책을 등록한다.
+# 대상은 서비스 중단과 사람이 처리해야 하는 오류뿐이다. (docs/infra/ecs-migration-plan.md 6단계)
+#
+# $ALERT_WEBHOOK_URL: Slack incoming webhook. compose가 .env에서 넘긴다. (값은 SSM monitoring/ALERT_WEBHOOK_URL)
+# 알림 템플릿({{ $labels.event }})은 환경변수로 해석되지 않으므로 데이터소스 파일과 달리 $$로 쓰지 않는다.
+#
+# 규칙은 provisioning으로만 관리한다. Grafana 화면에서 고친 내용은 재시작하면 이 파일로 돌아간다.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: slack
+    receivers:
+      - uid: slack
+        type: slack
+        settings:
+          url: $ALERT_WEBHOOK_URL
+        disableResolveMessage: false   # 해제 알림도 보낸다
+
+policies:
+  - orgId: 1
+    receiver: slack
+    group_by: [grafana_folder, alertname]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+
+groups:
+  - orgId: 1
+    name: attraction-reservation
+    folder: attraction-reservation
+    interval: 1m
+    rules:
+      # ALB가 요청을 보낼 api task가 없다. Fluent Bit(essential)이 죽어 task가 내려간 경우도 여기서 잡힌다.
+      # CloudWatch 지표는 1분마다 나오므로 지표가 끊겨도 알린다.
+      - uid: api-healthy-hosts
+        title: api 정상 대상 0
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        annotations:
+          summary: ALB 대상 그룹 attraction-app-ecs에 정상 api task가 없습니다.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: cloudwatch
+            model:
+              refId: A
+              queryMode: Metrics
+              metricQueryType: 0
+              metricEditorMode: 0
+              region: default
+              namespace: AWS/ApplicationELB
+              metricName: HealthyHostCount
+              dimensions:
+                LoadBalancer: [app/attraction-final/1d837d2395cf6f31]
+                TargetGroup: [targetgroup/attraction-app-ecs/215e2f37c84dd08a]
+              matchExact: true
+              statistic: Minimum
+              period: "60"
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: lt, params: [ 1 ] } } ]
+
+      # Alloy 사이드카는 essential이 아니라 죽어도 task가 남는다. 이때는 위 규칙으로 잡히지 않는다.
+      - uid: api-metrics-missing
+        title: api 메트릭 끊김
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        annotations:
+          summary: Prometheus에 api 메트릭이 들어오지 않습니다. (Alloy 사이드카 확인)
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: count(up{job="attraction-reservation", service="api"} == 1) or vector(0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: lt, params: [ 1 ] } } ]
+
+      # 스케줄러 5개가 10~30초 주기로 돈다. worker task가 없을 때도 실행 횟수 0으로 잡힌다.
+      - uid: worker-scheduler-stalled
+        title: worker 스케줄러 멈춤
+        condition: C
+        for: 1m
+        noDataState: Alerting
+        execErrState: Error
+        annotations:
+          summary: worker의 스케줄러가 10분 동안 한 번도 실행되지 않았습니다.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(tasks_scheduled_execution_seconds_count{job="attraction-reservation", service="worker"}[10m])) or vector(0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: lt, params: [ 1 ] } } ]
+
+      # 5분 동안 5xx 비율 5% 초과 그리고 5건 이상. 요청이 적을 때 한두 건으로 울리지 않게 한다.
+      # 조건을 만족하면 5xx 건수, 아니면 0을 돌려준다.
+      - uid: api-5xx
+        title: api 5xx
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "api 5xx가 5분 동안 {{ $values.B.Value }}건 발생했습니다. (비율 5% 초과)"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                (
+                  sum(increase(http_server_requests_seconds_count{job="attraction-reservation", service="api", uri!~"/actuator.*", status=~"5.."}[5m])) >= 5
+                )
+                and on()
+                (
+                  sum(rate(http_server_requests_seconds_count{job="attraction-reservation", service="api", uri!~"/actuator.*", status=~"5.."}[5m]))
+                  / sum(rate(http_server_requests_seconds_count{job="attraction-reservation", service="api", uri!~"/actuator.*"}[5m]))
+                  > 0.05
+                )
+                or on() vector(0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      # 결제 보상 취소·환불·웹훅의 최종 실패. 고객 돈이 걸려 있어 사람이 바로 처리해야 한다.
+      # 이벤트·결제(pgId)마다 따로 알린다. 아래 "ERROR 로그" 규칙에서는 이 이벤트를 뺀다.
+      - uid: payment-final-failure
+        title: 결제·환불 최종 실패
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "{{ $labels.event }} pgId={{ $labels.pgId }} ({{ $values.B.Value }}건, 5분)"
+          description: Loki에서 event와 pgId로 조회해 원장과 PG 상태를 확인합니다.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                sum by (event, pgId) (count_over_time(
+                {app="attraction-reservation", env="prod", service=~"api|worker"} | logfmt
+                | level="ERROR" | event=~"(PAYMENT_COMPENSATION|REFUND|WEBHOOK)_.+" [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      # 로깅 규칙 5장: ERROR 로그는 알림 대상이다. 기동 중 ERROR도 잡도록 메트릭이 아니라 로그 줄을 센다.
+      # KAN-135(슬롯 자동 생성 실패) 반영 전에는 매일 00:05에 울리므로 일시정지해 둔다. 반영 뒤 false로 바꾼다.
+      - uid: error-logs
+        title: ERROR 로그
+        isPaused: true
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "{{ $labels.service }}에서 ERROR 로그 {{ $values.B.Value }}건 (5분). Grafana 로그 대시보드에서 확인합니다."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: >-
+                sum by (service) (count_over_time(
+                {app="attraction-reservation", env="prod", service=~"api|worker"} | logfmt
+                | level="ERROR" | event!~"(PAYMENT_COMPENSATION|REFUND|WEBHOOK)_.+" [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]

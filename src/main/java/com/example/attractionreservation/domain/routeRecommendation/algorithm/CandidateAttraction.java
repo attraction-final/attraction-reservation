@@ -5,7 +5,7 @@ import java.util.List;
 public record CandidateAttraction(
         Long attractionId,
         String attractionName,
-        int moveMinutes, //이 어트랙션으로 이동할 때 적용할 예상 이동 시간
+        int moveMinutes, //정문 → 이 어트랙션 이동 시간. 첫 방문이거나 실측 구간이 없을 때 대체값으로 쓴다
         List<CandidateSlot> slots //후보 선정 조건을 통과한 슬롯 목록
 ) {
 }

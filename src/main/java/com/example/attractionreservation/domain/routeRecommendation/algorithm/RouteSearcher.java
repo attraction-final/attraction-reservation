@@ -10,10 +10,21 @@ import org.springframework.stereotype.Component;
 @Component
 public class RouteSearcher {
 
+    // 구간 데이터 없이 탐색한다. 모든 이동에 정문 기준 시간을 쓴다.
     public RouteSearchResult search(
             LocalDateTime startAt,
             LocalDateTime endAt,
             List<CandidateAttraction> candidates
+    ) {
+        return search(startAt, endAt, candidates, TravelTimeTable.empty());
+    }
+
+    // 첫 이동은 정문 기준 시간, 이후 이동은 직전 어트랙션 → 다음 어트랙션 실측 시간으로 탐색한다.
+    public RouteSearchResult search(
+            LocalDateTime startAt,
+            LocalDateTime endAt,
+            List<CandidateAttraction> candidates,
+            TravelTimeTable travelTimes
     ) {
         // 아무것도 방문하지 않는 경로를 초기 비교 대상으로 둔다
         RouteSearchResult emptyResult = new RouteSearchResult(
@@ -23,7 +34,9 @@ public class RouteSearcher {
                 startAt, //전체 소요 시간 계산의 기준
                 endAt,
                 candidates,
+                travelTimes,
                 startAt, //첫 이동을 시작할 수 있는 시각
+                null, //직전 어트랙션 ID. null = 정문에서 출발
                 new ArrayList<>(), //현재 만들어 가는 방문 경로
                 new HashSet<>(), //현재 경로에서 이미 방문한 어트랙션 ID
                 emptyResult
@@ -52,7 +65,9 @@ public class RouteSearcher {
             LocalDateTime startAt,
             LocalDateTime endAt,
             List<CandidateAttraction> candidates,
+            TravelTimeTable travelTimes,
             LocalDateTime departureAt,
+            Long previousAttractionId,
             List<PlannedVisit> path,
             Set<Long> visitedIds,
             RouteSearchResult bestResult
@@ -71,9 +86,13 @@ public class RouteSearcher {
                 continue;
             }
 
-            LocalDateTime arrivalAt = departureAt.plusMinutes(
+            //직전 어트랙션 → 이번 어트랙션 이동 시간. 첫 이동이거나 구간이 없으면 정문 기준 시간
+            int moveMinutes = travelTimes.minutesBetween(
+                    previousAttractionId,
+                    attraction.attractionId(),
                     attraction.moveMinutes()
             );
+            LocalDateTime arrivalAt = departureAt.plusMinutes(moveMinutes);
             //도착 후 이용할 수 있는 가장 이른 슬롯 하나를 찾는다
             Optional<CandidateSlot> availableSLot = findEarliestAvailableSlot(attraction,arrivalAt,endAt);
             if (availableSLot.isEmpty()) {
@@ -90,7 +109,7 @@ public class RouteSearcher {
                     attraction.attractionId(),
                     attraction.attractionName(),
                     slot.slotId(),
-                    attraction.moveMinutes(),
+                    moveMinutes,
                     arrivalAt,
                     waitMinutes,
                     slot.startsAt(),
@@ -105,7 +124,10 @@ public class RouteSearcher {
             bestResult = searchPaths(
                     startAt,
                     endAt,
-                    candidates,slot.endsAt(),
+                    candidates,
+                    travelTimes,
+                    slot.endsAt(),
+                    attraction.attractionId(), //다음 이동의 출발지는 방금 방문한 어트랙션
                     path,
                     visitedIds,
                     bestResult

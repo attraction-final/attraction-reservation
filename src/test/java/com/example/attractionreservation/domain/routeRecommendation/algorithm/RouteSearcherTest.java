@@ -30,6 +30,65 @@ class RouteSearcherTest {
         return result.visits().stream().map(PlannedVisit::attractionId).toList();
     }
 
+    private static List<Integer> moveMinutes(RouteSearchResult result) {
+        return result.visits().stream().map(PlannedVisit::moveMinutes).toList();
+    }
+
+    // 13:00부터 5분 간격으로 10분짜리 슬롯을 만든다. 이동 시간만큼 바로 다음 슬롯을 탈 수 있게 해서
+    // 총 소요 시간이 이동 시간에 의해서만 달라지도록 한다.
+    private static CandidateSlot[] everyFiveMinutes(long slotIdBase) {
+        List<CandidateSlot> slots = new ArrayList<>();
+        LocalDateTime startsAt = at("13:00");
+        for (int i = 0; i < 36; i++) {
+            slots.add(new CandidateSlot(slotIdBase + i, startsAt, startsAt.plusMinutes(10)));
+            startsAt = startsAt.plusMinutes(5);
+        }
+        return slots.toArray(CandidateSlot[]::new);
+    }
+
+    //실측 구간 이동 시간
+
+    @Test
+    @DisplayName("실측 구간이 방향마다 다르면 이동 시간이 짧은 방문 순서를 고른다")
+    void search_MeasuredPath_ChoosesShorterDirection() {
+        //given
+        // 정문 기준 시간은 둘 다 10분이라, 구간 데이터가 없으면 동점 → ID가 작은 A가 먼저 온다.
+        CandidateAttraction a = attraction(1L, "A", 10, everyFiveMinutes(100L));
+        CandidateAttraction b = attraction(2L, "B", 10, everyFiveMinutes(200L));
+        TravelTimeTable travelTimes = TravelTimeTable.from(List.of(
+                new TravelTimeTable.PathTime(1L, 2L, 30, true),   // A → B 30분
+                new TravelTimeTable.PathTime(2L, 1L, 5, true)));  // B → A 5분
+
+        //when
+        RouteSearchResult result = routeSearcher.search(at("13:00"), at("18:00"), List.of(a, b), travelTimes);
+
+        //then
+        // B(13:10~13:20) → 5분 이동 → A(13:25~13:35)
+        assertEquals(List.of(2L, 1L), visitedIds(result));
+        assertEquals(List.of(10, 5), moveMinutes(result));
+        assertEquals(35, result.totalDurationMinutes());
+    }
+
+    @Test
+    @DisplayName("비활성 구간은 실측값 대신 도착 어트랙션의 정문 기준 시간을 쓴다")
+    void search_InactivePath_UsesEntranceMinutes() {
+        //given
+        CandidateAttraction a = attraction(1L, "A", 10, everyFiveMinutes(100L));
+        CandidateAttraction b = attraction(2L, "B", 10, everyFiveMinutes(200L));
+        TravelTimeTable travelTimes = TravelTimeTable.from(List.of(
+                new TravelTimeTable.PathTime(1L, 2L, 30, true),    // A → B 30분
+                new TravelTimeTable.PathTime(2L, 1L, 5, false)));  // B → A 비활성 → 정문 기준 10분
+
+        //when
+        RouteSearchResult result = routeSearcher.search(at("13:00"), at("18:00"), List.of(a, b), travelTimes);
+
+        //then
+        // B → A(10분)가 A → B(30분)보다 짧다
+        assertEquals(List.of(2L, 1L), visitedIds(result));
+        assertEquals(List.of(10, 10), moveMinutes(result));
+        assertEquals(40, result.totalDurationMinutes());
+    }
+
 
 
 

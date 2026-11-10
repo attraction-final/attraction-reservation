@@ -202,6 +202,21 @@ class FlywayMigrationIntegrationTest {
                 .isInstanceOf(DuplicateKeyException.class);
     }
 
+    // V10: KAN-142부터 쓰지 않는 추천 저장 테이블을 지웠다. (V8·V9가 바꾼 테이블도 여기서 함께 사라진다)
+    @Test
+    @DisplayName("추천 경로 저장 테이블은 마이그레이션 후 남아 있지 않다")
+    void migrate_DropsRouteRecommendationTables() {
+        // when
+        Integer remaining = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name IN ('route_recommendations', 'route_recommendation_stops', 'route_recommendation_exclusions')
+                """, Integer.class);
+
+        // then
+        assertThat(remaining).isZero();
+    }
+
     private long insertAttractionAndGetId(String name) {
         insertAttraction(name, null);
         return jdbcTemplate.queryForObject(

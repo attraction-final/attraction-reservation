@@ -129,3 +129,11 @@ attraction:
       scheduler:
         enabled: true
         cron: "0 5 0 * * *"      # 초 분 시 일 월 요일 → 매일 00:05
+
+# 현재 위치 기반 경로 추천 (RouteRecommendationProperties, KAN-142)
+route-recommendation:
+  detour-factor: 1.68                  # 실측 도보 거리 / 직선거리 중앙값 (attraction_paths 90건 기준)
+  walking-speed-meters-per-minute: 52.8 # 실측 distance_m / move_minutes 중앙값
+  accuracy-limit-meters: 100           # 위치 오차가 이 값 이상이면 400
+  max-start-distance-meters: 2000      # 가장 가까운 선택 어트랙션까지 직선거리가 이 값을 넘으면 400
+  stale-after: 5m                      # 측정 시각이 이보다 오래되면 STALE_POSITION 경고

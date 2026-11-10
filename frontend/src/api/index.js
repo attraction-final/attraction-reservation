@@ -455,62 +455,76 @@ export const paymentApi = {
 
 // ───────── 루트 추천 ✅ ─────────
 
-// [추천 결과] SearchRouteRecommendationResponse → 화면 모양
+// 이용할 수 없어 계산에서 뺀 구간의 이유
+const UNAVAILABLE_REASON = {
+  INACTIVE: '일시 폐쇄',
+  MISSING: '이동 정보 없음',
+};
+
+// [추천 결과] CreateRouteRecommendationResponse → 화면 모양
+// legs[i] 는 visits[i] 로 가는 구간이에요. (legs[0] = 현재 위치 → 첫 방문지)
 function toRouteResult(res, byId) {
-  const stops = res.visits
-      .map((v) => {
+  const nameOf = (id) => byId.get(id)?.name ?? `어트랙션 ${id}`;
+  const visits = res.visits
+      .map((v, i) => {
         const a = byId.get(v.attractionId);
+        const leg = res.legs[i];
         return {
           order: v.sequence,                       // 방문 순서 1, 2, 3...
           attractionId: v.attractionId,
           name: v.attractionName,
           image: a?.image ?? imageOf(v.attractionName),
           zone: a?.zone ?? '',
-          slotId: v.attractionSlotId,              // "모두 예약" 할 때 쓰는 슬롯 번호
-          time: toHHmm(v.startsAt),                // 탑승 시작
-          endTime: toHHmm(v.endsAt),               // 탑승 끝
-          rideMinutes: v.estimatedRideMinutes,
-          moveMinutes: v.estimatedMoveMinutes,     // 이전 장소(처음엔 입구)에서 여기까지 이동
-          waitMinutes: v.estimatedWaitMinutes,     // 도착해서 탑승 시작까지 기다리는 시간
-          arrivalTime: toHHmm(v.estimatedArrivalAt),
+          moveMinutes: leg.moveMinutes,            // 이전 장소(처음엔 현재 위치)에서 여기까지 도보 시간
+          distanceM: leg.distanceM,                // 도보 거리(m)
+          estimated: leg.estimated,                // true 면 실측이 아닌 추정값 (첫 구간은 항상 추정)
+          fromUserLocation: leg.fromType === 'USER_LOCATION',
         };
       })
       .sort((x, y) => x.order - y.order);
 
-  const excluded = res.excludedAttractions.map((e) => ({ name: e.attractionName, reason: e.reason }));
-
   return {
-    recommendationId: res.recommendationId,    // 추천 없음(NONE)이면 저장되지 않아서 null
-    resultType: res.resultType,                // FULL(전부) | PARTIAL(일부) | NONE(없음)
-    ticketId: res.ticketId,
-    stops,
-    totalRideMinutes: res.totalRideMinutes,
-    totalWalkMinutes: res.totalMoveMinutes,
-    totalWaitMinutes: res.totalWaitMinutes,
-    estimatedEndTime: toHHmm(res.estimatedEndAt),
-    excluded,
-    unavailable: excluded.map((e) => e.name),
+    visits,
+    totalMoveMinutes: res.totalMoveMinutes,
+    totalDistanceM: res.totalDistanceM,
+    accuracyM: Math.round(res.location.accuracy),        // 위치 오차 반경(m)
+    stalePosition: res.location.warnings.includes('STALE_POSITION'), // 오래된 위치로 계산했는지
+    unavailablePaths: res.unavailablePaths.map((p) => ({
+      from: nameOf(p.fromAttractionId),
+      to: nameOf(p.toAttractionId),
+      reason: UNAVAILABLE_REASON[p.reason] ?? p.reason,
+    })),
   };
 }
 
+// 백엔드 규칙: 어트랙션은 정확히 5개 (CreateRouteRecommendationRequest @Size(min = 5, max = 5))
+export const ROUTE_PICK_COUNT = 5;
+
 export const routeApi = {
-  // [POST /api/route-recommendations] { ticketId, startAt, endAt, attractionIds }
-  // 화면은 "14:00" 같은 시간만 주니까, 입장권 날짜를 붙여 "2026-11-02T14:00:00" 으로 만들어요.
-  // (백엔드는 입장권 날짜 기준으로 시간을 검사해요)
-  recommend: async ({ ticketId, date, startTime, endTime, attractionIds }) => {
-    if (!ticketId) throw new Error('입장 완료된 오늘 입장권이 있어야 루트를 추천받을 수 있어요.');
-    if (attractionIds.length > 5) throw new Error('어트랙션은 최대 5개까지 고를 수 있어요.');
-    const day = date || todayString();
-    const [res, all] = await Promise.all([
-      http.post('/route-recommendations', {
-        ticketId: Number(ticketId),
-        startAt: `${day}T${startTime}:00`,
-        endAt: `${day}T${endTime}:00`,
-        attractionIds: attractionIds.map(Number),
-      }),
+  // [GET /api/route-recommendations/attractions] → [{ attractionId, attractionName }]
+  // 추천에 고를 수 있는 어트랙션(좌표가 등록된 곳)과 사진·운영 상태가 있는 어트랙션 목록을 합쳐서 줘요.
+  // 좌표가 없는 어트랙션을 고르면 추천이 실패해서, 처음부터 선택지에서 빼요.
+  recommendableAttractions: async () => {
+    const [recommendable, all] = await Promise.all([
+      http.get('/route-recommendations/attractions'),
       attractionApi.list('ALL'),
     ]);
-    // 응답에 사진·위치가 없어서 어트랙션 목록에서 id로 찾아 붙여요.
+    const ids = new Set(recommendable.map((a) => a.attractionId));
+    return all.filter((a) => ids.has(a.id));
+  },
+
+  // [POST /api/route-recommendations] { latitude, longitude, accuracy, ..., attractionIds }
+  // 현재 위치(getCurrentLocation 결과)와 어트랙션 5개로 총 이동 시간이 가장 짧은 방문 순서를 받아요.
+  // 서버는 결과를 저장하지 않아요. 슬롯·예약과는 상관없이 이동 순서만 계산해요.
+  recommend: async ({ position, attractionIds }) => {
+    if (attractionIds.length !== ROUTE_PICK_COUNT) {
+      throw new Error(`어트랙션을 정확히 ${ROUTE_PICK_COUNT}개 골라 주세요.`);
+    }
+    const [res, all] = await Promise.all([
+      http.post('/route-recommendations', { ...position, attractionIds: attractionIds.map(Number) }),
+      attractionApi.list('ALL'),
+    ]);
+    // 응답에 사진·구역이 없어서 어트랙션 목록에서 id로 찾아 붙여요.
     return toRouteResult(res, new Map(all.map((a) => [a.id, a])));
   },
 };

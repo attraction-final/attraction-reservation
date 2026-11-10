@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import { BackHeader, Empty, Loading } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
-import { ROUTE_PICK_COUNT, attractionApi, routeApi } from '../api/index.js';
+import { ROUTE_PICK_COUNT, routeApi } from '../api/index.js';
 import { getCurrentLocation } from '../api/geolocation.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 export default function RouteSetup() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const rides = useApi(() => attractionApi.list('ALL'), []);
+  const rides = useApi(() => (user ? routeApi.recommendableAttractions() : Promise.resolve([])), [user]);
 
   const [picked, setPicked] = useState([]); // 고른 어트랙션 id 목록
   const [error, setError] = useState('');
@@ -90,7 +90,13 @@ export default function RouteSetup() {
             <h2 className="display" style={{ fontSize: 18 }}>방문할 어트랙션</h2>
             <span className="small bold" style={{ color: 'var(--blue-ink)' }}>{picked.length}/{ROUTE_PICK_COUNT}개 선택됨</span>
           </div>
-          <span className="small muted">{ROUTE_PICK_COUNT}개를 고르면 걷는 시간이 가장 짧은 순서를 알려 드려요.</span>
+          <span className="small muted">
+            {ROUTE_PICK_COUNT}개를 고르면 걷는 시간이 가장 짧은 순서를 알려 드려요. 이동 정보가 준비된 어트랙션만 보여요.
+          </span>
+          {rides.error && <span className="error-text" role="alert">{rides.error.message}</span>}
+          {!rides.error && (rides.data || []).length < ROUTE_PICK_COUNT && (
+            <span className="small muted">지금은 추천할 수 있는 어트랙션이 {ROUTE_PICK_COUNT}개보다 적어요. 잠시 후 다시 확인해 주세요.</span>
+          )}
           {(rides.data || []).map((a) => {
             const closed = a.status !== 'OPERATING';
             const on = picked.includes(a.id);

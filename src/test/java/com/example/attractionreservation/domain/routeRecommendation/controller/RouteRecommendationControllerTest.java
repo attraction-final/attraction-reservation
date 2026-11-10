@@ -8,6 +8,7 @@ import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRo
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Leg;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Location;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Visit;
+import com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse;
 import com.example.attractionreservation.domain.routeRecommendation.service.RouteRecommendationService;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.config.SecurityConfig;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -173,5 +175,30 @@ class RouteRecommendationControllerTest {
                         .content(VALID_BODY))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(ErrorCode.DUPLICATE_ROUTE_ATTRACTION.getMessage()));
+    }
+
+    // ===== 추천 가능한 어트랙션 목록 =====
+
+    @Test
+    @DisplayName("추천 가능한 어트랙션 목록을 200으로 반환한다")
+    void findRecommendableAttractions_returnsOk() throws Exception {
+        when(routeRecommendationService.findRecommendableAttractions()).thenReturn(List.of(
+                new RecommendableAttractionResponse(1L, "범퍼카"),
+                new RecommendableAttractionResponse(6L, "허리케인")));
+
+        mockMvc.perform(get(URL + "/attractions").with(authenticatedMember()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].attractionId").value(1))
+                .andExpect(jsonPath("$.data[1].attractionName").value("허리케인"));
+    }
+
+    @Test
+    @DisplayName("로그인하지 않으면 추천 가능한 어트랙션 목록도 401")
+    void findRecommendableAttractions_unauthenticated_returnsUnauthorized() throws Exception {
+        mockMvc.perform(get(URL + "/attractions"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(routeRecommendationService);
     }
 }

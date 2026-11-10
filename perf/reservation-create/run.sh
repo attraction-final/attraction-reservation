@@ -9,6 +9,18 @@ users="${TEST_VUS:-50}"
 k6_cpus="${PERF_K6_CPUS:-1}"
 db_locks="${PERF_DB_LOCKS:-0}"
 pool_size="${PERF_DB_POOL_SIZE:-10}"
+fixed_time="${PERF_FIXED_TIME:-}"
+business_time_sql=NULL
+time_mode=real
+if [[ -n "$fixed_time" ]]; then
+  # SQL과 JVM이 동일한 날짜를 사용하도록 KST 14시 형식만 허용한다.
+  if [[ ! "$fixed_time" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T14:00:00\+09:00$ ]]; then
+    echo 'PERF_FIXED_TIME은 YYYY-MM-DDT14:00:00+09:00 형식이어야 합니다.' >&2
+    exit 1
+  fi
+  time_mode=fixed
+  business_time_sql="'${fixed_time:0:10} 14:00:00'"
+fi
 if [[ "$pool_size" != 10 && "$pool_size" != 20 ]]; then
   echo 'PERF_DB_POOL_SIZE는 10 또는 20만 지원합니다.' >&2
   exit 1
@@ -47,20 +59,37 @@ export RUN_ID="$run_id" SCENARIO="$scenario" TEST_VUS="$users" PERF_UID="$(id -u
 export PERF_K6_CPUS="$k6_cpus"
 export PERF_DB_LOCKS="$db_locks"
 export PERF_DB_POOL_SIZE="$pool_size"
+export PERF_FIXED_TIME="$fixed_time"
 compose_file="$script_dir/compose.yaml"
 case "$(uname -s)" in MINGW*|MSYS*) compose_file="$(cygpath -w "$compose_file")" ;; esac
+compose_args=(-f "$compose_file")
+if [[ "$time_mode" == fixed ]]; then
+  fixed_compose="$script_dir/compose.fixed-time.yaml"
+  case "$(uname -s)" in MINGW*|MSYS*) fixed_compose="$(cygpath -w "$fixed_compose")" ;; esac
+  compose_args+=(-f "$fixed_compose")
+fi
 docker_cmd() { MSYS_NO_PATHCONV=1 docker "$@"; }
-compose() { docker_cmd compose -f "$compose_file" "$@"; }
+compose() { docker_cmd compose "${compose_args[@]}" "$@"; }
 mysql() { compose exec -T -e MYSQL_PWD=perf-local-only mysql mysql -uperf --default-character-set=utf8mb4 --batch --raw --skip-column-names reservation_create_perf "$@"; }
-sql_file() { { printf "SET @run_id='%s'; SET @scenario='%s'; SET @users=%s;\n" "$run_id" "$scenario" "$users"; cat "$1"; } | mysql; }
+sql_file() { { printf "SET @run_id='%s'; SET @scenario='%s'; SET @users=%s; SET @business_kst=%s;\n" "$run_id" "$scenario" "$users" "$business_time_sql"; cat "$1"; } | mysql; }
 snapshot() {
   curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18107/actuator/prometheus |
     awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_|reservation_create_(slot_(lookup|postlookup)|attraction_lookup)_)/'
 }
 
 compose up -d --wait --wait-timeout 120 mysql redis
-# UTC 시각에 9시간을 더해 검사한다. Docker TZ 설정으로 날짜 검증을 우회하지 않는다.
-kst_hm="$(mysql -e "SELECT DATE_FORMAT(UTC_TIMESTAMP()+INTERVAL 9 HOUR,'%H%i');" | tr -d '\r')"
+# 실제 모드는 기존 시간 제한을 유지하고 고정 모드는 설정 날짜·시각을 검증한다.
+if [[ "$time_mode" == fixed ]]; then
+  # 월별 일수 등 날짜 오류도 DB에서 확인한다. 실패하면 앱 실행과 데이터 준비 전에 종료한다.
+  checked_time="$(mysql -e "SELECT DATE_FORMAT(CAST($business_time_sql AS DATETIME),'%Y-%m-%dT%H:%i:%s');" | tr -d '\r')"
+  if [[ "$checked_time" != "${fixed_time:0:19}" ]]; then
+    echo 'PERF_FIXED_TIME 날짜 검증 실패' >&2
+    exit 1
+  fi
+  kst_hm=1400
+else
+  kst_hm="$(mysql -e "SELECT DATE_FORMAT(UTC_TIMESTAMP()+INTERVAL 9 HOUR,'%H%i');" | tr -d '\r')"
+fi
 if [[ ! "$kst_hm" =~ ^[0-9]{4}$ ]] || (( 10#$kst_hm < 1000 || 10#$kst_hm >= 2110 )); then
   echo '실제 KST 10:00 이상~21:10 미만에 실행하세요. 오늘 21:50 슬롯의 마감 여유가 필요합니다.' >&2
   exit 1
@@ -80,6 +109,7 @@ fi
 if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 결과 ${users}행 검증 실패" >&2; exit 1; fi
 {
   echo "runId=$run_id startedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "businessTimeMode=$time_mode fixedBusinessTime=${fixed_time:-unset} realTimeClockUsedForJwtAndMetrics=true"
   echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
   echo "appCpus=2 appMemory=1GiB poolMax=$pool_size poolMin=$pool_size generatorCpus=$k6_cpus generatorMemory=2GiB"
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
@@ -89,7 +119,7 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
   echo "setupTimeoutSeconds=$(( users >= 2000 ? 240 : users >= 500 ? 120 : 60 )) minimumTokenValiditySeconds=$(( (users >= 2000 ? 240 : users >= 500 ? 120 : 60) + 120 ))"
   (cd -- "$project_dir" && git rev-parse HEAD && git status --short)
   sha256sum "$jar" "$script_dir/compose.yaml" "$script_dir/reservation-create.js" \
-    "$script_dir/prepare.sql" "$script_dir/verify.sql" "$script_dir/run.sh" \
+    "$script_dir/prepare.sql" "$script_dir/verify.sql" "$script_dir/run.sh" "$script_dir/compose.fixed-time.yaml" \
     "$script_dir/prepare-accounts.js" "$script_dir/sample-resources.sh" "$script_dir/lock-waits.sql" \
     "$script_dir/../reservation-list/auth.js" "$script_dir/../reservation-list/application-perf.yaml"
   mysql -e "SELECT VERSION(),UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 9 HOUR;"

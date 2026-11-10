@@ -27,10 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.*;
 
 @Service
 @RequiredArgsConstructor
@@ -46,6 +43,7 @@ public class ReservationService {
     private final AttractionSlotService attractionSlotService;
     // 예약 생성의 구간별 처리 시간을 기록할 Timer를 등록하고 관리한다.
     private final MeterRegistry meterRegistry;
+    private final Clock clock;
 
     // 예약 생성
     @Transactional
@@ -122,7 +120,7 @@ public class ReservationService {
 
         // 후속 구간 2: 필요한 잠금 조회가 끝난 뒤 기준 시각을 구하고 예약 가능 조건을 검증한다.
         /* 현재시간, 오늘날짜, 현재시각 */
-        LocalDateTime now = KstTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         LocalDate today = now.toLocalDate();
 
         // 티켓 입장 날짜

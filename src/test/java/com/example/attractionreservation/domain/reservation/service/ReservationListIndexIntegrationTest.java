@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import com.example.attractionreservation.global.config.ClockConfig;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -73,7 +75,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class,
+@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class, ClockConfig.class,
         ReservationListIndexIntegrationTest.MySqlConfig.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Tag("performance")

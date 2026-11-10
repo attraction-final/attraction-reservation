@@ -49,6 +49,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -67,6 +68,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 // 개선 전에는 실패할 수 있는 회귀 테스트다. 중복 조회와 정원 UPDATE는 실제 MySQL에서 실행한다.
 @DataJpaTest(properties = "spring.datasource.hikari.maximum-pool-size=20") // DB 연결 최대 20개까지 확보
@@ -111,6 +113,9 @@ class ReservationConcurrencyIntegrationTest {
     @MockitoBean
     private RefreshTokenRepository refreshTokenRepository;
 
+    @MockitoBean
+    private Clock clock;
+
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
     private OverlappingSlot overlappingSlot;
@@ -129,6 +134,9 @@ class ReservationConcurrencyIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // 예약 생성의 업무 시각은 모든 작업 스레드에 주입되는 Clock으로 제어한다.
+        when(clock.getZone()).thenReturn(KstTime.ZONE);
+        when(clock.instant()).thenReturn(NOW.atZone(KstTime.ZONE).toInstant());
         transactionTemplate = new TransactionTemplate(transactionManager);
         // 별도 transaction으로 commit하여 작업 스레드에서도 테스트 데이터를 조회할 수 있게 한다.
         fixture = Objects.requireNonNull(transactionTemplate.execute(status -> {

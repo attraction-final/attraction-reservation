@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import com.example.attractionreservation.global.config.ClockConfig;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
@@ -62,7 +64,7 @@ import static org.assertj.core.api.SoftAssertions.assertSoftly;
 })
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class,
+@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class, ClockConfig.class,
         ReservationListQueryIntegrationTest.MySqlConfig.class})
 class ReservationListQueryIntegrationTest {
 

@@ -52,8 +52,8 @@ SQL은 테스트 조건을 만들기 위해 결제 완료 주문과 입장된 �
 
 ## 시간 조건
 
-**실제 KST 10:00 이상~21:10 미만**에 실행한다. 오늘 21:50~22:00 슬롯을 사용하며 예약 마감은 21:20이다.
-실행기와 준비 SQL이 시각을 검사한다. 서버 시각·Docker 시간을 변경하거나 마감 검증을 우회하지 않는다.
+기본 실제 시각 모드는 **실제 KST 10:00 이상~21:10 미만**에 실행한다. 오늘 21:50~22:00 슬롯을 사용하며 예약 마감은 21:20이다.
+실행기와 준비 SQL이 시각을 검사한다. KAN-155 고정 모드는 아래의 명시적 PERF_FIXED_TIME 설정으로 별도 실행하며 서버·Docker의 시스템 시계는 변경하지 않는다.
 준비가 길어져 마감을 넘기면 유효한 정원 소진 테스트가 아니므로 새 실행으로 재검증한다.
 슬롯은 마감까지 여유가 있는 고정 조건이며 시간 경계 검증 시나리오는 아니다.
 
@@ -410,7 +410,7 @@ KAN-155의 Timer를 시작 전·주기·종료 후 Prometheus 파일에 수집�
 PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh base155-01 single
 ```
 
-실제 KST 10:00 이상~21:10 미만에 실행한다. 아직 이 기준값은 측정하지 않았다.
+위 명령은 기본 실제 시각 모드이므로 실제 KST 10:00 이상~21:10 미만에 실행한다. 아직 이 기준값은 측정하지 않았다.
 
 | Prometheus 지표 접두어 | result 값 | 측정 구간 |
 | --- | --- | --- |
@@ -423,6 +423,32 @@ PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/rese
 attraction lookup은 postlookup 내부의 세부 구간이므로 두 시간을 합산하지 않는다.
 현재 Timer에는 histogram/percentile 설정이 없으므로 구간별 p95/p99를 제공한다고 가정하지 않는다. k6 API 지연 분포와 구분한다.
 부하 실행은 사용자가 수행하고, 측정 추가 전 KAN-150 결과와 코드/JAR 조건이 달라졌음을 기록한다. 성능 개선 전 기준값이며 아직 로직 최적화는 하지 않았다.
+
+## KAN-155 야간 실행용 고정 업무 시각
+
+PERF_FIXED_TIME을 명시한 경우에만 compose.fixed-time.yaml을 추가해 reservation-create-perf-time profile과 reservation.perf.fixed-time 설정을 앱에 전달한다.
+설정하지 않으면 기존 실제 시각 모드와 실행 시간 제한을 유지한다. 현재 실행기는 YYYY-MM-DDT14:00:00+09:00 형식만 허용하며 SQL의 방문일·슬롯·티켓 날짜도 같은 날짜를 사용한다.
+
+먼저 현재 코드로 JAR를 만들고, 새 profile과 날짜 연결을 50건으로 확인한다. 날짜는 예시이며 명시적으로 고정한 업무 날짜다.
+
+```bash
+./gradlew bootJar
+PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 TEST_VUS=50 bash perf/reservation-create/run.sh fixed155-01 single
+```
+
+이 실행을 확인한 다음 고정 모드의 최적화 전 2,000명 기준값을 별도로 확보한다. 아래 실행은 아직 수행하지 않았다.
+
+```bash
+PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh fixed155-02 single
+```
+
+- 일반 설정의 ClockConfig는 실제 KST를 제공한다. 전용 profile에서는 @Primary 고정 Clock이 Clock 주입을 받는 구성요소에 우선 적용된다. 예약 생성 외의 Clock 소비자도 영향을 받으므로 이 profile은 전용 부하 환경에만 사용한다.
+- 부하 환경의 기존 스케줄러 비활성화를 유지한다. 다른 팀원의 도구와 공통 application-perf.yaml은 수정하지 않는다.
+- JWT·로그·Micrometer 경과 시간·SQL created_at/updated_at은 실제 시각을 유지한다. 예약 생성의 업무 시각과 fixture 날짜만 맞춘다.
+- KstTime.now()를 직접 사용하는 취소 등 다른 경로의 시각은 고정되지 않는다. 이번 모드는 예약 생성 부하용이며 전체 API의 시간 제어가 아니다.
+- 고정 시각은 흐르지 않는다. 마감 경과·자정 경계·시간 흐름 정책 검증은 실제 모드 또는 Clock을 이동시키는 별도 통합 테스트로 수행한다.
+- metadata.txt의 businessTimeMode/fixedBusinessTime과 JAR·도구 해시를 함께 확인한다. 실제 모드의 KAN-150 결과와 동일 조건이라고 간주하지 않는다.
+- profile 격리·정상 설정·누락·잘못된 시각은 ReservationPerfClockConfigTest로 검증한다. 아직 이 변경의 테스트나 고정 모드 부하는 실행하지 않았다.
 
 ## 마무리 및 후속 작업
 

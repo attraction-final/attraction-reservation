@@ -31,7 +31,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -51,6 +50,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -64,9 +64,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
-import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 // 실제 MySQL 회원 행 잠금으로 예약 생성을 대기시키고, 대기 중 마감이 지나는 상황을 검증한다.
 // 시간만 제어하며 회원·슬롯·어트랙션 조회와 예약·정원 변경은 실제 구현을 사용한다.
@@ -111,6 +110,9 @@ class ReservationDeadlineConcurrencyIntegrationTest {
     @MockitoBean
     private RefreshTokenRepository refreshTokenRepository;
 
+    @MockitoBean
+    private Clock clock;
+
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
 
@@ -125,6 +127,9 @@ class ReservationDeadlineConcurrencyIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // 예약 생성의 업무 시각은 모든 작업 스레드에 주입되는 Clock으로 제어한다.
+        when(clock.getZone()).thenReturn(KstTime.ZONE);
+        when(clock.instant()).thenReturn(BEFORE_DEADLINE.atZone(KstTime.ZONE).toInstant());
         transactionTemplate = new TransactionTemplate(transactionManager);
         fixture = Objects.requireNonNull(transactionTemplate.execute(status -> {
             User user = User.builder()
@@ -256,6 +261,8 @@ class ReservationDeadlineConcurrencyIntegrationTest {
     private ReservationResult reserveAfterLockWait(Class<?> lockedType, Long lockedId, LocalDateTime releasedAt)
             throws Exception {
         AtomicReference<LocalDateTime> serverTime = new AtomicReference<>(BEFORE_DEADLINE);
+        // 잠금 대기 중 변경한 시각을 Clock을 통해 실제 예약 생성 경로에 전달한다.
+        when(clock.instant()).thenAnswer(invocation -> serverTime.get().atZone(KstTime.ZONE).toInstant());
         CountDownLatch rowLocked = new CountDownLatch(1);
         CountDownLatch releaseLock = new CountDownLatch(1);
         CountDownLatch lookupStarted = new CountDownLatch(1);
@@ -273,14 +280,10 @@ class ReservationDeadlineConcurrencyIntegrationTest {
             assertThat(rowLocked.await(10, TimeUnit.SECONDS)).isTrue();
 
             Future<ReservationResult> reservation = executor.submit(() -> {
-                // static mock은 예약 작업 스레드에만 적용하고, now 외의 KST 변환은 실제 동작을 유지한다.
-                try (MockedStatic<KstTime> timeMock = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
-                    timeMock.when(KstTime::now).thenAnswer(invocation -> serverTime.get());
-                    try {
-                        return new ReservationResult(reservationService.createReservation(fixture.userId(), request), null);
-                    } catch (RuntimeException exception) {
-                        return new ReservationResult(null, exception);
-                    }
+                try {
+                    return new ReservationResult(reservationService.createReservation(fixture.userId(), request), null);
+                } catch (RuntimeException exception) {
+                    return new ReservationResult(null, exception);
                 }
             });
             assertThat(lookupStarted.await(10, TimeUnit.SECONDS)).isTrue();

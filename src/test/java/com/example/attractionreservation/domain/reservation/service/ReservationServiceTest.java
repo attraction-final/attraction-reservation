@@ -34,13 +34,13 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -83,6 +83,9 @@ class ReservationServiceTest {
     @Mock
     private AttractionSlotService attractionSlotService;
 
+    @Mock
+    private Clock clock;
+
     private ReservationService reservationService;
 
     private SimpleMeterRegistry meterRegistry;
@@ -99,7 +102,9 @@ class ReservationServiceTest {
         metricsClock = new MockClock();
         meterRegistry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, metricsClock);
         reservationService = new ReservationService(
-                reservationRepository, userService, ticketService, attractionSlotService, meterRegistry);
+                reservationRepository, userService, ticketService, attractionSlotService, meterRegistry, clock);
+        // 업무 시각은 java.time.Clock으로, 경과 시간은 Micrometer MockClock으로 각각 제어한다.
+        lenient().when(clock.getZone()).thenReturn(KstTime.ZONE);
         // Mockito 직접 호출에는 Spring 트랜잭션이 없으므로 callback 등록 환경만 준비한다.
         // 실제 commit/rollback 검증은 ReservationConcurrencyIntegrationTest에서 수행한다.
         TransactionSynchronizationManager.initSynchronization();
@@ -611,11 +616,9 @@ class ReservationServiceTest {
     private CreateReservationResponse createReservationAt(
             LocalDateTime now
     ) {
-        try (MockedStatic<KstTime> mocked = mockStatic(KstTime.class)) {
-            mocked.when(KstTime::now).thenReturn(now);
-
-            return reservationService.createReservation(USER_ID, request);
-        }
+        // 시각 검증 전에 거절되는 테스트도 있으므로 이 설정만 lenient로 둔다.
+        lenient().when(clock.instant()).thenReturn(now.atZone(KstTime.ZONE).toInstant());
+        return reservationService.createReservation(USER_ID, request);
     }
 
     private void assertReservationRejected(

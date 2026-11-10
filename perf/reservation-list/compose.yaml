@@ -1,0 +1,92 @@
+# KAN-134 개인 로컬 환경. 기존 앱/DB와 다른 네트워크와 볼륨을 사용한다.
+name: attraction-reservation-perf
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: perf-local-only
+      MYSQL_DATABASE: reservation_perf
+      MYSQL_USER: perf
+      MYSQL_PASSWORD: perf-local-only
+    cpus: 1.0
+    mem_limit: 1g
+    command: ["--innodb-buffer-pool-size=268435456"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uperf", "-pperf-local-only"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis@sha256:298e5b3bc566bade82f46ad5511777a4a07a294097ce16ada2f6a42be5239df5
+    cpus: 0.5
+    mem_limit: 256m
+  app:
+    image: eclipse-temurin:17-jre
+    cpus: "${TEST_APP_CPUS:-1.0}"
+    mem_limit: 1g
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+    command: ["java", "-jar", "/app/app.jar", "--spring.config.additional-location=file:/app/application-perf.yaml", "--spring.datasource.hikari.maximum-pool-size=${TEST_POOL_SIZE:-10}", "--spring.datasource.hikari.minimum-idle=10"]
+    ports:
+      - "127.0.0.1:18096:8080"
+      - "127.0.0.1:18097:8081"
+    volumes:
+      - type: bind
+        source: ../../build/libs/attraction-reservation-0.0.1-SNAPSHOT.jar
+        target: /app/app.jar
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./application-perf.yaml
+        target: /app/application-perf.yaml
+        read_only: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+  accounts:
+    image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
+    profiles: [tools]
+    cpus: 1.0
+    mem_limit: 512m
+    working_dir: /scripts
+    command: ["run", "--quiet", "prepare-accounts.js"]
+    volumes:
+      - ./:/scripts:ro
+  fixture:
+    image: mysql:8.4
+    profiles: [tools]
+    user: "${PERF_UID:-1000}:${PERF_GID:-1000}"
+    environment:
+      MYSQL_PWD: perf-local-only
+      RUN_ID: "${RUN_ID:-smoke-02}"
+    entrypoint: ["/bin/sh", "/scripts/prepare.sh"]
+    volumes:
+      - ./:/scripts:ro
+      - ./results:/results
+  k6:
+    image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
+    profiles: [tools]
+    user: "${PERF_UID:-1000}:${PERF_GID:-1000}"
+    cpus: 1.0
+    mem_limit: 2g
+    working_dir: /scripts
+    environment:
+      RUN_ID: "${RUN_ID:-smoke-02}"
+      TEST_MODE: "${TEST_MODE:-smoke}"
+      TEST_VUS: "${TEST_VUS:-10}"
+      START_MODE: "${START_MODE:-simultaneous}"
+      WARMUP_SECONDS: "${WARMUP_SECONDS:-20}"
+      P95_MS: "${P95_MS:-}"
+      P99_MS: "${P99_MS:-}"
+      MEASUREMENT_SECONDS: "${MEASUREMENT_SECONDS:-60}"
+    command: ["run", "--quiet", "reservation-list.js"]
+    volumes:
+      - ./:/scripts:ro
+      - ./results:/results
+volumes:
+  mysql-data:

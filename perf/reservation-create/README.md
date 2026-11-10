@@ -480,6 +480,26 @@ fixed155-03도 준비·HTTP·DB·수집·정리 종료 코드 모두 0, 오류 �
 - metadata.txt의 businessTimeMode/fixedBusinessTime과 JAR·도구 해시를 함께 확인한다. 실제 모드의 KAN-150 결과와 동일 조건이라고 간주하지 않는다.
 - profile 격리·정상 설정·누락·잘못된 시각은 ReservationPerfClockConfigTest로 검증한다. 사용자가 설정 테스트 통과를 보고했으며 고정 모드 50명·2,000명 부하 결과도 확인했다.
 
+## KAN-155 정원 확보 SQL 개선 전 검증
+
+AttractionSlotCapacityQueryIntegrationTest를 실제 MySQL 8.4에서 실행한 결과, 8개 중 SQL 예산 검증 3개만 실패했고 나머지 5개는 통과했다.
+같은 트랜잭션에서 슬롯 잠금을 먼저 얻은 뒤 정원 확보 호출과 flush의 SQL 수만 측정한다. 초기 잠금 SELECT·fixture 준비·검증용 재조회는 측정에서 제외한다.
+
+| 예약 인원 변화 | 기대 SQL 수 | 실제 SQL 수 | 현재 처리 |
+| --- | --- | --- | --- |
+| 0 → 1 | 1 | 2 | 조건부 UPDATE + refresh 조회 |
+| 8 → 9 | 1 | 2 | 조건부 UPDATE + refresh 조회 |
+| 9 → 10 | 1 | 3 | 조건부 UPDATE + refresh 조회 + 자동 마감 UPDATE |
+
+세 실패 모두 SQL 수 assertion에서 발생했고, 그 전에 확인한 저장 인원·잔여 정원·자동 마감 상태는 기대값과 일치했다.
+예약 불가 상태 3개·정원 초과 방어·롤백 복구 검증은 통과했다. 이는 슬롯 정원 처리에 대한 검증이며 전체 예약 경합을 재검증한 결과는 아니다.
+개선 전 실패를 확인한 뒤, 이미 잠근 관리 상태 엔티티에서 인원 증가·자동 마감을 처리하도록 구현을 변경했다.
+변경 후 같은 통합 테스트 8개가 모두 통과했고, 0→1·8→9·9→10 세 경우 모두 정원 확보와 flush의 SQL이 1회로 줄었다. 마지막 자리도 별도 refresh 없이 상태와 인원이 함께 저장됐다.
+이는 해당 호출 경로의 SQL 감소 검증이며 API 지연 개선은 아직 재측정 전이다. 업무 검증·트랜잭션·슬롯 잠금 보호를 유지한 상태에서 같은 부하로 후속 비교한다.
+트랜잭션 부재·쓰기 잠금 부재 거부를 실제 MySQL 테스트에 보강했고 기존 Mockito 테스트를 새 방식에 맞췄다.
+사용자 실행 결과에서 AttractionSlotReservationServiceTest 12개·AttractionSlotServiceTest 46개·AttractionSlotCapacityQueryIntegrationTest 10개, 합계 68개가 실패·오류 없이 통과한 것을 확인했다.
+실제 예약 생성·취소·관리자 변경과의 동시성 회귀 및 변경 후 부하 비교는 아직 수행 전이다.
+
 ## 마무리 및 후속 작업
 
 KAN-150은 예약 생성 부하의 정합성 검증·병목 진단으로 마무리한다. 최종 기본 pool 10·측정 k6 2 CPU 조건에서 2,000명 집중·매진·분산을 각각 두 번 확인했다.

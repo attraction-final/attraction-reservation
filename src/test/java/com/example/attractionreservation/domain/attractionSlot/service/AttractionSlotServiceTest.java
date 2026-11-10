@@ -12,6 +12,7 @@ import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -132,12 +133,8 @@ class AttractionSlotServiceTest {
         void tryReservationCapacity_LastPlace_AutoClosesSlot() {
             // given
             AttractionSlot slot = createTomorrowSlot(19, SlotStatus.OPEN);
-            given(attractionSlotRepository.tryReserveCapacity(31L, SlotStatus.OPEN)).willReturn(1);
             givenSlot(slot);
-            doAnswer(invocation -> {
-                ReflectionTestUtils.setField(slot, "reservedCount", 20);
-                return null;
-            }).when(entityManager).refresh(slot);
+            given(entityManager.getLockMode(slot)).willReturn(LockModeType.PESSIMISTIC_WRITE);
 
             // when
             attractionSlotService.tryReservationCapacity(31L);
@@ -147,9 +144,10 @@ class AttractionSlotServiceTest {
             assertThat(slot.getStatus()).isEqualTo(SlotStatus.CLOSED);
             assertThat(slot.isAutoClosed()).isTrue();
             InOrder calls = inOrder(attractionSlotRepository, entityManager);
-            calls.verify(attractionSlotRepository).tryReserveCapacity(31L, SlotStatus.OPEN);
             calls.verify(attractionSlotRepository).findById(31L);
-            calls.verify(entityManager).refresh(slot);
+            calls.verify(entityManager).getLockMode(slot);
+            verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+            verify(entityManager, never()).refresh(any());
         }
 
         @Test
@@ -157,12 +155,8 @@ class AttractionSlotServiceTest {
         void tryReservationCapacity_RemainingPlaces_KeepsOpen() {
             // given
             AttractionSlot slot = createTomorrowSlot(18, SlotStatus.OPEN);
-            given(attractionSlotRepository.tryReserveCapacity(31L, SlotStatus.OPEN)).willReturn(1);
             givenSlot(slot);
-            doAnswer(invocation -> {
-                ReflectionTestUtils.setField(slot, "reservedCount", 19);
-                return null;
-            }).when(entityManager).refresh(slot);
+            given(entityManager.getLockMode(slot)).willReturn(LockModeType.PESSIMISTIC_WRITE);
 
             // when
             attractionSlotService.tryReservationCapacity(31L);
@@ -171,20 +165,25 @@ class AttractionSlotServiceTest {
             assertThat(slot.getReservedCount()).isEqualTo(19);
             assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
             assertThat(slot.isAutoClosed()).isFalse();
-            verify(entityManager).refresh(slot);
+            verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+            verify(entityManager, never()).refresh(any());
         }
 
         @Test
-        @DisplayName("정원 확보 UPDATE가 실패하면 슬롯 조회와 갱신 없이 예외가 발생한다")
-        void tryReservationCapacity_UpdateFailed_ThrowsException() {
+        @DisplayName("잠근 슬롯의 정원이 가득 차면 인원 변경 없이 예외가 발생한다")
+        void tryReservationCapacity_FullSlot_ThrowsException() {
             // given
-            given(attractionSlotRepository.tryReserveCapacity(31L, SlotStatus.OPEN)).willReturn(0);
+            AttractionSlot slot = createTomorrowSlot(20, SlotStatus.OPEN);
+            givenSlot(slot);
+            given(entityManager.getLockMode(slot)).willReturn(LockModeType.PESSIMISTIC_WRITE);
 
             // when & then
             assertErrorCode(() -> attractionSlotService.tryReservationCapacity(31L),
                     ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
-            verify(attractionSlotRepository, never()).findById(any());
-            verifyNoInteractions(entityManager);
+            assertThat(slot.getReservedCount()).isEqualTo(20);
+            assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
+            verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+            verify(entityManager, never()).refresh(any());
         }
 
         @Test

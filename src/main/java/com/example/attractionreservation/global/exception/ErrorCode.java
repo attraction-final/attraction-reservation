@@ -101,15 +101,11 @@ public enum ErrorCode {
     TICKET_NOT_REFUNDABLE(HttpStatus.CONFLICT, "미사용 티켓만 환불할 수 있습니다."),
 
     // routeRecommendation
-    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다."),
-    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
-    INVALID_ATTRACTION_SELECTION(HttpStatus.BAD_REQUEST, "어트랙션은 중복 없이 1~5개 선택해야 합니다."),
-    INVALID_TIME_RANGE(HttpStatus.BAD_REQUEST, "이용 시작 시각은 종료 시각보다 이전이어야 하며 입장권 이용 시간 안이어야 합니다."),
-    TICKET_NOT_OWNED(HttpStatus.FORBIDDEN, "본인 소유의 입장권이 아닙니다."),
-    TICKET_NOT_AVAILABLE(HttpStatus.CONFLICT, "사용 중인 입장권으로만 추천받을 수 있습니다."),
-    ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "기존 예약의 취소 가능 시간이 지나 새로운 추천 경로를 생성할 수 없습니다."),
-    INVALID_CURRENT_LOCATION(HttpStatus.BAD_REQUEST, "현재 위치는 위도와 경도를 함께 보내야 합니다."),
-    CURRENT_LOCATION_OUT_OF_PARK(HttpStatus.BAD_REQUEST, "현재 위치가 공원 범위 밖입니다. 공원 안에서 다시 요청하거나 위치 없이 요청해주세요."),
+    DUPLICATE_ROUTE_ATTRACTION(HttpStatus.BAD_REQUEST, "같은 어트랙션을 중복해서 선택할 수 없습니다."),
+    LOCATION_ACCURACY_TOO_LOW(HttpStatus.BAD_REQUEST, "현재 위치의 정확도가 낮아 경로를 추천할 수 없습니다. 위치를 다시 측정해주세요."),
+    LOCATION_OUT_OF_SERVICE_AREA(HttpStatus.BAD_REQUEST, "현재 위치가 서비스 지역에서 너무 멀어 경로를 추천할 수 없습니다."),
+    ATTRACTION_LOCATION_NOT_FOUND(HttpStatus.CONFLICT, "좌표 정보가 등록되지 않은 어트랙션이 있습니다."),
+    ROUTE_NO_VALID_ORDER(HttpStatus.CONFLICT, "이용 가능한 이동 경로로 선택한 어트랙션을 모두 방문하는 순서가 없습니다."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),

@@ -1,0 +1,1570 @@
+{
+  "uid": "business-events",
+  "title": "비즈니스 이벤트",
+  "tags": [
+    "attraction-reservation",
+    "logs",
+    "business"
+  ],
+  "timezone": "browser",
+  "editable": false,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "env",
+        "type": "custom",
+        "query": "prod",
+        "hide": 0,
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        },
+        "options": [
+          {
+            "text": "prod",
+            "value": "prod",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "label": "검색어",
+        "type": "textbox",
+        "query": "",
+        "description": "로그 줄에 포함된 문자열 (대소문자 무시, 정규식). 예: orderId=12 ",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "요약 (선택한 기간)",
+      "collapsed": false,
+      "panels": [],
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "stat",
+      "title": "주문 생성",
+      "description": "사용자 주문(ORDER_CREATED)과 관리자 주문(ADMIN_ORDER_CREATED) 합계.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"ORDER_CREATED|ADMIN_ORDER_CREATED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "결제 승인",
+      "description": "PAYMENT_APPROVED. 커밋된 승인만 남는다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_APPROVED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "결제 승인 금액",
+      "description": "PAYMENT_APPROVED의 amount 합계. 로그 기준 운영 참고값이며 정산 기준은 DB다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(sum_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_APPROVED\" | unwrap amount [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "결제 실패",
+      "description": "PAYMENT_MARKED_FAILED. PG 결제가 실패·취소 상태로 확인된 건.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_MARKED_FAILED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "환불 완료",
+      "description": "REFUND_COMPLETED. PG 취소가 확인되어 원장에 반영된 건.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"REFUND_COMPLETED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "환불 완료 금액",
+      "description": "REFUND_COMPLETED의 amount 합계. 로그 기준 운영 참고값이며 정산 기준은 DB다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(sum_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"REFUND_COMPLETED\" | unwrap amount [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 7,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "예약 생성",
+      "description": "RESERVATION_CREATED.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"RESERVATION_CREATED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 8,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "예약 취소",
+      "description": "사용자 취소(RESERVATION_CANCELLED)와 관리자 취소(RESERVATION_ADMIN_CANCELLED) 합계.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"RESERVATION_CANCELLED|RESERVATION_ADMIN_CANCELLED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 9,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "이용 완료",
+      "description": "RESERVATION_COMPLETED.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"RESERVATION_COMPLETED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 10,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "노쇼",
+      "description": "RESERVATION_NO_SHOW_RECORDED.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"RESERVATION_NO_SHOW_RECORDED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 11,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "확인 필요",
+      "description": "재시도·보상까지 끝난 최종 실패이거나 원장과 PG가 어긋난 이벤트. 1건이라도 있으면 아래 표에서 확인한다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"REFUND_RETRY_EXHAUSTED|REFUND_CANCEL_REJECTED|REFUND_CHECK_EXPIRED|REFUND_AMOUNT_MISMATCHED|REFUND_COMPLETE_RECORD_FAILED|REFUND_DEFER_RECORD_FAILED|PAYMENT_COMPENSATION_RETRY_EXHAUSTED|PAYMENT_COMPENSATION_CHECK_EXPIRED|WEBHOOK_RETRY_EXHAUSTED|WEBHOOK_STATE_CONFLICTED|WEBHOOK_FAILURE_RECORD_FAILED|ORDER_AUTO_CANCEL_FAILED\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 12,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "위험 신호",
+      "description": "PG 호출 1회 실패, 결제 금액 불일치 등. 다음 재시도나 보상으로 회복될 수 있다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"PG_CANCEL_REJECTED|PG_CANCEL_UNCONFIRMED|PAYMENT_AMOUNT_MISMATCHED|REFUND_FAILED|PAYMENT_COMPENSATION_FAILED|WEBHOOK_PROCESS_FAILED|PG_RESPONSE_INVALID\" [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "id": 13,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 5
+      }
+    },
+    {
+      "type": "row",
+      "title": "결제",
+      "collapsed": false,
+      "panels": [],
+      "id": 14,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "주문 · 결제 흐름",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"ORDER_CREATED|ADMIN_ORDER_CREATED\" [$__auto]))",
+          "legendFormat": "주문 생성"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_APPROVED\" [$__auto]))",
+          "legendFormat": "결제 승인"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_MARKED_FAILED\" [$__auto]))",
+          "legendFormat": "결제 실패"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"ORDER_CANCELLED|ADMIN_ORDER_CANCELLED\" [$__auto]))",
+          "legendFormat": "주문 취소"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(sum_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"ORDER_AUTO_CANCEL_PROCESSED\" | unwrap count [$__auto]))",
+          "legendFormat": "미결제 자동 취소"
+        }
+      ],
+      "id": 15,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "결제 전환율",
+      "description": "결제 승인 ÷ 주문 생성. 주문과 결제 시점이 달라 구간이 짧으면 100%를 넘을 수 있다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_APPROVED\" [1h])) / sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"ORDER_CREATED|ADMIN_ORDER_CREATED\" [1h]))",
+          "legendFormat": "전환율 (1시간)"
+        }
+      ],
+      "id": 16,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "결제 금액",
+      "description": "로그 기준 운영 참고값이며 정산 기준은 DB다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(sum_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_APPROVED\" | unwrap amount [$__auto]))",
+          "legendFormat": "결제 승인"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(sum_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"REFUND_COMPLETED\" | unwrap amount [$__auto]))",
+          "legendFormat": "환불 완료"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(sum_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"PAYMENT_COMPENSATION_COMPLETED\" | unwrap amount [$__auto]))",
+          "legendFormat": "보상 취소"
+        }
+      ],
+      "id": 17,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "웹훅 처리",
+      "description": "WEBHOOK_PROCESSED는 처리 결과(result)별로 나눈다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"WEBHOOK_RECEIVED\" [$__auto]))",
+          "legendFormat": "수신"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"WEBHOOK_DUPLICATED\" [$__auto]))",
+          "legendFormat": "중복 수신"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum by (result) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"WEBHOOK_PROCESSED\" [$__auto]))",
+          "legendFormat": "처리 {{result}}"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum by (event) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"WEBHOOK_PROCESS_SKIPPED|WEBHOOK_PROCESS_FAILED|WEBHOOK_RETRY_EXHAUSTED|WEBHOOK_STATE_CONFLICTED\" [$__auto]))",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "id": 18,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      }
+    },
+    {
+      "type": "row",
+      "title": "환불 · 보상 취소",
+      "collapsed": false,
+      "panels": [],
+      "id": 19,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "환불 이벤트",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum by (event) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"REFUND_.*\" [$__auto]))",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "id": 20,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "결제 보상 취소 이벤트",
+      "description": "결제 금액 불일치·취소된 결제 승인 시 PG 결제를 되돌리는 흐름.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum by (event) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"PAYMENT_COMPENSATION_.*\" [$__auto]))",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "id": 21,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      }
+    },
+    {
+      "type": "row",
+      "title": "예약",
+      "collapsed": false,
+      "panels": [],
+      "id": 22,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "예약 이벤트",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum by (event) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"RESERVATION_.*\" [$__auto]))",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "id": 23,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "노쇼 비율",
+      "description": "노쇼 ÷ (이용 완료 + 노쇼). 관리자가 처리한 시점 기준.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "drawStyle": "line",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=\"RESERVATION_NO_SHOW_RECORDED\" [1d])) / sum(count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"RESERVATION_COMPLETED|RESERVATION_NO_SHOW_RECORDED\" [1d]))",
+          "legendFormat": "노쇼 비율 (1일)"
+        }
+      ],
+      "id": 24,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      }
+    },
+    {
+      "type": "row",
+      "title": "확인이 필요한 이벤트 (선택한 기간)",
+      "collapsed": false,
+      "panels": [],
+      "id": 25,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      }
+    },
+    {
+      "type": "table",
+      "title": "확인 필요",
+      "description": "최종 실패·불일치 이벤트. 아래 로그 패널에서 pgId·refundId로 검색해 원인을 본다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "건수",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "건수"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"REFUND_RETRY_EXHAUSTED|REFUND_CANCEL_REJECTED|REFUND_CHECK_EXPIRED|REFUND_AMOUNT_MISMATCHED|REFUND_COMPLETE_RECORD_FAILED|REFUND_DEFER_RECORD_FAILED|PAYMENT_COMPENSATION_RETRY_EXHAUSTED|PAYMENT_COMPENSATION_CHECK_EXPIRED|WEBHOOK_RETRY_EXHAUSTED|WEBHOOK_STATE_CONFLICTED|WEBHOOK_FAILURE_RECORD_FAILED|ORDER_AUTO_CANCEL_FAILED\" [$__range]))",
+          "queryType": "instant",
+          "format": "table"
+        }
+      ],
+      "id": 26,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      }
+    },
+    {
+      "type": "table",
+      "title": "위험 신호",
+      "description": "회복될 수 있는 실패. 같은 대상이 계속 남으면 확인한다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "건수",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "건수"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event, errorCode) (count_over_time({app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"PG_CANCEL_REJECTED|PG_CANCEL_UNCONFIRMED|PAYMENT_AMOUNT_MISMATCHED|REFUND_FAILED|PAYMENT_COMPENSATION_FAILED|WEBHOOK_PROCESS_FAILED|PG_RESPONSE_INVALID\" [$__range]))",
+          "queryType": "instant",
+          "format": "table"
+        }
+      ],
+      "id": 27,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      }
+    },
+    {
+      "type": "row",
+      "title": "로그",
+      "collapsed": false,
+      "panels": [],
+      "id": 28,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      }
+    },
+    {
+      "type": "logs",
+      "title": "확인 필요 로그",
+      "description": "줄을 펼쳐 traceId를 누르면 같은 요청의 로그를 본다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{app=\"attraction-reservation\", env=~\"$env\"} | logfmt | event=~\"REFUND_RETRY_EXHAUSTED|REFUND_CANCEL_REJECTED|REFUND_CHECK_EXPIRED|REFUND_AMOUNT_MISMATCHED|REFUND_COMPLETE_RECORD_FAILED|REFUND_DEFER_RECORD_FAILED|PAYMENT_COMPENSATION_RETRY_EXHAUSTED|PAYMENT_COMPENSATION_CHECK_EXPIRED|WEBHOOK_RETRY_EXHAUSTED|WEBHOOK_STATE_CONFLICTED|WEBHOOK_FAILURE_RECORD_FAILED|ORDER_AUTO_CANCEL_FAILED|PG_CANCEL_REJECTED|PG_CANCEL_UNCONFIRMED|PAYMENT_AMOUNT_MISMATCHED|REFUND_FAILED|PAYMENT_COMPENSATION_FAILED|WEBHOOK_PROCESS_FAILED|PG_RESPONSE_INVALID\"",
+          "queryType": "range",
+          "maxLines": 500
+        }
+      ],
+      "id": 29,
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      }
+    },
+    {
+      "type": "logs",
+      "title": "결제 · 예약 이벤트 로그",
+      "description": "상단 검색어로 거른다. 예: orderId=12 , pgId=pay-abc , reservationId=7 . 주기마다 남는 배치 로그는 스케줄러 대시보드에서 본다.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{app=\"attraction-reservation\", env=~\"$env\"} |~ \"(?i)$search\" | logfmt | event=~\"(ADMIN_)?ORDER_.*|PAYMENT_.*|REFUND_.*|WEBHOOK_.*|PG_.*|RESERVATION_.*|TICKETS_ISSUED|TICKET_ENTERED\" | event!~\".*_BATCH_.*\" | event!=\"ORDER_AUTO_CANCEL_PROCESSED\"",
+          "queryType": "range",
+          "maxLines": 500
+        }
+      ],
+      "id": 30,
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      }
+    }
+  ]
+}

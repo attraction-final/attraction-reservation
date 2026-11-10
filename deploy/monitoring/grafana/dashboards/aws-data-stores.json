@@ -14,44 +14,7 @@
   },
   "schemaVersion": 39,
   "templating": {
-    "list": [
-      {
-        "name": "rds",
-        "label": "RDS",
-        "type": "custom",
-        "query": "attraction-final-db",
-        "hide": 0,
-        "current": {
-          "text": "attraction-final-db",
-          "value": "attraction-final-db"
-        },
-        "options": [
-          {
-            "text": "attraction-final-db",
-            "value": "attraction-final-db",
-            "selected": true
-          }
-        ]
-      },
-      {
-        "name": "cache",
-        "label": "ElastiCache",
-        "type": "custom",
-        "query": "attraction-final-cache-001",
-        "hide": 0,
-        "current": {
-          "text": "attraction-final-cache-001",
-          "value": "attraction-final-cache-001"
-        },
-        "options": [
-          {
-            "text": "attraction-final-cache-001",
-            "value": "attraction-final-cache-001",
-            "selected": true
-          }
-        ]
-      }
-    ]
+    "list": []
   },
   "panels": [
     {
@@ -94,7 +57,6 @@
             }
           },
           "min": 0,
-          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -133,7 +95,7 @@
           "metricName": "CPUUtilization",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -213,7 +175,7 @@
           "metricName": "CPUCreditBalance",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -250,8 +212,7 @@
             "fillOpacity": 10,
             "lineWidth": 1,
             "showPoints": "never"
-          },
-          "min": 0
+          }
         },
         "overrides": []
       },
@@ -277,7 +238,7 @@
           "metricName": "DatabaseConnections",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -314,8 +275,7 @@
             "fillOpacity": 10,
             "lineWidth": 1,
             "showPoints": "never"
-          },
-          "min": 0
+          }
         },
         "overrides": []
       },
@@ -341,7 +301,7 @@
           "metricName": "FreeableMemory",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -366,7 +326,7 @@
           "metricName": "SwapUsage",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -430,7 +390,7 @@
           "metricName": "ReadIOPS",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -455,7 +415,7 @@
           "metricName": "WriteIOPS",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -519,7 +479,7 @@
           "metricName": "ReadLatency",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -544,7 +504,7 @@
           "metricName": "WriteLatency",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -586,7 +546,6 @@
             }
           },
           "min": 0,
-          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -625,7 +584,7 @@
           "metricName": "BurstBalance",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -689,7 +648,7 @@
           "metricName": "DiskQueueDepth",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Average",
@@ -726,8 +685,7 @@
             "fillOpacity": 10,
             "lineWidth": 1,
             "showPoints": "never"
-          },
-          "min": 0
+          }
         },
         "overrides": []
       },
@@ -753,7 +711,7 @@
           "metricName": "FreeStorageSpace",
           "dimensions": {
             "DBInstanceIdentifier": [
-              "$rds"
+              "attraction-final-db"
             ]
           },
           "statistic": "Minimum",
@@ -808,7 +766,6 @@
             }
           },
           "min": 0,
-          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -847,7 +804,7 @@
           "metricName": "CPUUtilization",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -872,7 +829,7 @@
           "metricName": "EngineCPUUtilization",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -914,7 +871,6 @@
             }
           },
           "min": 0,
-          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -953,7 +909,7 @@
           "metricName": "DatabaseMemoryUsagePercentage",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -991,10 +947,22 @@
             "lineWidth": 1,
             "showPoints": "never"
           },
-          "min": 0,
-          "max": 100
+          "min": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "적중률"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1018,7 +986,7 @@
           "metricName": "CacheHits",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1026,7 +994,7 @@
           "matchExact": true,
           "metricQueryType": 0,
           "metricEditorMode": 0,
-          "id": "hits",
+          "id": "",
           "expression": "",
           "label": "",
           "hide": true
@@ -1043,7 +1011,7 @@
           "metricName": "CacheMisses",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1051,7 +1019,7 @@
           "matchExact": true,
           "metricQueryType": 0,
           "metricEditorMode": 0,
-          "id": "misses",
+          "id": "",
           "expression": "",
           "label": "",
           "hide": true
@@ -1059,22 +1027,11 @@
         {
           "refId": "C",
           "datasource": {
-            "type": "cloudwatch",
-            "uid": "cloudwatch"
+            "type": "__expr__",
+            "uid": "__expr__"
           },
-          "queryMode": "Metrics",
-          "region": "default",
-          "metricQueryType": 0,
-          "metricEditorMode": 1,
-          "namespace": "",
-          "metricName": "",
-          "dimensions": {},
-          "statistic": "Average",
-          "period": "",
-          "matchExact": true,
-          "id": "",
-          "expression": "100 * hits / (hits + misses)",
-          "label": "적중률",
+          "type": "math",
+          "expression": "100 * $A / ($A + $B)",
           "hide": false
         }
       ]
@@ -1101,8 +1058,7 @@
             "fillOpacity": 10,
             "lineWidth": 1,
             "showPoints": "never"
-          },
-          "min": 0
+          }
         },
         "overrides": []
       },
@@ -1128,7 +1084,7 @@
           "metricName": "CurrConnections",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1153,7 +1109,7 @@
           "metricName": "NewConnections",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1217,7 +1173,7 @@
           "metricName": "CurrItems",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1242,7 +1198,7 @@
           "metricName": "Evictions",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1322,7 +1278,7 @@
           "metricName": "CPUCreditBalance",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Average",
@@ -1386,7 +1342,7 @@
           "metricName": "NetworkBytesIn",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1411,7 +1367,7 @@
           "metricName": "NetworkBytesOut",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",
@@ -1475,7 +1431,7 @@
           "metricName": "ProcessedCommands",
           "dimensions": {
             "CacheClusterId": [
-              "$cache"
+              "attraction-final-cache-001"
             ]
           },
           "statistic": "Sum",

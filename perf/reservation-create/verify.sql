@@ -2,7 +2,7 @@
 CREATE TEMPORARY TABLE guard (ok TINYINT NOT NULL CHECK (ok = 1));
 INSERT INTO guard SELECT IF(DATABASE()='reservation_create_perf',1,0);
 INSERT INTO guard SELECT IF(@scenario IN ('sold-out','single','spread'),1,0);
-INSERT INTO guard SELECT IF(@users IN (50,100,200),1,0);
+INSERT INTO guard SELECT IF(@users IN (50,100,200,500,1000),1,0);
 SET @groups=IF(@scenario='spread',5,1);
 SET @capacity=IF(@scenario='sold-out',20,@users DIV @groups);
 SET @expected=IF(@scenario='sold-out',20,@users);

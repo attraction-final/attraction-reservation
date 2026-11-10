@@ -10,7 +10,8 @@ if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘�
 const scenario = __ENV.SCENARIO || 'sold-out';
 if (!['sold-out','single','spread'].includes(scenario)) throw new Error('잘못된 SCENARIO');
 const users = Number(__ENV.TEST_VUS || 50);
-if (![50,100,200].includes(users)) throw new Error('TEST_VUS는 50, 100, 200이어야 합니다.');
+if (![50,100,200,500,1000].includes(users)) throw new Error('TEST_VUS는 50, 100, 200, 500, 1000이어야 합니다.');
+const setupTimeoutSeconds = users >= 500 ? 120 : 60;
 const expectedSuccess = scenario === 'sold-out' ? 20 : users;
 const expectedRejection = users - expectedSuccess;
 const expectedSlots = scenario === 'spread' ? 5 : 1;
@@ -22,7 +23,10 @@ const unexpected = new Counter('reservation_create_unexpected');
 const successDuration = new Trend('reservation_create_success_duration', true);
 const rejectionDuration = new Trend('reservation_create_rejection_duration', true);
 const requestStartedAt = new Gauge('reservation_create_request_started_at_ms');
+const setupStartedAt = new Gauge('reservation_create_setup_started_at_ms');
+const setupFinishedAt = new Gauge('reservation_create_setup_finished_at_ms');
 export const options = {
+  setupTimeout: `${setupTimeoutSeconds}s`,
   scenarios: { [scenario]: { executor: 'per-vu-iterations', vus: users, iterations: 1, maxDuration: '90s', gracefulStop: '10s' } },
   summaryTrendStats: ['avg','med','max','p(95)','p(99)'],
   thresholds: {
@@ -33,6 +37,7 @@ export const options = {
 };
 
 export function setup() {
+  setupStartedAt.add(Date.now());
   if (fixture.length !== users || new Set(fixture.map(x => x.userId)).size !== users
       || new Set(fixture.map(x => x.ticketId)).size !== users || new Set(fixture.map(x => x.slotId)).size !== expectedSlots
       || fixture.some(x => x.scenario !== scenario || x.users !== users)) {
@@ -42,7 +47,10 @@ export function setup() {
     if (fixture.filter(x => x.slotId === slotId).length !== users / expectedSlots) throw new Error('슬롯별 회원 배정 불일치');
   }
   // 실제 서버 시간을 바꾸지 않는다. 토큰은 setup 메모리에서만 전달한다.
-  return fixture.map(account => ({ ...account, token: login(account.email, 180) }));
+  // setup 대기 + scenario 최대 90초 + gracefulStop 10초 + 여유 20초를 확보한다.
+  const accounts = fixture.map(account => ({ ...account, token: login(account.email, setupTimeoutSeconds + 120) }));
+  setupFinishedAt.add(Date.now());
+  return accounts;
 }
 
 export default function (accounts) {

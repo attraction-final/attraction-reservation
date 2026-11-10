@@ -22,3 +22,9 @@ ticket:
   expiration:
     scheduler:
       enabled: false
+
+attraction:
+  slot:
+    generation:
+      scheduler:
+        enabled: false

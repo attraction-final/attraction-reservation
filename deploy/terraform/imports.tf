@@ -247,10 +247,6 @@ import {
 
 # 데이터 저장소
 import {
-  to = aws_db_subnet_group.main
-  id = "attraction-final-db-sng"
-}
-import {
   to = aws_db_instance.main
   id = "attraction-final-db"
 }

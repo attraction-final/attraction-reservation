@@ -1,9 +1,9 @@
 # 콘솔에서 만든 설정을 그대로 옮겼다. 아래 값을 바꾸면 운영 DB·캐시에 바로 반영되므로 plan을 꼭 확인한다.
 
-resource "aws_db_subnet_group" "main" {
-  name        = "attraction-final-db-sng"
-  description = "attration-final-db-sng"
-  subnet_ids  = [aws_subnet.public_2a.id, aws_subnet.public_2b.id]
+resource "aws_db_subnet_group" "private" {
+  name        = "attraction-final-db-private-sng"
+  description = "attraction-final-db private subnets"
+  subnet_ids  = [aws_subnet.private_2a.id, aws_subnet.private_2b.id]
 }
 
 resource "aws_db_instance" "main" {
@@ -22,7 +22,7 @@ resource "aws_db_instance" "main" {
   storage_encrypted     = true
   kms_key_id            = "arn:aws:kms:${local.region}:${local.account_id}:key/baff3704-7521-4ee9-8fa6-05429f87a52b"
 
-  db_subnet_group_name   = aws_db_subnet_group.main.name
+  db_subnet_group_name   = aws_db_subnet_group.private.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
   multi_az               = false
@@ -31,11 +31,15 @@ resource "aws_db_instance" "main" {
   option_group_name        = "default:mysql-8-4"
   engine_lifecycle_support = "open-source-rds-extended-support-disabled"
 
-  backup_retention_period = 0
-  backup_window           = "16:54-17:24"
-  maintenance_window      = "mon:14:31-mon:15:01"
-  copy_tags_to_snapshot   = true
-  skip_final_snapshot     = true
+  backup_retention_period   = 7
+  backup_window             = "16:54-17:24"
+  maintenance_window        = "mon:14:31-mon:15:01"
+  copy_tags_to_snapshot     = true
+  deletion_protection       = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "attraction-final-db-final"
+  # 변경을 maintenance window까지 미루지 않는다. 백업 0 → 7 같은 변경은 짧은 재시작이 생길 수 있다.
+  apply_immediately = true
 }
 
 resource "aws_elasticache_subnet_group" "main" {

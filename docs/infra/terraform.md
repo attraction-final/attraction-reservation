@@ -59,6 +59,7 @@ terraform apply           # plan을 확인한 뒤 적용
 
 ## 4. 주의할 점
 
+- RDS는 `apply_immediately = true`라서 apply하면 maintenance window를 기다리지 않고 바로 반영된다. 재시작이 필요한 변경은 plan을 보고 시간을 골라 적용한다.
 - RDS는 자동 마이너 업그레이드가 켜져 있다. AWS가 버전을 올리면 `engine_version` diff가 생기므로 코드의 버전을 실제 값으로 고친다.
 - ALB 리스너·규칙의 forward 액션은 import 결과에 맞춰 적었다. 형식을 바꾸면 의미가 같아도 diff가 생길 수 있다.
 - ECR lifecycle 정책은 태그된 이미지만 센다. buildx로 올린 이미지는 태그된 index 아래 플랫폼 이미지가 태그 없이 들어 있어서, 태그 없는 이미지를 지우는 규칙을 두면 실행 중인 이미지가 깨질 수 있다.
@@ -66,6 +67,6 @@ terraform apply           # plan을 확인한 뒤 적용
 
 ## 5. 가져오면서 발견한 것 (바꾸지 않고 현재 값을 그대로 옮김)
 
-- [ ] RDS가 public 서브넷에 있다. DB 서브넷 그룹이 public 2a/2b를 쓴다. `publicly_accessible = false`이고 SG가 app SG에서 오는 연결만 허용해 외부에서 바로 접근할 수는 없지만, private 서브넷으로 옮기는 것이 맞다.
-- [ ] RDS 자동 백업이 꺼져 있다(`backup_retention_period = 0`). 삭제 방지도 꺼져 있고 `skip_final_snapshot = true`라서, 실수로 지우면 복구할 수 없다.
+- [x] RDS가 public 서브넷에 있다. → 2026-11-10 private 서브넷 그룹 `attraction-final-db-private-sng`(private 2a/2b)로 옮겼다. 같은 VPC 안에서는 서브넷 그룹을 바꿀 수 없어서 스냅샷을 같은 identifier로 복원했다(엔드포인트 동일).
+- [x] RDS 자동 백업이 꺼져 있다. → 2026-11-10 백업 보존 7일, 삭제 방지, 삭제 시 final snapshot(`attraction-final-db-final`)을 켰다.
 - [ ] Terraform을 루트 계정 자격 증명으로 실행했다. 관리자 IAM 사용자나 IAM Identity Center로 바꾼다.

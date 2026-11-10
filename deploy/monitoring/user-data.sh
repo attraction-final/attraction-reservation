@@ -19,6 +19,8 @@
 #
 # 필요한 Parameter Store 값
 #   ${SSM_PREFIX}/MONITORING_VERSION                 실행 구성을 받을 커밋 SHA. CD가 갱신한다.
+#     주의: 새 환경에서 첫 모니터링 배포가 실패하면(인스턴스가 아직 없을 때 등) CD가 이 값을 none으로 남긴다.
+#           이 상태로는 인스턴스가 기동하지 못하므로, S3 monitoring/<SHA>/ 에 번들이 있는 SHA로 직접 고친 뒤 띄운다.
 #   ${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD  Grafana admin 비밀번호
 #
 # 이후 설정 변경은 CD(deploy-monitoring)가 SSM Run Command로 반영한다.
@@ -30,7 +32,7 @@ set -euo pipefail
 SSM_PREFIX=/attraction-reservation/prod
 ARTIFACT_BUCKET=attraction-reservation-793168138824-ap-northeast-2-an
 ARTIFACT_PREFIX=attraction-reservation
-COMPOSE_VERSION=v2.29.7
+COMPOSE_VERSION=v2.40.3
 DEPLOY_DIR=/opt/monitoring
 
 # IMDSv2로 리전을 읽는다.
@@ -74,7 +76,14 @@ chown -R 472:0 /data/grafana            # grafana/grafana
 umask 077
 GRAFANA_ADMIN_PASSWORD=$(aws ssm get-parameter --name "${SSM_PREFIX}/monitoring/GRAFANA_ADMIN_PASSWORD" \
   --with-decryption --query 'Parameter.Value' --output text)
-printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "$GRAFANA_ADMIN_PASSWORD" > .env
+# 작은따옴표로 감싸야 Compose가 $, # 를 해석하지 않는다. 감쌀 수 없는 작은따옴표는 거부한다.
+case "$GRAFANA_ADMIN_PASSWORD" in
+  *\'*)
+    echo "GRAFANA_ADMIN_PASSWORD에 작은따옴표가 있어 .env에 쓸 수 없습니다." >&2
+    exit 1
+    ;;
+esac
+printf "GRAFANA_ADMIN_PASSWORD='%s'\n" "$GRAFANA_ADMIN_PASSWORD" > .env
 umask 022
 
 docker compose up -d

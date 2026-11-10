@@ -24,6 +24,7 @@ public enum ErrorCode {
     ATTRACTION_STATUS_SAME(HttpStatus.BAD_REQUEST, "현재 상태와 같습니다."),
     ATTRACTION_HAS_UPCOMING_RESERVATIONS(HttpStatus.CONFLICT, "이용 예정 예약이 있어 처리할 수 없습니다. 예약을 먼저 처리해 주세요."),
     ATTRACTION_NOT_OPERATING(HttpStatus.CONFLICT, "현재 운영 중인 어트랙션이 아닙니다."),
+    ATTRACTION_DURATION_CHANGE_NOT_ALLOWED(HttpStatus.CONFLICT, "운영 예정이거나 진행 중인 슬롯이 있어 소요 시간을 변경할 수 없습니다."),
 
     // attractionSlot
     SLOT_NOT_FOUND(HttpStatus.NOT_FOUND, "슬롯을 찾을 수 없습니다."),
@@ -44,6 +45,7 @@ public enum ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     USER_NOT_WITHDRAWABLE(HttpStatus.FORBIDDEN, "현재 회원 상태에서는 탈퇴할 수 없습니다."),
     USER_WITHDRAWAL_UNUSED_TICKET(HttpStatus.CONFLICT, "미사용 입장권이 있어 탈퇴할 수 없습니다. 환불 후 다시 시도해주세요."),
+    USER_WITHDRAWAL_INCOMPLETE_REFUND(HttpStatus.CONFLICT, "완료되지 않은 환불이 있어 탈퇴할 수 없습니다."),
     CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "유저를 찾을 수 없습니다."),
     USER_STATUS_SAME(HttpStatus.CONFLICT, "현재 회원 상태와 동일합니다."),
@@ -99,13 +101,12 @@ public enum ErrorCode {
     TICKET_NOT_REFUNDABLE(HttpStatus.CONFLICT, "미사용 티켓만 환불할 수 있습니다."),
 
     // routeRecommendation
-    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다."),
-    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
-    INVALID_ATTRACTION_SELECTION(HttpStatus.BAD_REQUEST, "어트랙션은 중복 없이 1~5개 선택해야 합니다."),
-    INVALID_TIME_RANGE(HttpStatus.BAD_REQUEST, "이용 시작 시각은 종료 시각보다 이전이어야 하며 입장권 이용 시간 안이어야 합니다."),
-    TICKET_NOT_OWNED(HttpStatus.FORBIDDEN, "본인 소유의 입장권이 아닙니다."),
-    TICKET_NOT_AVAILABLE(HttpStatus.CONFLICT, "사용 중인 입장권으로만 추천받을 수 있습니다."),
-    ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "기존 예약의 취소 가능 시간이 지나 새로운 추천 경로를 생성할 수 없습니다."),
+    DUPLICATE_ROUTE_ATTRACTION(HttpStatus.BAD_REQUEST, "같은 어트랙션을 중복해서 선택할 수 없습니다."),
+    LOCATION_ACCURACY_TOO_LOW(HttpStatus.BAD_REQUEST, "현재 위치의 정확도가 낮아 경로를 추천할 수 없습니다. 위치를 다시 측정해주세요."),
+    LOCATION_OUT_OF_SERVICE_AREA(HttpStatus.BAD_REQUEST, "현재 위치가 서비스 지역에서 너무 멀어 경로를 추천할 수 없습니다."),
+    ATTRACTION_LOCATION_NOT_FOUND(HttpStatus.CONFLICT, "좌표 정보가 등록되지 않은 어트랙션이 있습니다."),
+    ROUTE_NO_VALID_ORDER(HttpStatus.CONFLICT, "이용 가능한 이동 경로로 선택한 어트랙션을 모두 방문하는 순서가 없습니다."),
+    ROUTE_ATTRACTION_NOT_OPERATING(HttpStatus.CONFLICT, "운영하지 않는 어트랙션이 있어 경로를 추천할 수 없습니다."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),
@@ -153,7 +154,11 @@ public enum ErrorCode {
     REFUND_INVALID_TICKET(HttpStatus.BAD_REQUEST, "해당 주문의 티켓이 아닙니다."),
     REFUND_DUPLICATE_TICKET(HttpStatus.BAD_REQUEST, "같은 티켓을 중복해서 환불할 수 없습니다."),
     REFUND_DEADLINE_PASSED(HttpStatus.CONFLICT, "입장일 전날까지만 환불할 수 있습니다."),
-    REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다.");
+    REFUND_USER_WITHDRAW(HttpStatus.CONFLICT, "탈퇴한 회원의 결제는 환불을 요청할 수 없습니다."),
+    REFUND_NOT_FOUND(HttpStatus.NOT_FOUND, "환불 내역을 찾을 수 없습니다."),
+
+    //jev ai / chatbot
+    ATTRACTION_QUESTION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "지금은 어트랙션 질문에 답할 수 없습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;
     private final String message;

@@ -5,11 +5,13 @@ import com.example.attractionreservation.domain.attraction.dto.*;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
 import com.example.attractionreservation.domain.attractionSlot.repository.ReservableSlotView;
 import com.example.attractionreservation.global.config.CacheConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,9 +67,11 @@ public class AttractionService {
             throw e;
         }
 
-        // 추가
-        log.info("event=ATTRACTION_CREATED attractionId={} adminId={} durationMinutes={}",
-                savedAttraction.getId(), adminId, savedAttraction.getDurationMinutes());
+        // [로그 수정] 커밋 뒤에 남긴다. 로그에 쓸 값은 람다 밖에서 미리 꺼낸다.
+        Long attractionId = savedAttraction.getId();
+        Integer durationMinutes = savedAttraction.getDurationMinutes();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_CREATED attractionId={} userId={} durationMinutes={}",
+                attractionId, adminId, durationMinutes));
 
         return CreateAttractionResponse.from(savedAttraction); // 저장된 엔티티를 응답 DTO로 변환하여 반환
     }
@@ -183,6 +187,16 @@ public class AttractionService {
             throw new BusinessException(ErrorCode.ATTRACTION_NAME_DUPLICATED);
         }
 
+        // 소요 시간을 생략하거나 기존 값과 동일하게 요청하면 슬롯 검사를 수행하지 않는다.
+        boolean isDurationChanged = request.durationMinutes() != null && !request.durationMinutes().equals(previousDurationMinutes);
+        // 어트랙션 잠금 확보 후의 KST를 기준으로 취소되지 않은 운영 예정·진행 중 슬롯을 확인한다.
+        // 기존 슬롯·예약 시간표를 보존하기 위해 예약 인원과 관계없이 소요 시간 변경을 거부한다.
+        if (isDurationChanged &&
+                attractionSlotRepository.existsByAttraction_IdAndStatusNotAndEndsAtAfter(attractionId, SlotStatus.CANCELLED, KstTime.now())) {
+            // 엔티티 수정 전에 거부하여 함께 요청한 이름·설명 등도 변경되지 않도록 한다.
+            throw new BusinessException(ErrorCode.ATTRACTION_DURATION_CHANGE_NOT_ALLOWED);
+        }
+
         attraction.update(
                 request.name(),
                 request.description(),
@@ -203,9 +217,10 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제 (예외로 롤백되면 실행되지 않음)
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_UPDATED attractionId={} adminId={} previousDurationMinutes={} currentDurationMinutes={}",
-                attractionId, adminId, previousDurationMinutes, attraction.getDurationMinutes());
+        // [로그 수정] 커밋 뒤에 남긴다.
+        Integer currentDurationMinutes = attraction.getDurationMinutes();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_UPDATED attractionId={} userId={} previousDurationMinutes={} currentDurationMinutes={}",
+                attractionId, adminId, previousDurationMinutes, currentDurationMinutes));
 
         return SearchAttractionResponse.from(attraction);
     }
@@ -235,9 +250,11 @@ public class AttractionService {
         // 커밋이 끝난 뒤 상세 캐시 삭제
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} adminId={} previousStatus={} currentStatus={}",
-                attractionId, adminId, previousStatus, newStatus);
+        // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
+        String previousStatusName = previousStatus.name();
+        String currentStatusName = newStatus.name();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_STATUS_CHANGED attractionId={} userId={} previousStatus={} currentStatus={}",
+                attractionId, adminId, previousStatusName, currentStatusName));
 
         return UpdateAttractionStatusResponse.of(attraction, previousStatus);
     }
@@ -262,8 +279,8 @@ public class AttractionService {
 
         attractionDetailCacheEvictor.evictAfterCommit(attractionId);
 
-        // 추가
-        log.info("event=ATTRACTION_DELETED attractionId={} adminId={}", attractionId, adminId);
+        // [로그 수정] 커밋 뒤에 남긴다.
+        AfterCommit.run(() -> log.info("event=ATTRACTION_DELETED attractionId={} userId={}", attractionId, adminId));
     }
 
     // 예약 - 잠금 전용 조회 메서드

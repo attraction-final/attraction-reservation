@@ -39,7 +39,7 @@ logging:
 
 메시지는 `event=이벤트이름` 다음에 `key=value` 쌍만 나열하며, 문장형 설명은 쓰지 않는다.
 
-```java
+```
 log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, amount);
 ```
 
@@ -64,7 +64,8 @@ log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, 
 | 키 | 의미 | 값 예시 | 비고 |
 | --- | --- | --- | --- |
 | `event` | 이벤트 이름 | `ORDER_CREATED` | 필수 |
-| `userId` | 사용자 식별자 | `u-881` | 이메일·이름 대신 ID |
+| `userId` | 요청을 수행한 로그인 사용자 식별자 | `99` | 관리자도 포함. 대상 회원·소유자 ID를 대신 넣지 않는다 |
+| `targetUserId` | 처리 대상 회원 또는 데이터 소유자 식별자 | `10` | 요청자와 대상 회원이 다르거나, 요청자를 알 수 없는 공통 서비스·자동 처리에서 사용 |
 | `<대상>Id` | 대상 식별자 | `orderId=A1024` | `orderId`, `paymentId` 등 |
 | `result` | 처리 결과 | `SUCCESS`, `FAILURE` | 성공/실패를 한 이벤트로 묶을 때만. 결과가 enum이면 `name()` 사용 |
 | `errorCode` | 내부 에러 코드 | `TOKEN_EXPIRED` | enum `name()` 사용 |
@@ -83,6 +84,29 @@ log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, 
 | `idempotencyKey` | 외부 API 멱등 키 | `3f2a…` | PG 문의·중복 확인용 |
 | `status` | 대상의 현재 상태 | `REQUESTED` | enum `name()` 사용 |
 | `eventType` | 외부 이벤트 종류 | `WebhookTransactionPaid` | 웹훅 등 외부에서 받은 이벤트 |
+| `questionLength` | 질문 글자 수 | `14` | 질문 원문 대신 남긴다 (8장) |
+| `intent` | 질문 의도 | `HEIGHT_LIMIT` | enum `name()` 사용 |
+| `attractionConfidence` | 어트랙션 분류 확신도 | `0.85` | 0~1 |
+| `intentConfidence` | 의도 분류 확신도 | `0.73` | 0~1 |
+| `model` | 외부 AI 모델 이름 | `"jev-1.13.0"` | 외부 응답 값이라 `model="{}"` + `LogValues.quoted()` |
+| `inputTokens` | 외부 AI 입력 토큰 수 | `120` | 비용 집계용. 응답에 값이 없으면 `null` |
+| `exceptionType` | 예외 클래스 이름 | `TypeSafeApiTimeoutException` | 예외 메시지에 민감정보나 외부 응답 본문이 섞일 수 있어 예외 객체 대신 남길 때 |
+
+**요청자와 대상 회원 구분**
+
+- 모든 도메인에서 요청한 사람은 `userId`, 처리 대상 회원은 `targetUserId`로 기록한다. 관리자 요청도 `adminId` 대신 `userId`를 사용한다.
+- 본인 요청임을 확인한 로그는 `userId`만 기록해도 된다. 서로 다른 회원을 대신 처리하면, 이미 알고 있는 대상 회원 ID를 `targetUserId`로 함께 기록한다.
+- 환불 공통 서비스, 결제 웹훅, 티켓 발급, 스케줄러처럼 소유자만 알고 있는 곳은 `targetUserId`를 사용한다. 소유자를 요청자로 추정하거나 임의의 `userId`를 넣지 않는다.
+- 대상 회원 ID를 얻기 위한 추가 DB 조회나 로그만을 위한 API 응답 변경은 하지 않는다. 이미 알고 있는 대상 데이터 ID와 `traceId`로 연결한다.
+- 이 규칙은 로그 키에 적용한다. 메서드 파라미터·DTO·이벤트 필드 이름까지 일괄 변경하지 않는다.
+
+```text
+event=ATTRACTION_UPDATED attractionId=3 userId=99
+event=USER_STATUS_CHANGED userId=99 targetUserId=10 previousStatus=ACTIVE currentStatus=SUSPENDED
+event=REFUND_REQUESTED refundId=20 pgId=pg-1 targetUserId=10 amount=30000
+```
+
+로그 키 변경 이전 기록에는 `adminId` 또는 소유자를 뜻하는 `userId`가 남아 있다. 과거 기록을 조회할 때는 해당 이벤트와 배포 시점을 함께 확인하고, 기존 Loki 쿼리·대시보드도 새 키에 맞춘다.
 
 ## 5. 로그 레벨 기준
 
@@ -104,7 +128,7 @@ log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, 
 
 예외는 객체째 마지막 인자로 넘기고, 처리하는 곳에서 한 번만 남긴다.
 
-```java
+```
 log.error("event=PAYMENT_FAILED orderId={} errorCode={}", orderId, errorCode.name(), e);  // O
 log.error("event=PAYMENT_FAILED reason=" + e.getMessage());                                // X
 ```
@@ -126,7 +150,8 @@ log.error("event=PAYMENT_FAILED reason=" + e.getMessage());                     
 | --- | --- | --- |
 | 무슨 일이 일어났나 | `event` | 항상 |
 | 어느 요청인가 | `traceId` | MDC 자동 (스케줄러·비동기는 9장 참고) |
-| 누가 | `userId` | 인증된 요청이면 항상 |
+| 누가 | `userId` | 인증된 요청 경계에서 기록. 공통 서비스·자동 처리에서 요청자를 모르면 생략 |
+| 누구를 대상으로 | `targetUserId` | 요청자와 다른 대상 회원 또는 소유자만 알고 있을 때. 추가 조회 없이 알고 있는 ID를 사용 |
 | 무엇에 대해 | `<대상>Id` | 특정 대상이 있으면 항상 |
 | 결과는 | `result`, `errorCode` | 실패 시 `errorCode` 필수. 대응하는 ErrorCode가 없는 실패(DB 오류, 수동 확인 알림 등)는 `reason`이나 예외 객체로 원인을 남긴다 |
 | 왜 | `reason` | `errorCode`만으로 원인을 알 수 없을 때 |
@@ -137,7 +162,7 @@ log.error("event=PAYMENT_FAILED reason=" + e.getMessage());                     
 
 | 로그 유형 | 레벨 | 필수 키 | 권장 키 |
 | --- | --- | --- | --- |
-| 비즈니스 이벤트 (주문 생성, 결제 완료) | INFO | `event`, `<대상>Id`, `userId` | 금액 등 핵심 수치 |
+| 비즈니스 이벤트 (주문 생성, 결제 완료) | INFO | `event`, `<대상>Id`, `userId`(요청자를 아는 경우) | `targetUserId`(대상 회원·소유자를 아는 경우), 금액 등 핵심 수치 |
 | 클라이언트 원인 실패 (4xx) | INFO | `event`, `method`, `uri`, `errorCode`, `httpStatus` | `userId` |
 | 서버 오류 (5xx, 처리되지 않은 예외) | ERROR | `event`, `errorCode`(대응하는 ErrorCode가 있을 때), `<대상>Id`, 예외 객체 | `reason` |
 | 외부 연동 호출 | INFO | `event`, `target`, `durationMs`, `result` | `httpStatus` |
@@ -153,7 +178,7 @@ log.error("event=PAYMENT_FAILED reason=" + e.getMessage());                     
 
 ## 8. 민감정보
 
-아래 정보는 어떤 레벨에서도 로그에 남기지 않는다. 사용자를 식별해야 할 때는 내부 `userId`만 쓴다.
+아래 정보는 어떤 레벨에서도 로그에 남기지 않는다. 사용자를 식별해야 할 때는 내부 ID를 `userId` 또는 `targetUserId`로만 기록한다.
 
 | 분류 | 항목 | 처리 |
 | --- | --- | --- |
@@ -191,11 +216,16 @@ implementation 'io.micrometer:micrometer-tracing-bridge-brave'
 | 구분 | 키 | 이유 |
 | --- | --- | --- |
 | 레이블로 사용 | `app`, `env` (+ 필요 시 `level`) | 값 종류가 적어 스트림 수가 작게 유지됨 |
+| 레이블로 사용 | `instance` (EC2 인스턴스 ID) | 인스턴스별로 스트림을 나눠, 한 인스턴스의 전송이 늦어져도 다른 인스턴스 로그 때문에 거부(`too far behind`)되지 않게 한다. 값은 배포마다 바뀌지만 동시에 떠 있는 인스턴스 수만큼만 생긴다 |
 | 레이블 금지 | `userId`, `orderId`, `traceId`, `uri`, `event` 등 | 값이 많아 스트림이 폭증하고 Loki 성능이 저하됨 |
 
 **수집기 설정**
 
-- 수집기는 Grafana Alloy를 사용한다. (Promtail은 지원 종료 수순)
+- 수집기는 Grafana Alloy를 사용한다. (Promtail은 지원 종료 수순) 설정은 `deploy/alloy/config.alloy`에 둔다.
+- 애플리케이션은 로그를 stdout으로만 출력하고 파일로 쓰지 않는다. Alloy는 Docker API(`loki.source.docker`)로 compose의 `app` 서비스 컨테이너 stdout만 수집한다.
+- Alloy는 Docker 소켓을 직접 마운트하지 않고, 읽기 전용 프록시(`docker-proxy`)로 Docker API에 접근한다. 소켓은 `:ro`로 마운트해도 API 쓰기를 막지 못한다.
+- stdout에는 logfmt 로그만 나가게 한다. JVM이 직접 찍는 줄(`JAVA_TOOL_OPTIONS`의 `Picked up ...` 등)이 섞이지 않도록 JVM 옵션은 실행 명령에 직접 넘긴다.
+- 컨테이너 로그는 Docker `json-file` 드라이버의 `max-size`, `max-file`로 순환해 디스크가 차지 않게 한다.
 - 스택 트레이스가 한 로그로 묶이도록 multiline 설정에서 "`ts=`로 시작하는 줄이 새 로그의 시작"으로 지정한다. (첫 줄 정규식 예: `^ts=`)
 
 **조회 예시 (LogQL)**
@@ -220,7 +250,7 @@ avg_over_time({app="order-api"} | logfmt | event="EXTERNAL_API_CALLED" | unwrap 
 
 **상황별 예시**
 
-```java
+```
 // 비즈니스 이벤트
 log.info("event=ORDER_CREATED orderId={} userId={} amount={}", orderId, userId, amount);
 
@@ -245,6 +275,7 @@ log.info("event=SETTLEMENT_BATCH_COMPLETED count={} durationMs={}", count, ms);
 
 - [ ] 메시지가 `event=`로 시작하고, 이벤트 이름이 `대상_동작` 대문자 스네이크 케이스인가
 - [ ] 나머지가 모두 `key=value`이고, 키 이름이 표준 키 사전과 일치하는가
+- [ ] `userId`는 요청자, `targetUserId`는 대상 회원·소유자이며, 소유자를 요청자로 기록하지 않았는가
 - [ ] 가변 값을 `{}` 플레이스홀더로 넘겼는가
 - [ ] 공백이 들어갈 수 있는 값을 따옴표로 감쌌는가
 - [ ] 레벨이 5장 기준에 맞는가 (4xx는 INFO)

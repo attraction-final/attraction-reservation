@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.time.LocalTime;
 
 @Getter
 @Entity
@@ -63,6 +64,23 @@ public class Attraction extends BaseTimeEntity {
     )
     private Integer activeAttraction;
 
+
+    //추가: 어트랙션 Q&A 답변에 쓰는 탑승 정보, 관리자 api가 아직 없어 마이그레이션 sql로만 값을 넣는다.
+    //전부 NULL을 허용한다. NULL은 제한 없음이 아니라 등록된 정보 없음이다.
+    @Column(name = "min_height_cm")
+    private Integer minHeightCm;  //혼자 탈 수 있는 최소 키
+
+    @Column(name = "max_height_cm")
+    private Integer maxHeightCm; //탈 수 있는 최대 키
+
+    @Column(name = "guardian_height_cm")
+    private Integer guardianHeightCm;
+
+    @Column(name = "open_time")
+    private LocalTime openTime;
+
+    @Column(name = "close_time")
+    private LocalTime closeTime;
 
     // Attraction Service 등록에 필요
     private Attraction(String name, String description, String location, Integer durationMinutes) {

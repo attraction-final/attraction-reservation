@@ -30,6 +30,17 @@ import java.util.UUID;
                         "active_reservation"
                 }
             )
+        },
+        indexes = {
+            @Index(
+                    name = "idx_reservations_user_status_id",
+                    columnList = "user_id, reservation_status, id"
+            ),
+            @Index(
+                    name = "idx_reservations_status_id",
+                    columnList = "reservation_status, id"
+            )
+
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

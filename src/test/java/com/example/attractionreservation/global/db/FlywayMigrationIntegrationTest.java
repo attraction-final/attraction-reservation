@@ -17,6 +17,9 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.mysql.MySQLContainer;
@@ -27,10 +30,12 @@ import java.sql.Statement;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
 // 마이그레이션 SQL(db/migration)이 엔티티 매핑과 일치하는지 운영과 같은 MySQL 버전에서 검증한다.
-// 다른 테스트는 엔티티로 스키마를 만들므로(create-drop), 엔티티만 바꾸고 마이그레이션을 빠뜨리면 이 테스트만 실패한다.
+// 다른 테스트는 엔티티로 스키마를 만들므로(create-drop), 테이블·컬럼을 빠뜨리거나 컬럼 타입이 다르면 이 테스트만 실패한다.
+// validate는 컬럼 길이·NULL 여부·UNIQUE 제약·인덱스·외래 키를 비교하지 않는다. (docs/database/migration.md 2장)
 @DataJpaTest(properties = {
         "spring.flyway.enabled=true",
         "spring.jpa.hibernate.ddl-auto=validate"
@@ -52,6 +57,9 @@ class FlywayMigrationIntegrationTest {
 
     @Autowired
     private MySQLContainer mysql;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @TestConfiguration(proxyBeanMethods = false)
     static class MySqlConfig {
@@ -108,6 +116,134 @@ class FlywayMigrationIntegrationTest {
         });
         assertThat(Arrays.stream(applied).map(MigrationInfo::getVersion))
                 .contains(MigrationVersion.fromVersion("2"));
+    }
+
+    // validate는 UNIQUE 제약을 비교하지 않으므로 V2의 uk_attraction_name_active는 실제 INSERT로 검증한다.
+    @Test
+    @DisplayName("삭제되지 않은 어트랙션과 같은 이름으로 추가하면 UNIQUE 제약 위반이 발생한다")
+    void insertAttraction_DuplicateActiveName_ThrowsDuplicateKeyException() {
+        // given
+        insertAttraction("회전목마", null);
+
+        // when & then
+        assertThatThrownBy(() -> insertAttraction("회전목마", null))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    @DisplayName("같은 이름의 삭제된 어트랙션이 여러 건 있어도 그 이름으로 추가할 수 있다")
+    void insertAttraction_SameNameDeletedExists_Success() {
+        // given
+        insertAttraction("회전목마", "2026-01-01 00:00:00");
+        insertAttraction("회전목마", "2026-01-02 00:00:00");
+
+        // when
+        insertAttraction("회전목마", null);
+
+        // then
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attractions WHERE name = ?", Integer.class, "회전목마");
+        assertThat(count).isEqualTo(3);
+    }
+
+    // validate는 UNIQUE·CHECK 제약을 비교하지 않으므로 V6(attraction_locations)·V7(attraction_paths) 제약은 실제 INSERT로 검증한다.
+    @Test
+    @DisplayName("같은 출발·도착 어트랙션의 이동 구간을 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
+    void insertAttractionPath_DuplicateDirection_ThrowsDuplicateKeyException() {
+        // given
+        long from = insertAttractionAndGetId("범퍼카");
+        long to = insertAttractionAndGetId("썬더폴스");
+        insertAttractionPath(from, to, 141, 3);
+
+        // when & then
+        assertThatThrownBy(() -> insertAttractionPath(from, to, 141, 3))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    @DisplayName("방향이 반대인 이동 구간은 별도 행으로 넣을 수 있다")
+    void insertAttractionPath_ReverseDirection_Success() {
+        // given
+        long a = insertAttractionAndGetId("범퍼카");
+        long b = insertAttractionAndGetId("아마존 익스프레스");
+        insertAttractionPath(a, b, 641, 11);
+
+        // when
+        insertAttractionPath(b, a, 641, 12);
+
+        // then
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM attraction_paths", Integer.class);
+        assertThat(count).isEqualTo(2);
+    }
+
+    // MySQL의 CHECK 위반(오류 코드 3819, SQLState HY000)은 Spring이 DataIntegrityViolationException으로 번역하지 않고
+    // UncategorizedSQLException으로 던진다. 그래서 예외 타입 대신 위반한 제약 이름으로 검증한다.
+    @Test
+    @DisplayName("출발과 도착이 같은 이동 구간은 CHECK 제약 위반이 발생한다")
+    void insertAttractionPath_SameAttraction_ThrowsCheckConstraintViolation() {
+        // given
+        long a = insertAttractionAndGetId("범퍼카");
+
+        // when & then
+        assertThatThrownBy(() -> insertAttractionPath(a, a, 10, 1))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_attraction_paths_not_self");
+    }
+
+    @Test
+    @DisplayName("한 어트랙션의 좌표를 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
+    void insertAttractionLocation_Duplicate_ThrowsDuplicateKeyException() {
+        // given
+        long a = insertAttractionAndGetId("범퍼카");
+        insertAttractionLocation(a, 37.2923658, 127.1995663);
+
+        // when & then
+        assertThatThrownBy(() -> insertAttractionLocation(a, 37.2923658, 127.1995663))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    // V10: KAN-142부터 쓰지 않는 추천 저장 테이블을 지웠다. (V8·V9가 바꾼 테이블도 여기서 함께 사라진다)
+    @Test
+    @DisplayName("추천 경로 저장 테이블은 마이그레이션 후 남아 있지 않다")
+    void migrate_DropsRouteRecommendationTables() {
+        // when
+        Integer remaining = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name IN ('route_recommendations', 'route_recommendation_stops', 'route_recommendation_exclusions')
+                """, Integer.class);
+
+        // then
+        assertThat(remaining).isZero();
+    }
+
+    private long insertAttractionAndGetId(String name) {
+        insertAttraction(name, null);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM attractions WHERE name = ? AND deleted_at IS NULL", Long.class, name);
+    }
+
+    private void insertAttractionPath(long fromId, long toId, int distanceM, int moveMinutes) {
+        jdbcTemplate.update("""
+                INSERT INTO attraction_paths (created_at, updated_at, from_attraction_id, to_attraction_id,
+                    distance_m, move_minutes)
+                VALUES (NOW(6), NOW(6), ?, ?, ?, ?)
+                """, fromId, toId, distanceM, moveMinutes);
+    }
+
+    private void insertAttractionLocation(long attractionId, double latitude, double longitude) {
+        jdbcTemplate.update("""
+                INSERT INTO attraction_locations (created_at, updated_at, attraction_id, latitude, longitude)
+                VALUES (NOW(6), NOW(6), ?, ?, ?)
+                """, attractionId, latitude, longitude);
+    }
+
+    private void insertAttraction(String name, String deletedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO attractions (created_at, updated_at, deleted_at, description,
+                    duration_minutes, entrance_move_minutes, location, name, operation_status)
+                VALUES (NOW(6), NOW(6), ?, '설명', 5, 1, '위치', ?, 'OPERATING')
+                """, deletedAt, name);
     }
 
     // 컨테이너의 root 계정으로 별도 스키마를 만들고 V1 SQL만 실행한다. (Flyway 이력 없음)

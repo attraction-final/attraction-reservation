@@ -16,6 +16,7 @@ import com.example.attractionreservation.domain.ticket.entity.Ticket;
 import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
 import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -79,6 +80,9 @@ class RefundServiceTest {
     @Mock
     private TicketService ticketService;
 
+    @Mock
+    private UserRepository userRepository;
+
     @InjectMocks
     private RefundService refundService;
 
@@ -129,7 +133,8 @@ class RefundServiceTest {
         //then
         assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
                 .singleElement().asString().contains("INFO")
-                .contains("refundId=1 pgId=" + payment.getPgId() + " userId=" + USER_ID + " amount=20000");
+                .contains("refundId=1 pgId=" + payment.getPgId() + " targetUserId=" + USER_ID + " amount=20000")
+                .doesNotContain(" userId=", " adminId=");
         assertThat(output).doesNotContain("단순 변심");
     }
 
@@ -292,11 +297,33 @@ class RefundServiceTest {
         verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
     }
 
+    @ParameterizedTest(name = "전체 환불 여부: {0}")
+    @ValueSource(booleans = {true, false})
+    @DisplayName("일반 사용자가 탈퇴한 타인의 결제를 환불 요청하면 탈퇴 상태를 노출하지 않고 없는 결제로 처리한다")
+    void createUserRefund_otherOwnerWithdrawn_returnsPaymentNotFound(boolean fullRefund) {
+        // given
+        payment.getOrder().getUser().withdraw(NOW);
+        givenPayment(payment);
+
+        // when & then
+        assertThatThrownBy(() -> {
+            if (fullRefund) {
+                refundService.createFullRefund(OTHER_USER_ID, PG_ID, "단순 변심", NOW);
+            } else {
+                refundService.createRefund(OTHER_USER_ID, PG_ID, List.of(1L), "단순 변심", NOW);
+            }
+        }).isInstanceOfSatisfying(BusinessException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_NOT_FOUND));
+
+        // 소유권 검사에서 거부되므로 티켓 조회·환불 수량 계산·환불 저장은 수행하지 않는다.
+        verifyNoInteractions(ticketService, refundItemRepository, refundRepository);
+    }
+
     @Test
     @DisplayName("존재하지 않는 결제는 환불할 수 없다.")
     void createRefund_paymentNotFound_Fail() {
         //given
-        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.empty());
+        given(paymentRepository.findUserIdByPgId(PG_ID)).willReturn(Optional.empty());
         List<Long> ticketIds = List.of(1L);
 
         //when & then
@@ -542,7 +569,7 @@ class RefundServiceTest {
     @ParameterizedTest
     @ValueSource(longs = {0, 86400})
     @DisplayName("관리자 전체 환불은 회원 소유 결제의 방문일 당일·이후에도 미사용 티켓을 환불 요청한다")
-    void createAdminFullRefund_AfterDeadline_SavesUnusedTickets(long secondsAfterVisitStart) {
+    void createAdminFullRefund_AfterDeadline_SavesUnusedTickets(long secondsAfterVisitStart, CapturedOutput output) {
         // given
         ReflectionTestUtils.setField(payment.getOrder().getUser(), "id", OTHER_USER_ID);
         givenPayment(payment);
@@ -563,6 +590,11 @@ class RefundServiceTest {
         assertThat(saved.getStatus()).isEqualTo(RefundStatus.REQUESTED);
         assertThat(saved.getRefundAmount()).isEqualTo(20000);
         assertThat(unused).extracting(Ticket::getStatus).containsOnly(TicketStatus.REFUNDED);
+        // 공통 서비스가 알고 있는 결제 소유자는 요청자가 아닌 대상 회원으로 기록한다.
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
+                .singleElement().asString()
+                .contains("targetUserId=" + OTHER_USER_ID)
+                .doesNotContain(" userId=", " adminId=");
         var calls = org.mockito.Mockito.inOrder(paymentRepository, ticketService, refundRepository);
         calls.verify(paymentRepository).findWithLockByPgId(PG_ID);
         calls.verify(ticketService).findUnusedTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID));
@@ -572,7 +604,7 @@ class RefundServiceTest {
     @ParameterizedTest
     @ValueSource(longs = {0, 86400})
     @DisplayName("관리자 부분 환불은 회원 소유 결제의 방문일 당일·이후에도 지정한 미사용 티켓만 환불 요청한다")
-    void createAdminPartialRefund_AfterDeadline_SavesSelectedTickets(long secondsAfterVisitStart) {
+    void createAdminPartialRefund_AfterDeadline_SavesSelectedTickets(long secondsAfterVisitStart, CapturedOutput output) {
         // given
         ReflectionTestUtils.setField(payment.getOrder().getUser(), "id", OTHER_USER_ID);
         givenPayment(payment);
@@ -595,6 +627,11 @@ class RefundServiceTest {
             assertThat(item.getQuantity()).isEqualTo(1);
         });
         assertThat(selected.get(0).getStatus()).isEqualTo(TicketStatus.REFUNDED);
+        // 관리자 요청에서도 결제 소유자 ID를 요청자 ID로 오인하지 않도록 검증한다.
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=REFUND_REQUESTED")))
+                .singleElement().asString()
+                .contains("targetUserId=" + OTHER_USER_ID)
+                .doesNotContain(" userId=", " adminId=");
         var calls = org.mockito.Mockito.inOrder(paymentRepository, ticketService, refundRepository);
         calls.verify(paymentRepository).findWithLockByPgId(PG_ID);
         calls.verify(ticketService).findRefundTicketsForUpdate(Set.of(ADULT_ITEM_ID, CHILD_ITEM_ID), Set.of(11L));
@@ -744,7 +781,7 @@ class RefundServiceTest {
     @DisplayName("관리자 전체·부분 환불 모두 존재하지 않는 결제를 거부한다")
     void createAdminRefunds_PaymentNotFound_RejectsRequests() {
         // given
-        given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.empty());
+        given(paymentRepository.findUserIdByPgId(PG_ID)).willReturn(Optional.empty());
 
         // when & then
         assertThatThrownBy(() -> refundService.createAdminFullRefund(PG_ID, "관리자 환불", NOW))
@@ -757,6 +794,10 @@ class RefundServiceTest {
     }
 
     private void givenPayment(Payment found) {
+        // 소유자 ID 조회 → 회원 잠금 → 결제 잠금의 실제 서비스 흐름에 맞춘다.
+        User owner = found.getOrder().getUser();
+        given(paymentRepository.findUserIdByPgId(PG_ID)).willReturn(Optional.of(owner.getId()));
+        given(userRepository.findByIdForUpdate(owner.getId())).willReturn(Optional.of(owner));
         given(paymentRepository.findWithLockByPgId(PG_ID)).willReturn(Optional.of(found));
     }
 

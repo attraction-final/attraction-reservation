@@ -7,6 +7,7 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import com.querydsl.core.types.Order;
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.dsl.BooleanExpression;
+import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -82,6 +83,10 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
     ) {
         List<Reservation> content = queryFactory
                 .selectFrom(reservation)
+                .join(reservation.attractionSlot, attractionSlot)
+                .fetchJoin()
+                .join(attractionSlot.attraction, attraction)
+                .fetchJoin()
                 .where(
                         ownerIdEq(userId),
                         statusEq(status),
@@ -139,7 +144,9 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
         List<Reservation> content = queryFactory
                 .selectFrom(reservation)
                 .join(reservation.attractionSlot, attractionSlot)
+                .fetchJoin()
                 .join(attractionSlot.attraction, attraction)
+                .fetchJoin()
                 .where(
                         userIdEq(userId),
                         attractionIdEq(attractionId),
@@ -152,19 +159,26 @@ public class ReservationCustomRepositoryImpl implements ReservationCustomReposit
                 .limit(stablePageable.getPageSize())
                 .fetch();
 
-        Long total = queryFactory
+        // 전체 건수 조회 조건을 조립한다. 아직 SQL을 실행하지 않아 이후 조건에 따라 join을 구성할 수 있다.
+        JPAQuery<Long> countQuery = queryFactory
                 .select(reservation.count())
-                .from(reservation)
-                .join(reservation.attractionSlot, attractionSlot)
-                .join(attractionSlot.attraction, attraction)
-                .where(
-                        userIdEq(userId),
-                        attractionIdEq(attractionId),
-                        statusEq(status),
-                        startDayGoe(startDay),
-                        nextDayLt(nextDay)
-                )
-                .fetchOne();
+                .from(reservation);
+
+        if (attractionId != null || startDay != null || nextDay != null) {
+            countQuery.join(reservation.attractionSlot, attractionSlot)
+                    .join(attractionSlot.attraction, attraction);
+        }
+
+        countQuery.where(
+                userIdEq(userId),
+                attractionIdEq(attractionId),
+                statusEq(status),
+                startDayGoe(startDay),
+                nextDayLt(nextDay)
+        );
+
+        // 조립한 count 쿼리를 실행해 목록과 동일한 검색 조건의 전체 건수를 구한다.
+        Long total = countQuery.fetchOne();
 
         return new PageImpl<>(
                 content,

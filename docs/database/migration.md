@@ -33,7 +33,10 @@ Flyway는 적용한 파일의 checksum을 기록한다. dev에 머지된 파일�
 3. 로컬에서 앱을 띄워 Flyway 적용과 `validate`가 통과하는지 확인한다.
 4. `FlywayMigrationIntegrationTest`를 실행한다. (Docker 필요, CI에서도 실행된다)
    - 운영과 같은 MySQL 8.4의 빈 DB에 모든 마이그레이션을 적용한 뒤 엔티티와 비교한다.
-   - **엔티티만 바꾸고 마이그레이션을 빠뜨리면 이 테스트가 실패한다.** 다른 테스트는 엔티티로 스키마를 만들기 때문에(`create-drop`) 통과한다.
+   - **테이블·컬럼을 빠뜨리거나 컬럼 타입이 다르면 이 테스트가 실패한다.** 다른 테스트는 엔티티로 스키마를 만들기 때문에(`create-drop`) 통과한다.
+5. 테스트가 잡지 못하는 차이는 리뷰에서 엔티티와 SQL을 나란히 놓고 확인한다.
+   - `validate`는 테이블·컬럼 존재와 컬럼 타입만 비교한다.
+   - **컬럼 길이, NULL 여부, UNIQUE 제약, 인덱스, 외래 키**는 비교하지 않는다. 엔티티에만 추가하고 마이그레이션을 빠뜨려도 모든 테스트가 통과하고, 운영에만 제약이 없게 된다.
 
 ## 3. 배포 중 하위 호환
 
@@ -65,7 +68,11 @@ MySQL의 DDL은 트랜잭션으로 되돌려지지 않는다. 파일 하나에 �
 
 - 빈 DB: 앱을 띄우면 V1부터 모두 적용된다.
 - Flyway 도입 전에 Hibernate(`ddl-auto`)로 테이블을 만든 DB: V1이 적용된 것으로 표시하고(baseline) V2부터 적용한다.
-  - 로컬 테이블이 V1과 다르면 `validate`에서 기동이 실패한다. 이때는 로컬 DB를 지우고 다시 만든다.
+  - baseline은 로컬 테이블이 실제로 V1과 같은지 확인하지 않는다. 다르면 아래처럼 기동이 실패한다. 이때는 로컬 DB를 지우고 다시 만든다.
+    - V2 이후 마이그레이션이 이미 있는 컬럼·제약을 다시 추가하려다 실패한다. (`Duplicate column name` 등)
+      MySQL DDL은 되돌려지지 않아 `flyway_schema_history`에 실패 기록이 남으므로, 다시 띄워도 계속 실패한다.
+    - 마이그레이션은 통과해도 엔티티와 테이블·컬럼이 다르면 `validate`에서 실패한다.
+  - **`docs/sql/kan-103-…`을 로컬에 직접 실행한 DB는 반드시 이 경우다.** `active_attraction` 컬럼이 이미 있어 V2가 실패한다. 처음부터 로컬 DB를 지우고 다시 만든다.
 
 ```sql
 DROP DATABASE attraction_reservation;
@@ -77,4 +84,8 @@ CREATE DATABASE attraction_reservation;
 - Flyway 도입 전에는 `docs/sql/`의 SQL을 각자 DB에 직접 실행했다.
 - `V1__init.sql`은 Flyway 도입 시점(2026-11-05)의 운영 스키마이고, `V2`는 `docs/sql/kan-103-…`과 같다.
 - 앞으로의 스키마 변경은 `docs/sql/`이 아니라 `db/migration/`에 추가한다.
-- `docs/sql/`에 있지만 아직 엔티티가 없는 테이블(예: KAN-97 `attraction_paths`, `attraction_locations`)은 V1에 없다. 그 기능을 머지할 때 마이그레이션 파일로 추가한다.
+- KAN-136 `attraction_locations`, `attraction_paths`는 엔티티와 함께 `V6`, `V7`로 추가했다. 데이터(구간·좌표)는 마이그레이션에 넣지 않고 `docs/sql/kan-136-route-travel-data.sql`로 배포 후 적용한다.
+- KAN-139 `V8`은 `route_recommendations.travel_time_basis` enum에 `MEASURED_PATH`를 추가한다. 이 컬럼은 MySQL enum이라 Java enum에 값을 추가할 때마다 마이그레이션이 필요하다. (`ddl-auto=validate`는 enum 값 목록을 비교하지 않는다)
+- KAN-140 `V9`는 `route_recommendations.start_location` enum에 `CURRENT_LOCATION`을 추가한다. V8과 같은 이유로 Java enum과 함께 추가했다.
+- KAN-142부터 추천 경로는 계산 결과를 저장하지 않는다. `route_recommendations`, `route_recommendation_stops`, `route_recommendation_exclusions`는 엔티티를 지웠지만 테이블은 남겨 두었다. 배포 중에는 이전 버전 앱이 이 테이블을 쓰므로, 삭제는 3장의 "컬럼 삭제"와 같이 다음 배포에서 별도 마이그레이션으로 한다.
+- KAN-147 `V10`은 위 세 테이블을 삭제한다. KAN-142가 운영에 배포되어 이전 버전 앱이 모두 내려간 뒤에 머지한다. 이 테이블을 쓰던 V8·V9 검증 테스트도 함께 지웠다.

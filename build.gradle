@@ -59,6 +59,10 @@ dependencies {
     // portone 연동
     implementation 'io.portone:server-sdk:0.24.0'
 
+    // TypeSafe Jev 연동. 공식 Java SDK가 없어 Spring AI Community 스타터를 쓴다.
+    // 검토 필요: 0.4.0은 Boot 4.0.7 기준 빌드이고 커뮤니티 프로젝트라 Boot 버전을 올릴 때 호환성을 다시 확인해야 한다.
+    implementation 'org.springaicommunity:spring-ai-starter-typesafe:0.4.0'
+
     // 모니터링: Prometheus 메트릭, 로그 traceId(MDC)
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-micrometer-tracing-brave'

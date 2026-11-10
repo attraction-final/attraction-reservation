@@ -5,6 +5,8 @@ import com.example.attractionreservation.domain.order.dto.SearchAdminOrderListRe
 import com.example.attractionreservation.domain.order.dto.SearchAdminOrderResponse;
 import com.example.attractionreservation.domain.order.entity.Order;
 import com.example.attractionreservation.domain.order.repository.OrderRepository;
+import com.example.attractionreservation.domain.ticket.entity.Ticket;
+import com.example.attractionreservation.domain.ticket.service.TicketService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,8 @@ import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.util.AfterCommit;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -30,6 +34,7 @@ public class AdminOrderService {
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final OrderService orderService;
+    private final TicketService ticketService;
 
     public SearchAdminOrderListResponse findOrders(
             SearchAdminOrderCondition condition
@@ -60,7 +65,11 @@ public class AdminOrderService {
         String pgId = orderRepository.findPaymentPgIdByOrderId(orderId)
                 .orElse(null);
 
-        return SearchAdminOrderResponse.from(order, pgId);
+        // 부분 환불할 티켓을 고를 수 있도록 주문에 발급된 티켓도 함께 반환한다.
+        // 결제 전(PENDING) 주문은 티켓이 아직 없으므로 빈 목록이 된다.
+        List<Ticket> tickets = ticketService.findTicketsByOrderId(orderId);
+
+        return SearchAdminOrderResponse.from(order, pgId, tickets);
     }
 
     @Transactional
@@ -85,7 +94,7 @@ public class AdminOrderService {
         // 트랜잭션이 확정된 경우에만 완료 로그를 기록한다.
         AfterCommit.run(() -> log.info(
                 "event=ADMIN_ORDER_CREATED "
-                        + "adminId={} userId={} orderId={} totalAmount={} status={}",
+                        + "userId={} targetUserId={} orderId={} totalAmount={} status={}",
                 adminId,
                 request.userId(),
                 response.orderId(),
@@ -115,7 +124,7 @@ public class AdminOrderService {
 
         AfterCommit.run(() -> log.info(
                 "event=ADMIN_ORDER_CANCELLED "
-                        + "adminId={} userId={} orderId={} status={}",
+                        + "userId={} targetUserId={} orderId={} status={}",
                 adminId,
                 targetUserId,
                 response.orderId(),

@@ -1,19 +1,20 @@
 package com.example.attractionreservation.domain.routeRecommendation.controller;
 
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse;
 import com.example.attractionreservation.domain.routeRecommendation.service.RouteRecommendationService;
 import com.example.attractionreservation.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
-import com.example.attractionreservation.global.response.PageableDto;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -22,52 +23,19 @@ public class RouteRecommendationController {
 
     private final RouteRecommendationService routeRecommendationService;
 
+    // 계산만 하고 저장하지 않으므로 항상 200. 로그인 여부는 SecurityConfig 가 검사한다.
     @PostMapping
-    public ResponseEntity<ApiResponse<SearchRouteRecommendationResponse>> createRouteRecommendation(
-            @AuthenticationPrincipal Long userId,
+    public ResponseEntity<ApiResponse<CreateRouteRecommendationResponse>> createRouteRecommendation(
             @Valid @RequestBody CreateRouteRecommendationRequest request
     ) {
-        SearchRouteRecommendationResponse response = routeRecommendationService.createRouteRecommendation(userId, request);
-
-        // 추천 없음은 오류가 아니라 정상 결과 → 200, 저장된 추천은 새 리소스 → 201
-        if (response.isNone()) {
-            return ResponseEntity.ok(ApiResponse.ok("선택한 조건에서 추천 가능한 경로가 없습니다.", response));
-        }
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(createdMessage(response), response));
+        CreateRouteRecommendationResponse response = routeRecommendationService.recommend(request);
+        return ResponseEntity.ok(ApiResponse.ok("최적 방문 순서를 추천했습니다.", response));
     }
 
-    @GetMapping("/{recommendationId}")
-    public ResponseEntity<ApiResponse<SearchRouteRecommendationResponse>> getRouteRecommendationById(
-            @AuthenticationPrincipal Long userId,
-            @PathVariable Long recommendationId
-    ) {
-        SearchRouteRecommendationResponse response = routeRecommendationService.findRouteRecommendationById(userId, recommendationId);
-        return ResponseEntity.ok(ApiResponse.ok("추천 경로 상세 조회에 성공했습니다.", response));
-    }
-
-    @GetMapping
-    public ResponseEntity<ApiResponse<PageableDto<SearchRouteRecommendationSummaryResponse>>> getRouteRecommendationAll(
-            @AuthenticationPrincipal Long userId,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
-    ) {
-        PageableDto<SearchRouteRecommendationSummaryResponse> response =
-                routeRecommendationService.findRouteRecommendations(userId, page, size);
-        return ResponseEntity.ok(ApiResponse.ok("추천 경로 목록 조회에 성공했습니다.", response));
-    }
-
-    @DeleteMapping("/{recommendationId}")
-    public ResponseEntity<ApiResponse<Void>> deleteRouteRecommendation(
-            @AuthenticationPrincipal Long userId,
-            @PathVariable Long recommendationId
-    ) {
-        routeRecommendationService.deleteRouteRecommendation(userId, recommendationId);
-        return ResponseEntity.ok(ApiResponse.<Void>ok("추천 경로 이력이 삭제되었습니다.", null));
-    }
-
-    private String createdMessage(SearchRouteRecommendationResponse response) {
-        return "선택하신 %d개의 어트랙션 중 %d개를 방문할 수 있는 경로를 추천했습니다."
-                .formatted(response.totalSelectedAttractions(), response.totalRecommendedAttractions());
+    // 추천에 고를 수 있는 어트랙션 목록 (운영 중이고 좌표가 있는 어트랙션). 나머지는 추천 요청이 409로 실패하므로 화면이 미리 걸러낸다.
+    @GetMapping("/attractions")
+    public ResponseEntity<ApiResponse<List<RecommendableAttractionResponse>>> findRecommendableAttractions() {
+        return ResponseEntity.ok(ApiResponse.ok(
+                "추천 가능한 어트랙션 목록을 조회했습니다.", routeRecommendationService.findRecommendableAttractions()));
     }
 }

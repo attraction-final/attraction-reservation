@@ -95,7 +95,7 @@ class OrderServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L, 20L)))
                 .thenReturn(List.of(secondProduct, firstProduct));
-        when(orderRepository.saveAndFlush(any(Order.class)))
+        when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> {
                     Order order = invocation.getArgument(0);
                     ReflectionTestUtils.setField(order, "id", 101L);
@@ -126,7 +126,7 @@ class OrderServiceTest {
                 .containsExactly(2, 1);
 
         ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderRepository).saveAndFlush(captor.capture());
+        verify(orderRepository).save(captor.capture());
         Order savedOrder = captor.getValue();
 
         assertThat(savedOrder.getUser()).isSameAs(user);
@@ -153,7 +153,7 @@ class OrderServiceTest {
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(10L))).thenReturn(List.of(product));
-        when(orderRepository.saveAndFlush(any(Order.class)))
+        when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(paymentService.createPayment(any(Order.class)))
                 .thenThrow(new BusinessException(ErrorCode.PAYMENT_INVALID_AMOUNT));
@@ -392,7 +392,7 @@ class OrderServiceTest {
 
         // then
         ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderRepository).saveAndFlush(captor.capture());
+        verify(orderRepository).save(captor.capture());
         assertThat(captor.getValue().getVisitDate()).isEqualTo(visitDate);
     }
 
@@ -400,7 +400,7 @@ class OrderServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(ticketProductRepository.findAllWithUpdateByIdInOrderById(Set.of(product.getId())))
                 .thenReturn(List.of(product));
-        when(orderRepository.saveAndFlush(any(Order.class)))
+        when(orderRepository.save(any(Order.class)))
                 .thenAnswer(invocation -> {
                     Order order = invocation.getArgument(0);
                     ReflectionTestUtils.setField(order, "id", 101L);
@@ -487,6 +487,7 @@ class OrderServiceTest {
         assertThat(response.orderId()).isEqualTo(101L);
         assertThat(response.totalAmount()).isEqualTo(120000);
         assertThat(response.status()).isEqualTo("PENDING");
+        assertThat(response.visitDate()).isEqualTo(VISIT_DATE);
         assertThat(response.createdAt())
                 .isEqualTo(LocalDateTime.of(2026, 10, 14, 10, 0));
         assertThat(response.items()).containsExactly(
@@ -544,11 +545,19 @@ class OrderServiceTest {
     @DisplayName("본인 ID와 최신순 페이지 조건으로 조회하고 목록 응답을 반환한다")
     void findOrdersByUserId_validCondition_returnsPage() {
         // given
+        TicketProduct product =
+                createProduct(10L, 60000, TicketProductStatus.ON_SALE);
+
         Order order = Order.create(user, 120000, VISIT_DATE);
+        order.addOrderItem(product, 2);
         ReflectionTestUtils.setField(order, "id", 101L);
         ReflectionTestUtils.setField(
                 order, "createdAt", Instant.parse("2026-10-14T01:00:00Z")
         );
+
+        // 주문 상품은 주문 ID 목록으로 한 번에 조회한다.
+        when(orderRepository.findOrderItemsWithProductByOrderIds(List.of(101L)))
+                .thenReturn(order.getOrderItems());
 
         when(orderRepository.findAllByUser_Id(eq(1L), any(Pageable.class)))
                 .thenAnswer(invocation -> {
@@ -568,7 +577,10 @@ class OrderServiceTest {
                         101L,
                         120000,
                         "PENDING",
-                        LocalDateTime.of(2026, 10, 14, 10, 0)
+                        LocalDateTime.of(2026, 10, 14, 10, 0),
+                        List.of(new SearchOrderListResponse.ItemSummary(
+                                10L, "테스트상품", 2
+                        ))
                 )
         );
         assertThat(response.page()).isEqualTo(1);
@@ -586,6 +598,7 @@ class OrderServiceTest {
                 Sort.Order.desc("createdAt"),
                 Sort.Order.desc("id")
         ));
+        verify(orderRepository).findOrderItemsWithProductByOrderIds(List.of(101L));
         verifyNoMoreInteractions(orderRepository);
     }
 

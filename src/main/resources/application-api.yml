@@ -1,0 +1,24 @@
+# API 전용 실행 설정. SPRING_PROFILES_ACTIVE=prod,api 처럼 다른 프로필과 함께 켠다.
+# API 인스턴스는 요청 처리만 하고, 스케줄러는 worker(이 프로필 없이 실행)에서만 돌린다.
+# 스케줄러를 추가하면 여기에도 enabled: false를 추가한다. (docs/infra/ecs-migration-plan.md)
+
+order:
+  cancel:
+    scheduler:
+      enabled: false
+
+payment:
+  webhook:
+    scheduler:
+      enabled: false
+  compensation:
+    scheduler:
+      enabled: false
+  refund:
+    scheduler:
+      enabled: false
+
+ticket:
+  expiration:
+    scheduler:
+      enabled: false

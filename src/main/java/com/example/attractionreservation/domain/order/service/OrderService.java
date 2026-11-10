@@ -127,7 +127,7 @@ public class OrderService {
         }
 
         // 주문 항목도 함께 저장한 뒤 DB에서 생성한 ID를 응답에 포함한다.
-        Order savedOrder = orderRepository.saveAndFlush(order);
+        Order savedOrder = orderRepository.save(order);
 
         // 결제창 연동에 쓸 결제를 주문과 같은 트랜잭션에서 만든다. 결제 생성이 실패하면 주문도 롤백된다.
         String pgId = paymentService.createPayment(savedOrder);
@@ -246,7 +246,7 @@ public class OrderService {
 
                 log.debug(
                         "event=ORDER_AUTO_CANCEL_REJECTED "
-                                + "userId={} orderId={} errorCode={}",
+                                + "targetUserId={} orderId={} errorCode={}",
                         userId,
                         orderId,
                         errorCode.name()
@@ -279,7 +279,7 @@ public class OrderService {
         if (firstServerFailure != null) {
             log.error(
                     "event=ORDER_AUTO_CANCEL_FAILED "
-                            + "userId={} orderId={} errorCode={}",
+                            + "targetUserId={} orderId={} errorCode={}",
                     firstFailedUserId,
                     firstFailedOrderId,
                     firstServerFailure.getErrorCode().name(),
@@ -305,9 +305,23 @@ public class OrderService {
                 )
         );
 
+        // 1번 쿼리: 주문 목록을 페이지 단위로 조회한다.
         Page<Order> orders = orderRepository.findAllByUser_Id(userId, pageable);
 
-        return SearchOrderListResponse.from(orders);
+        List<Long> orderIds = orders.getContent().stream()
+                .map(Order::getId)
+                .toList();
+
+        // 2번 쿼리: 이번 페이지 주문들의 상품을 한 번에 조회한다.
+        // 주문이 없으면 빈 IN 조건 쿼리를 보내지 않는다.
+        Map<Long, List<OrderItem>> orderItemsByOrderId = orderIds.isEmpty()
+                ? Map.of()
+                : orderRepository.findOrderItemsWithProductByOrderIds(orderIds).stream()
+                .collect(Collectors.groupingBy(
+                        orderItem -> orderItem.getOrder().getId()
+                ));
+
+        return SearchOrderListResponse.from(orders, orderItemsByOrderId);
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

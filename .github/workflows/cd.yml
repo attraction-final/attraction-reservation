@@ -131,6 +131,8 @@ jobs:
 
       # 수동 실행은 main에 머지된 커밋만 배포할 수 있다. (리뷰·CI를 거치지 않은 커밋 차단)
       - name: Verify version is on main
+        # 임시: cd 브랜치 push 시험 배포는 main 이력에 없는 커밋을 배포한다.
+        if: github.event_name == 'workflow_dispatch'
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |

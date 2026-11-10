@@ -202,42 +202,19 @@ class FlywayMigrationIntegrationTest {
                 .isInstanceOf(DuplicateKeyException.class);
     }
 
-    // validate는 MySQL enum의 값 목록을 비교하지 않으므로 V8(travel_time_basis 확장)은 실제 INSERT로 검증한다.
+    // V10: KAN-142부터 쓰지 않는 추천 저장 테이블을 지웠다. (V8·V9가 바꾼 테이블도 여기서 함께 사라진다)
     @Test
-    @DisplayName("추천 경로를 이동 시간 기준 MEASURED_PATH로 저장할 수 있다")
-    void insertRouteRecommendation_MeasuredPathBasis_Success() {
+    @DisplayName("추천 경로 저장 테이블은 마이그레이션 후 남아 있지 않다")
+    void migrate_DropsRouteRecommendationTables() {
         // when
-        jdbcTemplate.update("""
-                INSERT INTO route_recommendations (created_at, updated_at, start_at, end_at, estimated_end_at,
-                    result_type, start_location, ticket_id, total_duration_minutes, total_move_minutes,
-                    total_ride_minutes, total_selected_attractions, total_wait_minutes, travel_time_basis, user_id)
-                VALUES (NOW(6), NOW(6), NOW(6), NOW(6), NOW(6),
-                    'FULL', 'ENTRANCE', 1, 60, 10, 20, 1, 30, 'MEASURED_PATH', 1)
-                """);
+        Integer remaining = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                  AND table_name IN ('route_recommendations', 'route_recommendation_stops', 'route_recommendation_exclusions')
+                """, Integer.class);
 
         // then
-        String basis = jdbcTemplate.queryForObject(
-                "SELECT travel_time_basis FROM route_recommendations", String.class);
-        assertThat(basis).isEqualTo("MEASURED_PATH");
-    }
-
-    // validate는 MySQL enum의 값 목록을 비교하지 않으므로 V9(start_location 확장)는 실제 INSERT로 검증한다.
-    @Test
-    @DisplayName("추천 경로를 출발 위치 CURRENT_LOCATION으로 저장할 수 있다")
-    void insertRouteRecommendation_CurrentLocationStart_Success() {
-        // when
-        jdbcTemplate.update("""
-                INSERT INTO route_recommendations (created_at, updated_at, start_at, end_at, estimated_end_at,
-                    result_type, start_location, ticket_id, total_duration_minutes, total_move_minutes,
-                    total_ride_minutes, total_selected_attractions, total_wait_minutes, travel_time_basis, user_id)
-                VALUES (NOW(6), NOW(6), NOW(6), NOW(6), NOW(6),
-                    'FULL', 'CURRENT_LOCATION', 1, 60, 10, 20, 1, 30, 'MEASURED_PATH', 1)
-                """);
-
-        // then
-        String startLocation = jdbcTemplate.queryForObject(
-                "SELECT start_location FROM route_recommendations", String.class);
-        assertThat(startLocation).isEqualTo("CURRENT_LOCATION");
+        assertThat(remaining).isZero();
     }
 
     private long insertAttractionAndGetId(String name) {

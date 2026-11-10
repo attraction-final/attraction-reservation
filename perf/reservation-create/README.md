@@ -1,0 +1,98 @@
+# KAN-150 예약 생성 집중 요청 검증
+
+첫 단계는 정원 20명의 빈 슬롯에 **서로 다른 회원 50명이 각 1회** 예약하는 시나리오다.
+목록 조회처럼 같은 요청을 5분 반복하지 않는다. 쓰기 요청은 정원과 예약 데이터를 바꾸기 때문이다.
+
+## 검증 목적
+
+| 항목 | 기대 결과 |
+| --- | --- |
+| HTTP 요청 | 실제 로그인 후 POST /api/reservations 총 50회 |
+| 예약 성공 | HTTP 201, 20회, 요청한 티켓·슬롯·RESERVED 상태 반환 |
+| 예상 업무 거절 | HTTP 409, 30회, 슬롯 마감/정원 확보 실패 메시지 |
+| 예상하지 못한 응답 | 0회 (다른 409 사유도 실패) |
+| DB | 예약 20건·서로 다른 회원 20명·reservedCount 20·capacity 20 |
+| 슬롯 | CLOSED, autoClosed=true |
+| 데이터 소유 관계 | 예약 회원=티켓 주문 회원, 오늘의 IN_USE 티켓 |
+
+현재 공통 오류 응답에 errorCode 필드가 없어 실제 ErrorCode의 메시지로 거절 사유를 구분한다.
+409 전체를 성공으로 간주하지 않는다. k6의 expectedStatuses(201,409)는 HTTP 실패율 분류용이며 별도 응답 검증이 최종 판단을 보완한다.
+성공과 거절 지연을 각각 집계한다. 첫 실행에서는 생성 지연 분포를 관측하며 목록 조회의 p95 200ms 목표를 자동 적용하지 않는다.
+단 50회인 집중 요청 검증이므로 최대 처리량·장시간 안정성을 입증하지 않는다.
+
+## 격리 환경과 데이터
+
+- Compose project: attraction-reservation-create-perf
+- 전용 DB: reservation_create_perf, 별도 네트워크·mysql-data 볼륨
+- 앱: 2 CPU·메모리 1GiB·heap 256~512MiB·pool max/min 10/10
+- MySQL: 1 CPU·메모리 1GiB, Redis: 0.5 CPU·256MiB
+- 측정 k6: 1 CPU·메모리 2GiB
+- host 앱/관리 포트: 18106 / 18107 (localhost에만 공개)
+- RUN_ID마다 새 회원 50명·주문/티켓 50개·어트랙션/슬롯 1개를 추가한다. 기존 데이터 삭제·재설정 없음
+
+SQL은 테스트 조건을 만들기 위해 결제 완료 주문과 입장된 티켓을 직접 준비한다. 결제·발급·입장 API의 업무 검증은 이번 범위 밖이다.
+비밀번호는 가입 API의 실제 PasswordEncoder로 생성하고, 로그인 토큰은 setup 메모리에서만 전달한다.
+목록 환경의 auth.js와 application-perf.yaml은 읽기 전용으로 재사용하며 DB URL만 전용 CLI 인자로 덮어쓴다.
+해당 overlay의 외부 PG 더미값·쓰기 스케줄러 비활성화를 유지한다. 원래 목록 도구·팀원 도구·프로덕션 코드는 수정하지 않는다.
+목록 환경과 동시에 띄울 수 있는 포트/볼륨 구성이지만, 성능 비교 시 호스트 자원 경쟁을 줄이기 위해 불필요한 환경은 사용자가 종료하는 것이 좋다.
+
+## 시간 조건
+
+**실제 KST 10:00 이상~21:10 미만**에 실행한다. 오늘 21:50~22:00 슬롯을 사용하며 예약 마감은 21:20이다.
+실행기와 준비 SQL이 시각을 검사한다. 서버 시각·Docker 시간을 변경하거나 마감 검증을 우회하지 않는다.
+준비가 길어져 마감을 넘기면 유효한 정원 소진 테스트가 아니므로 새 실행으로 재검증한다.
+슬롯은 마감까지 여유가 있는 고정 조건이며 시간 경계 검증 시나리오는 아니다.
+
+## 실행 방법 — 프로젝트 루트 Git Bash
+
+최신 소스에 맞춰 JAR을 사용자가 먼저 빌드한다.
+
+```bash
+./gradlew bootJar
+```
+
+시간 조건을 충족할 때 새 RUN_ID로 실행한다. 현재 허용 범위는 영문·숫자·하이픈, 최대 12자다.
+
+```bash
+bash perf/reservation-create/run.sh focus-01
+```
+
+순서: 전용 DB/Redis → 시각 검사 → 앱 재생성 → 회원가입·로그인 확인 → SQL fixture → 실제 pool 검사 → k6 setup 로그인 → 50회 요청 → 종료 상태 보존 → DB 검증.
+첫 단계에서는 별도 warm-up이 없다. 첫 실행 지연과 잠금 경합의 초기 관측으로 취급하고, 이후 비교 시 같은 준비 조건을 유지한다.
+k6는 scenario 시작 1.5초 뒤를 공통 목표로 요청을 모으지만 정확히 같은 순간의 실행을 보장하지 않는다.
+reservation_create_request_started_at_ms의 min/max와 수집 시각으로 실제 발송 범위를 확인한다. maxDuration 90초는 목표 부하 유지 시간이 아닌 1회 요청 완료 제한이다.
+
+DB 검증은 k6 실패 후에도 실행한다. k6의 성공 20/거절 30과 DB의 20건·인원·소유 관계를 함께 확인해야 정합성 검증 완료다.
+전체 실행 exit 0만으로 수집 품질까지 보장하지 않으므로 아래 결과 파일을 함께 읽는다.
+사용자 중단 시 정리 전 상태가 running=true일 수 있으며 DB 검증까지 완료되지 않을 수 있다. 같은 RUN_ID 재실행은 거절한다.
+
+## 결과와 해석
+
+results/RUN_ID는 Git에서 제외한다. 토큰·전체 요청/응답 본문·setup_data는 저장하지 않는다.
+
+| 파일 | 확인 내용 |
+| --- | --- |
+| fixture.jsonl | 회원·티켓·슬롯 50행, 토큰 없음 |
+| preparation-errors.txt / preparation-exit-code.txt | SQL 준비 단계 오류와 종료 코드. 준비 실패 시 본 측정은 시작하지 않음 |
+| metadata.txt | 코드 HEAD·JAR/도구 hash·시각·전용 환경 자원 |
+| pool-config-check.txt | 실제 max/min 10/10 |
+| summary.json / exit-code.txt | 요청 50·성공 20·예상 거절 30·예상 외 0, 응답/지연 분리·HTTP 종료 코드 |
+| db-verification.txt / db-verification-exit-code.txt / db-verification-errors.txt | DB 스냅샷·정합성 검사 결과와 실패 원인 |
+| metrics-before.txt / metrics-after.txt | Hikari/JVM/HTTP 누적 메트릭, setup 포함 |
+| resource-samples.jsonl / metrics-samples.txt | 주기별 자원·커넥션 표본, 순간 최대를 보장하지 않음 |
+| sampling-errors.txt / sampling-boundary-events.txt / sampling-exit-code.txt | 수집 오류·종료 경계·프로세스 상태 |
+| measurement-state-before-cleanup.json | 정리 전 OOMKilled·종료 코드·실제 k6 메모리 한도 |
+| cleanup-errors.txt / cleanup-exit-code.txt | 이번 실행 소유의 측정용 k6 정리 결과 |
+
+샘플러는 목록 도구를 복사해 새 관리 포트만 맞췄다. 짧은 요청 폭주가 표본 사이에 끝날 수 있어 pending 0을 대기 부재로 해석하지 않는다.
+결과 파일은 기존 실행을 덮어쓰지 않는다. 실행별 핵심 수치만 트러블슈팅 문서에 기록한다.
+종료 후 앱/DB/Redis는 남아 있다. 필요하면 사용자가 아래 명령으로 종료하며 볼륨은 유지한다.
+
+```bash
+RUN_ID=focus-01 docker compose -f perf/reservation-create/compose.yaml down
+```
+
+## 아직 검증하지 않은 것
+
+실제 Docker 기동·Flyway 적용·SQL 준비 및 검증·k6 실행은 아직 수행하지 않았다.
+첫 집중 요청 결과 확인 후 반복·분산 요청 비교·회원별 중복/시간 충돌 대표 사례를 단계적으로 진행한다.

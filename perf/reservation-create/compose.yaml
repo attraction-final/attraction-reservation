@@ -1,0 +1,73 @@
+# KAN-150 전용 DB/네트워크/포트. 기존 목록·팀원 부하 환경을 변경하지 않는다.
+name: attraction-reservation-create-perf
+services:
+  mysql:
+    image: mysql:8.4
+    cpus: 1.0
+    mem_limit: 1g
+    environment:
+      MYSQL_ROOT_PASSWORD: perf-local-only
+      MYSQL_DATABASE: reservation_create_perf
+      MYSQL_USER: perf
+      MYSQL_PASSWORD: perf-local-only
+    command: ["--innodb-buffer-pool-size=268435456"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uperf", "-pperf-local-only"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis@sha256:298e5b3bc566bade82f46ad5511777a4a07a294097ce16ada2f6a42be5239df5
+    cpus: 0.5
+    mem_limit: 256m
+  app:
+    image: eclipse-temurin:17-jre
+    cpus: 2.0
+    mem_limit: 1g
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+    command: ["java", "-jar", "/app/app.jar", "--spring.config.additional-location=file:/shared/application-perf.yaml", "--spring.datasource.url=jdbc:mysql://mysql:3306/reservation_create_perf", "--spring.datasource.hikari.maximum-pool-size=10", "--spring.datasource.hikari.minimum-idle=10"]
+    ports:
+      - "127.0.0.1:18106:8080"
+      - "127.0.0.1:18107:8081"
+    volumes:
+      - type: bind
+        source: ../../build/libs/attraction-reservation-0.0.1-SNAPSHOT.jar
+        target: /app/app.jar
+        read_only: true
+        bind:
+          create_host_path: false
+      - ../reservation-list/application-perf.yaml:/shared/application-perf.yaml:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+  accounts:
+    image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
+    profiles: [tools]
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      RUN_ID: "${RUN_ID:?RUN_ID is required}"
+    volumes:
+      - ./:/scripts:ro
+      - ../reservation-list/auth.js:/shared/auth.js:ro
+    command: ["run", "--quiet", "/scripts/prepare-accounts.js"]
+  k6:
+    image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
+    profiles: [tools]
+    user: "${PERF_UID:-1000}:${PERF_GID:-1000}"
+    cpus: 1.0
+    mem_limit: 2g
+    environment:
+      RUN_ID: "${RUN_ID:?RUN_ID is required}"
+    volumes:
+      - ./:/scripts:ro
+      - ../reservation-list/auth.js:/shared/auth.js:ro
+      - ./results:/results
+    command: ["run", "--quiet", "/scripts/reservation-create.js"]
+volumes:
+  mysql-data:

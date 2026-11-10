@@ -91,6 +91,15 @@ resource "aws_lb_target_group" "app_ecs" {
   vpc_id               = aws_vpc.main.id
   deregistration_delay = 60
 
+  # OAuth 시작~콜백 사이의 인가 요청이 task 메모리 세션에 있어 같은 task로 보내야 한다.
+  # 앱이 JSESSIONID를 만들 때(OAuth 시작)만 고정되고, 일반 API 요청은 고정하지 않는다.
+  stickiness {
+    enabled         = true
+    type            = "app_cookie"
+    cookie_name     = "JSESSIONID"
+    cookie_duration = 300
+  }
+
   health_check {
     path                = "/readyz"
     matcher             = "200"

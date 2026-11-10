@@ -251,7 +251,7 @@ single2k-01은 기대한 HTTP·DB 정합성을 통과했다. 성공 p95/p99는 �
 ### 2,000명 발송 준비 시간 조정 후 반복
 
 single2k-02부터 2,000명만 공통 목표를 scenario 시작 +5초로 늦춘다. 1,000명 이하와 서버·발생기 자원·요청 timeout은 유지한다.
-VU 준비 여유를 주는 도구 변경이며 API 성능 개선이 아니다. 아직 실행하지 않았다.
+VU 준비 여유를 주는 도구 변경이며 API 성능 개선이 아니다.
 
 ```bash
 TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-02 single
@@ -259,6 +259,24 @@ TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-02 single
 
 HTTP·DB 정합성과 함께 늦은 VU·실제 호출 시작 범위가 줄었는지 확인한다. 준비 지연이 줄어도 공통 시각에 깨어나는 비용으로 발송은 분산될 수 있다.
 첫 실행과 유입 패턴이 달라질 수 있으므로 응답 지연만으로 서버 성능의 개선·악화를 판단하지 않는다.
+
+single2k-02는 HTTP 성공 2,000·예상 외 0, DB 예약·예약 회원·인원 모두 2,000으로 통과했다.
+늦은 VU는 1,301명에서 0명으로 줄었지만 호출 시작 범위는 여전히 2,778ms였다(이전 3,404ms).
+성공 p95/p99는 약 23.02/23.52초이며 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+준비 완료와 발송 집중은 별개이며, 완전한 동시 2,000명 처리로 표현하지 않는다.
+
+### k6 CPU 2개로 발송 범위 비교
+
+single2k-03은 측정용 k6만 1 CPU에서 2 CPU로 늘린다. 기본값은 1이며 PERF_K6_CPUS는 1 또는 2만 허용한다.
+서버 2 CPU·DB 1 CPU·pool 10·k6 메모리 2GiB·목표 발송 +5초·요청 timeout은 유지한다. accounts 서비스 자원은 변경하지 않는다.
+
+```bash
+PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-03 single
+```
+
+metadata.txt의 generatorCpus와 measurement-state-before-cleanup.json의 nanoCpus로 설정·실제 CPU 제한을 확인한다.
+single2k-02의 호출 시작 범위 2,778ms와 비교하고 HTTP·DB 정합성, 늦은 VU, 응답 지연, 수집·OOM 상태를 함께 확인한다. 아직 실행하지 않았다.
+발송 범위가 줄어도 서버 코드 개선으로 해석하지 않는다. 같은 Docker 호스트의 자원을 공유하므로 CPU 제한 변경과 호스트 경합의 영향은 단일 실행만으로 분리할 수 없다.
 
 ## 검증 현황
 

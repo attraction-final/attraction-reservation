@@ -6,6 +6,11 @@ project_dir="$(cd -- "$script_dir/../.." && pwd)"
 run_id="${1:-}"
 scenario="${2:-sold-out}"
 users="${TEST_VUS:-50}"
+k6_cpus="${PERF_K6_CPUS:-1}"
+if [[ "$k6_cpus" != 1 && "$k6_cpus" != 2 ]]; then
+  echo 'PERF_K6_CPUS는 1 또는 2만 지원합니다.' >&2
+  exit 1
+fi
 if [[ $# -lt 1 || $# -gt 2 || ! "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,11}$ ]]; then
   echo '사용법: bash perf/reservation-create/run.sh RUN_ID [sold-out|single|spread] (RUN_ID 최대 12자)' >&2
   exit 1
@@ -29,6 +34,7 @@ if [[ -e "$target" ]]; then echo '기존 결과는 덮어쓰지 않습니다. �
 jar="$project_dir/build/libs/attraction-reservation-0.0.1-SNAPSHOT.jar"
 if [[ ! -f "$jar" ]]; then echo '먼저 현재 코드로 ./gradlew bootJar를 실행하세요.' >&2; exit 1; fi
 export RUN_ID="$run_id" SCENARIO="$scenario" TEST_VUS="$users" PERF_UID="$(id -u)" PERF_GID="$(id -g)"
+export PERF_K6_CPUS="$k6_cpus"
 compose_file="$script_dir/compose.yaml"
 case "$(uname -s)" in MINGW*|MSYS*) compose_file="$(cygpath -w "$compose_file")" ;; esac
 docker_cmd() { MSYS_NO_PATHCONV=1 docker "$@"; }
@@ -63,7 +69,7 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
 {
   echo "runId=$run_id startedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
-  echo 'appCpus=2 appMemory=1GiB poolMax=10 poolMin=10 generatorCpus=1 generatorMemory=2GiB'
+  echo "appCpus=2 appMemory=1GiB poolMax=10 poolMin=10 generatorCpus=$k6_cpus generatorMemory=2GiB"
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
   echo "setupData=tokenArray fixtureData=sharedArray launchDiagnostics=enabled requestTargetOffsetMs=$(( users >= 2000 ? 5000 : 1500 ))"
   echo "setupTimeoutSeconds=$(( users >= 2000 ? 240 : users >= 500 ? 120 : 60 )) minimumTokenValiditySeconds=$(( (users >= 2000 ? 240 : users >= 500 ? 120 : 60) + 120 ))"
@@ -106,7 +112,7 @@ cleanup() {
   if [[ "$started" == true ]]; then
     identity="$(docker_cmd inspect --format '{{index .Config.Labels "kan150.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}' "$container_name" 2>> "$target/cleanup-errors.txt" | tr -d '\r')" || cleanup_exit=1
     if [[ "$identity" == "$owner|attraction-reservation-create-perf|k6" ]]; then
-      docker_cmd inspect --format '{"status":{{json .State.Status}},"running":{{.State.Running}},"oomKilled":{{.State.OOMKilled}},"exitCode":{{.State.ExitCode}},"memoryBytes":{{.HostConfig.Memory}}}' \
+      docker_cmd inspect --format '{"status":{{json .State.Status}},"running":{{.State.Running}},"oomKilled":{{.State.OOMKilled}},"exitCode":{{.State.ExitCode}},"memoryBytes":{{.HostConfig.Memory}},"nanoCpus":{{.HostConfig.NanoCpus}}}' \
         "$container_name" > "$target/measurement-state-before-cleanup.json" 2>> "$target/cleanup-errors.txt" || cleanup_exit=1
       if [[ "$(docker_cmd inspect --format '{{.State.Running}}' "$container_name" | tr -d '\r')" == true ]]; then
         docker_cmd stop --timeout 5 "$container_name" >/dev/null 2>> "$target/cleanup-errors.txt" || cleanup_exit=1

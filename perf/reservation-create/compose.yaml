@@ -61,7 +61,7 @@ services:
     image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
     profiles: [tools]
     user: "${PERF_UID:-1000}:${PERF_GID:-1000}"
-    cpus: 1.0
+    cpus: "${PERF_K6_CPUS:-1}"
     mem_limit: 2g
     environment:
       RUN_ID: "${RUN_ID:?RUN_ID is required}"

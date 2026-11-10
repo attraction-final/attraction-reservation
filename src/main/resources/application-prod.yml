@@ -15,6 +15,11 @@ spring:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
 
+server:
+  # ALB에서 TLS가 끝나므로 X-Forwarded-Proto를 믿어야 OAuth redirect_uri가 https로 만들어진다.
+  # Tomcat은 기본으로 사설 IP(10.x 등)에서 온 X-Forwarded-* 만 신뢰한다.
+  forward-headers-strategy: native
+
 # 운영에서는 Alloy가 컨테이너 stdout을 수집하므로 파일로 쓰지 않는다. (deploy/alloy/config.alloy)
 # 출력 패턴은 모든 프로필에서 같아야 하므로 application.yaml에 둔다.
 

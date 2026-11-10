@@ -201,6 +201,62 @@ class ReservationServiceTest {
     }
 
     @Test
+    @DisplayName("어트랙션 조회 시간은 슬롯 조회 시간과 분리해 성공으로 기록한다")
+    void recordSuccessfulAttractionLookupSeparately() {
+        // given
+        stubReservationSave();
+        when(attractionSlotService.findSlot(SLOT_ID)).thenAnswer(invocation -> {
+            metricsClock.add(Duration.ofMillis(25));
+            return slot;
+        });
+        when(attractionSlotService.findAttractionByIdForUpdate(ATTRACTION_ID)).thenAnswer(invocation -> {
+            metricsClock.add(Duration.ofMillis(40));
+            return attraction;
+        });
+
+        // when
+        createReservationAt(NOW);
+
+        // then
+        var lookup = meterRegistry.get("reservation.create.attraction.lookup")
+                .tag("result", "success").timer();
+        assertThat(lookup.count()).isEqualTo(1);
+        assertThat(lookup.totalTime(TimeUnit.MILLISECONDS)).isEqualTo(40.0);
+        assertThat(meterRegistry.get("reservation.create.slot.lookup")
+                .tag("result", "success").timer().totalTime(TimeUnit.MILLISECONDS)).isEqualTo(25.0);
+        assertThat(meterRegistry.find("reservation.create.attraction.lookup")
+                .tag("result", "failure").timer()).isNull();
+        assertThat(meterRegistry.find("reservation.create.slot.postlookup").timer()).isNull();
+    }
+
+    @Test
+    @DisplayName("슬롯 조회가 성공해도 어트랙션 조회 예외는 failure로 기록하고 원래 예외를 유지한다")
+    void recordFailedAttractionLookupAfterSuccessfulSlotLookup() {
+        // given
+        BusinessException failure = new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND);
+        when(attractionSlotService.findAttractionByIdForUpdate(ATTRACTION_ID)).thenAnswer(invocation -> {
+            metricsClock.add(Duration.ofMillis(30));
+            throw failure;
+        });
+
+        // when & then
+        assertThatThrownBy(() -> createReservationAt(NOW)).isSameAs(failure);
+        var lookup = meterRegistry.get("reservation.create.attraction.lookup")
+                .tag("result", "failure").timer();
+        assertThat(lookup.count()).isEqualTo(1);
+        assertThat(lookup.totalTime(TimeUnit.MILLISECONDS)).isEqualTo(30.0);
+        assertThat(meterRegistry.get("reservation.create.slot.lookup")
+                .tag("result", "success").timer().count()).isEqualTo(1);
+        assertThat(meterRegistry.find("reservation.create.attraction.lookup")
+                .tag("result", "success").timer()).isNull();
+        // 단위 테스트에서는 callback 등록까지 확인하며 실제 트랜잭션 완료와 구분한다.
+        assertThat(TransactionSynchronizationManager.getSynchronizations()).hasSize(1);
+        assertThat(meterRegistry.find("reservation.create.slot.postlookup").timer()).isNull();
+        verify(attractionSlotService, never()).tryReservationCapacity(any());
+        verify(reservationRepository, never()).save(any(Reservation.class));
+    }
+
+    @Test
     @DisplayName("완료 상태를 알 수 없는 callback은 unknown으로 한 번 기록한다")
     void recordUnknownTransactionCompletion() {
         // given

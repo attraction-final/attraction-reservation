@@ -55,7 +55,7 @@ mysql() { compose exec -T -e MYSQL_PWD=perf-local-only mysql mysql -uperf --defa
 sql_file() { { printf "SET @run_id='%s'; SET @scenario='%s'; SET @users=%s;\n" "$run_id" "$scenario" "$users"; cat "$1"; } | mysql; }
 snapshot() {
   curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18107/actuator/prometheus |
-    awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_|reservation_create_slot_(lookup|postlookup)_)/'
+    awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_|reservation_create_(slot_(lookup|postlookup)|attraction_lookup)_)/'
 }
 
 compose up -d --wait --wait-timeout 120 mysql redis

@@ -416,9 +416,11 @@ PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/rese
 | --- | --- | --- |
 | reservation_create_slot_lookup_seconds | success / failure | 슬롯 조회 호출 전부터 정상 반환 또는 예외까지. 잠금 대기·쿼리·엔티티 조회를 포함한다. |
 | reservation_create_slot_postlookup_seconds | committed / rolledback / unknown | 조회 지표 기록 직후부터 트랜잭션 afterCompletion callback까지. 정확한 DB 잠금 보유 시간이 아니다. |
+| reservation_create_attraction_lookup_seconds | success / failure | 어트랙션 잠금 조회 호출 시간. postlookup에 포함되며 순수 잠금 대기 시간은 아니다. |
 
 종료 후 실제 count/sum과 결과 tag를 확인한다. 평균은 같은 tag의 시작 전후 sum 차이 / count 차이로 계산하며 단위는 초다.
-첫 2,000건 성공 기준 실행은 lookup success와 postlookup committed의 count 증가가 각각 2,000인지 확인한다. 누락된 지표를 0으로 간주하지 않는다.
+첫 2,000건 성공 기준 실행은 slot lookup success·attraction lookup success·postlookup committed의 count 증가가 각각 2,000인지 확인한다. 누락된 지표를 0으로 간주하지 않는다.
+attraction lookup은 postlookup 내부의 세부 구간이므로 두 시간을 합산하지 않는다.
 현재 Timer에는 histogram/percentile 설정이 없으므로 구간별 p95/p99를 제공한다고 가정하지 않는다. k6 API 지연 분포와 구분한다.
 부하 실행은 사용자가 수행하고, 측정 추가 전 KAN-150 결과와 코드/JAR 조건이 달라졌음을 기록한다. 성능 개선 전 기준값이며 아직 로직 최적화는 하지 않았다.
 

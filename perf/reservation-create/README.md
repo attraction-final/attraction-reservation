@@ -275,8 +275,20 @@ PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-03 sin
 ```
 
 metadata.txt의 generatorCpus와 measurement-state-before-cleanup.json의 nanoCpus로 설정·실제 CPU 제한을 확인한다.
-single2k-02의 호출 시작 범위 2,778ms와 비교하고 HTTP·DB 정합성, 늦은 VU, 응답 지연, 수집·OOM 상태를 함께 확인한다. 아직 실행하지 않았다.
+single2k-02의 호출 시작 범위 2,778ms와 비교하고 HTTP·DB 정합성, 늦은 VU, 응답 지연, 수집·OOM 상태를 함께 확인한다.
 발송 범위가 줄어도 서버 코드 개선으로 해석하지 않는다. 같은 Docker 호스트의 자원을 공유하므로 CPU 제한 변경과 호스트 경합의 영향은 단일 실행만으로 분리할 수 없다.
+
+single2k-03은 실제 nanoCpus=2000000000으로 실행됐고 HTTP 성공 2,000·예상 외 0, DB 예약·예약 회원·인원 모두 2,000을 확인했다.
+호출 시작 범위는 309ms, 늦은 VU는 0이었다. 성공 p95/p99는 약 22.61/23.30초, k6 메모리 관측 최대는 1.431GiB였다.
+커넥션 timeout·수집/정리 오류·k6 OOM은 없었다. 아래 같은 조건의 반복도 완료했다.
+
+```bash
+PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-04 single
+```
+
+single2k-04도 HTTP 성공 2,000·예상 외 0, DB 예약·예약 회원·인원 모두 2,000으로 통과했다.
+호출 시작 범위 272ms·늦은 VU 0명, 성공 p95/p99 약 20.97/21.71초였다. 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+같은 2 CPU 조건에서 집중 발송과 정합성을 두 번 확인했으며, 지연 합격 기준은 여전히 미설정이다.
 
 ## 검증 현황
 

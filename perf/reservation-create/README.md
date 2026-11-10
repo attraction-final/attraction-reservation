@@ -3,6 +3,18 @@
 첫 단계는 정원 20명의 빈 슬롯에 **서로 다른 회원 50명이 각 1회** 예약하는 시나리오다.
 목록 조회처럼 같은 요청을 5분 반복하지 않는다. 쓰기 요청은 정원과 예약 데이터를 바꾸기 때문이다.
 
+## 지원 시나리오
+
+| 두 번째 인자 | 어트랙션/슬롯 | 총 정원 | HTTP 기대 결과 |
+| --- | --- | ---: | --- |
+| sold-out (기본) | 1개, 정원 20 | 20 | 성공 20, 정원 소진 거절 30 |
+| single | 1개, 정원 50 | 50 | 성공 50, 거절 0 |
+| spread | 서로 다른 어트랙션 5개에 슬롯 각 1개, 정원 각 10 | 50 | 슬롯별 10건, 총 성공 50, 거절 0 |
+
+single/spread는 회원 수·요청 수·총 정원·예상 성공 건수·자원을 같게 두고 대상 분산만 비교한다.
+현재 생성은 슬롯뿐 아니라 어트랙션도 잠그므로 이 비교는 슬롯과 어트랙션 경합 범위가 함께 달라진다. 차이를 특정 락 하나의 효과로 확정하지 않는다.
+매진 테스트의 성공 20건과 분산 테스트의 성공 50건을 직접 비교해 분산 효과라고 주장하지 않는다.
+
 ## 검증 목적
 
 | 항목 | 기대 결과 |
@@ -28,7 +40,7 @@
 - MySQL: 1 CPU·메모리 1GiB, Redis: 0.5 CPU·256MiB
 - 측정 k6: 1 CPU·메모리 2GiB
 - host 앱/관리 포트: 18106 / 18107 (localhost에만 공개)
-- RUN_ID마다 새 회원 50명·주문/티켓 50개·어트랙션/슬롯 1개를 추가한다. 기존 데이터 삭제·재설정 없음
+- RUN_ID마다 새 회원 50명·주문/티켓 50개·시나리오에 맞는 어트랙션/슬롯 1개 또는 5개를 추가한다. 기존 데이터 삭제·재설정 없음
 
 SQL은 테스트 조건을 만들기 위해 결제 완료 주문과 입장된 티켓을 직접 준비한다. 결제·발급·입장 API의 업무 검증은 이번 범위 밖이다.
 비밀번호는 가입 API의 실제 PasswordEncoder로 생성하고, 로그인 토큰은 setup 메모리에서만 전달한다.
@@ -62,7 +74,7 @@ bash perf/reservation-create/run.sh focus-01
 k6는 scenario 시작 1.5초 뒤를 공통 목표로 요청을 모으지만 정확히 같은 순간의 실행을 보장하지 않는다.
 reservation_create_request_started_at_ms의 min/max와 수집 시각으로 실제 발송 범위를 확인한다. maxDuration 90초는 목표 부하 유지 시간이 아닌 1회 요청 완료 제한이다.
 
-DB 검증은 k6 실패 후에도 실행한다. k6의 성공 20/거절 30과 DB의 20건·인원·소유 관계를 함께 확인해야 정합성 검증 완료다.
+DB 검증은 k6 실패 후에도 실행한다. 시나리오별 성공/거절 건수와 각 슬롯의 예약 수·인원·소유 관계를 함께 확인해야 정합성 검증 완료다.
 전체 실행 exit 0만으로 수집 품질까지 보장하지 않으므로 아래 결과 파일을 함께 읽는다.
 사용자 중단 시 정리 전 상태가 running=true일 수 있으며 DB 검증까지 완료되지 않을 수 있다. 같은 RUN_ID 재실행은 거절한다.
 
@@ -76,7 +88,7 @@ results/RUN_ID는 Git에서 제외한다. 토큰·전체 요청/응답 본문·s
 | preparation-errors.txt / preparation-exit-code.txt | SQL 준비 단계 오류와 종료 코드. 준비 실패 시 본 측정은 시작하지 않음 |
 | metadata.txt | 코드 HEAD·JAR/도구 hash·시각·전용 환경 자원 |
 | pool-config-check.txt | 실제 max/min 10/10 |
-| summary.json / exit-code.txt | 요청 50·성공 20·예상 거절 30·예상 외 0, 응답/지연 분리·HTTP 종료 코드 |
+| summary.json / exit-code.txt | 요청 50·시나리오별 성공/거절 건수·예상 외 0, 응답/지연 분리·HTTP 종료 코드 |
 | db-verification.txt / db-verification-exit-code.txt / db-verification-errors.txt | DB 스냅샷·정합성 검사 결과와 실패 원인 |
 | metrics-before.txt / metrics-after.txt | Hikari/JVM/HTTP 누적 메트릭, setup 포함 |
 | resource-samples.jsonl / metrics-samples.txt | 주기별 자원·커넥션 표본, 순간 최대를 보장하지 않음 |
@@ -92,7 +104,23 @@ results/RUN_ID는 Git에서 제외한다. 토큰·전체 요청/응답 본문·s
 RUN_ID=focus-01 docker compose -f perf/reservation-create/compose.yaml down
 ```
 
-## 아직 검증하지 않은 것
+## 검증 현황
 
-실제 Docker 기동·Flyway 적용·SQL 준비 및 검증·k6 실행은 아직 수행하지 않았다.
-첫 집중 요청 결과 확인 후 반복·분산 요청 비교·회원별 중복/시간 충돌 대표 사례를 단계적으로 진행한다.
+focus-02·03·04에서 SQL 준비, 실제 HTTP 요청 50회(성공 20/예상 거절 30), DB 정합성과 정상 수집·정리를 확인했다.
+최신 dev 반영 후 focus-03을 현재 코드의 기준 결과로 기록했다. 지연 합격 기준은 미설정이며 warm-up은 없다.
+수치와 해석 한계는 [측정 기록](../../docs/troubleshooting/reservation-create-load-test.md)에 남긴다.
+focus-03·04는 동일 JAR이며 지연에 편차가 남아 있다. single-01·spread-01도 각각 50건 성공과 DB 정합성을 통과했다.
+첫 집중·분산 비교 수치는 측정 기록에 정리했다. 각 1회라 성능 차이를 확정하지 않고, 순서를 바꿔 분산부터 반복한다.
+
+```bash
+bash perf/reservation-create/run.sh spread-02 spread
+```
+
+spread-02 결과 확인 후 집중 조건을 반복한다. 앱 재생성이 포함되므로 동시에 실행하지 않는다.
+
+```bash
+bash perf/reservation-create/run.sh single-02 single
+```
+
+양쪽 모두 앱 재생성·warm-up 없음이며 결과의 재현성을 확인한다. 회원별 중복/시간 충돌 HTTP 대표 사례도 아직 미실행이다.
+2,000명 피크 부하는 현재 지원하지 않는다. 유입 시간·정원·성공/거절 정책과 부하 발생기 한도를 먼저 정한 별도 확장이 필요하다.

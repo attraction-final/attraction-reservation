@@ -64,6 +64,7 @@ services:
     mem_limit: 2g
     environment:
       RUN_ID: "${RUN_ID:?RUN_ID is required}"
+      SCENARIO: "${SCENARIO:-sold-out}"
     volumes:
       - ./:/scripts:ro
       - ../reservation-list/auth.js:/shared/auth.js:ro

@@ -7,6 +7,11 @@ import { BASE, login } from '/shared/auth.js';
 
 const runId = __ENV.RUN_ID;
 if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘못된 RUN_ID');
+const scenario = __ENV.SCENARIO || 'sold-out';
+if (!['sold-out','single','spread'].includes(scenario)) throw new Error('잘못된 SCENARIO');
+const expectedSuccess = scenario === 'sold-out' ? 20 : 50;
+const expectedRejection = 50 - expectedSuccess;
+const expectedSlots = scenario === 'spread' ? 5 : 1;
 const fixture = new SharedArray('create-fixture', () => open(`/results/${runId}/fixture.jsonl`).trim().split(/\r?\n/).map(row => JSON.parse(row)));
 const sent = new Counter('reservation_create_requests');
 const succeeded = new Counter('reservation_create_success');
@@ -16,19 +21,23 @@ const successDuration = new Trend('reservation_create_success_duration', true);
 const rejectionDuration = new Trend('reservation_create_rejection_duration', true);
 const requestStartedAt = new Gauge('reservation_create_request_started_at_ms');
 export const options = {
-  scenarios: { focus: { executor: 'per-vu-iterations', vus: 50, iterations: 1, maxDuration: '90s', gracefulStop: '10s' } },
+  scenarios: { [scenario]: { executor: 'per-vu-iterations', vus: 50, iterations: 1, maxDuration: '90s', gracefulStop: '10s' } },
   summaryTrendStats: ['avg','med','max','p(95)','p(99)'],
   thresholds: {
     checks: ['rate==1'], reservation_create_requests: ['count==50'],
-    reservation_create_success: ['count==20'], reservation_create_expected_rejection: ['count==30'],
+    reservation_create_success: [`count==${expectedSuccess}`], reservation_create_expected_rejection: [`count==${expectedRejection}`],
     reservation_create_unexpected: ['count==0'], 'http_req_failed{endpoint:reservation-create}': ['rate==0'],
   },
 };
 
 export function setup() {
   if (fixture.length !== 50 || new Set(fixture.map(x => x.userId)).size !== 50
-      || new Set(fixture.map(x => x.ticketId)).size !== 50 || new Set(fixture.map(x => x.slotId)).size !== 1) {
-    throw new Error('서로 다른 회원·티켓 50개와 공통 슬롯 1개가 필요합니다.');
+      || new Set(fixture.map(x => x.ticketId)).size !== 50 || new Set(fixture.map(x => x.slotId)).size !== expectedSlots
+      || fixture.some(x => x.scenario !== scenario)) {
+    throw new Error('회원·티켓 50개와 시나리오별 슬롯 배정을 확인하세요.');
+  }
+  for (const slotId of new Set(fixture.map(x => x.slotId))) {
+    if (fixture.filter(x => x.slotId === slotId).length !== 50 / expectedSlots) throw new Error('슬롯별 회원 배정 불일치');
   }
   // 실제 서버 시간을 바꾸지 않는다. 토큰은 setup 메모리에서만 전달한다.
   return fixture.map(account => ({ ...account, token: login(account.email, 180) }));
@@ -42,14 +51,15 @@ export default function (accounts) {
   requestStartedAt.add(Date.now());
   const response = http.post(`${BASE}/api/reservations`, JSON.stringify({ ticketId: account.ticketId, slotId: account.slotId }), {
     headers: { Authorization: `Bearer ${account.token}`, 'Content-Type': 'application/json' },
-    timeout: '30s', tags: { endpoint: 'reservation-create' }, responseCallback: http.expectedStatuses(201,409),
+    timeout: '30s', tags: { endpoint: 'reservation-create' },
+    responseCallback: scenario === 'sold-out' ? http.expectedStatuses(201,409) : http.expectedStatuses(201),
   });
   let body = null;
   try { body = response.json(); } catch (_) { /* 아래에서 예상하지 못한 응답으로 집계한다. */ }
   const ok = response.status === 201 && body?.success === true && body.data?.reservationId > 0
     && body.data.ticketId === account.ticketId && body.data.slotId === account.slotId && body.data.status === 'RESERVED';
   // 현재 공통 오류 응답에는 errorCode가 없어 실제 ErrorCode의 메시지를 확인한다.
-  const expected = response.status === 409 && body?.success === false && [
+  const expected = scenario === 'sold-out' && response.status === 409 && body?.success === false && [
     '예약 가능한 슬롯 상태가 아닙니다.', '슬롯이 마감되었거나 잔여 정원이 없어 예약할 수 없습니다.',
   ].includes(body.message);
   sent.add(1); succeeded.add(ok ? 1 : 0); rejected.add(expected ? 1 : 0); unexpected.add(ok || expected ? 0 : 1);

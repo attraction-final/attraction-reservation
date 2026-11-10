@@ -108,6 +108,8 @@ public enum ErrorCode {
     TICKET_NOT_OWNED(HttpStatus.FORBIDDEN, "본인 소유의 입장권이 아닙니다."),
     TICKET_NOT_AVAILABLE(HttpStatus.CONFLICT, "사용 중인 입장권으로만 추천받을 수 있습니다."),
     ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "기존 예약의 취소 가능 시간이 지나 새로운 추천 경로를 생성할 수 없습니다."),
+    INVALID_CURRENT_LOCATION(HttpStatus.BAD_REQUEST, "현재 위치는 위도와 경도를 함께 보내야 합니다."),
+    CURRENT_LOCATION_OUT_OF_PARK(HttpStatus.BAD_REQUEST, "현재 위치가 공원 범위 밖입니다. 공원 안에서 다시 요청하거나 위치 없이 요청해주세요."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),

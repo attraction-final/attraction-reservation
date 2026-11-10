@@ -129,3 +129,18 @@ attraction:
       scheduler:
         enabled: true
         cron: "0 5 0 * * *"      # 초 분 시 일 월 요일 → 매일 00:05
+
+# 추천 경로를 현재 위치에서 출발할 때 첫 이동 시간 추정 (KAN-140)
+# 이동 시간(분) = 하버사인 직선거리 × detour-factor ÷ speed-meters-per-minute
+route-recommendation:
+  walking:
+    # 실측 구간 90건(docs/sql/kan-136-route-travel-data.sql)의 도보 거리 ÷ 좌표 직선거리 중앙값 1.68
+    detour-factor: 1.7
+    # 같은 90건의 도보 거리 ÷ 도보 시간 중앙값 52.8
+    speed-meters-per-minute: 53
+  # 이 사각형 밖의 좌표로 요청하면 400. 어트랙션 좌표 10건의 범위에 약 300m 여유를 더한 값
+  park-bounds:
+    min-latitude: 37.2870
+    max-latitude: 37.2975
+    min-longitude: 127.1950
+    max-longitude: 127.2095

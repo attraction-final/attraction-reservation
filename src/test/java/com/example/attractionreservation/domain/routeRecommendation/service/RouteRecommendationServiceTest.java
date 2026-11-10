@@ -10,14 +10,18 @@ import com.example.attractionreservation.domain.reservation.entity.enums.Reserva
 import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
 import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.WalkingTimeCalculator;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionLocation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionPath;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
+import com.example.attractionreservation.domain.routeRecommendation.entity.enums.StartLocation;
+import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionLocationRepository;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.TravelTimeBasis;
 import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionPathRepository;
 import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
@@ -43,6 +47,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
@@ -94,6 +99,8 @@ class RouteRecommendationServiceTest {
     private ReservationRepository reservationRepository;
     @Mock
     private AttractionPathRepository attractionPathRepository;
+    @Mock
+    private AttractionLocationRepository attractionLocationRepository;
 
     @BeforeEach
     void setUp() {
@@ -105,8 +112,11 @@ class RouteRecommendationServiceTest {
                 attractionSlotRepository,
                 reservationRepository,
                 attractionPathRepository,
+                attractionLocationRepository,
                 new CandidateSelector(),
                 new RouteSearcher(),
+                // application.yaml 기본값과 같은 설정
+                new WalkingTimeCalculator(1.7, 53, 37.2870, 37.2975, 127.1950, 127.2095),
                 FIXED_CLOCK
         );
     }
@@ -265,6 +275,122 @@ class RouteRecommendationServiceTest {
 
         // then
         verifyNoInteractions(attractionPathRepository);
+    }
+
+    //  현재 위치 출발
+
+    // 아마존 익스프레스 좌표와 허리케인 좌표. 둘 사이 직선거리 약 473m (첫 이동 16분)
+    private static final double AMAZON_LAT = 37.2912666, AMAZON_LON = 127.2057353;
+    private static final double HURRICANE_LAT = 37.29397, HURRICANE_LON = 127.20161;
+
+    private static CreateRouteRecommendationRequest requestFrom(Double latitude, Double longitude, Long... attractionIds) {
+        return new CreateRouteRecommendationRequest(
+                TICKET_ID, at("14:30"), at("18:00"), List.of(attractionIds), latitude, longitude);
+    }
+
+    // 정문 기준 이동 시간이 같은(10분) 두 어트랙션. 14:35부터 5분 간격 슬롯이 있다. (요청은 14:30 출발)
+    // 예약 마감(슬롯 시작 30분 전) 때문에 14:30 이전 슬롯은 후보에서 빠지므로 출발을 14:30으로 둔다.
+    // 위치 없이 요청하면 동점이라 ID가 작은 101이 먼저 온다.
+    private void givenTwoEquidistantAttractions() {
+        Attraction a = attraction(101L, "아마존 익스프레스", 10, 10);
+        Attraction b = attraction(102L, "허리케인", 10, 10);
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(List.of(a, b));
+        givenSlots(101L, everyFiveMinutesFrom1435(9100L, a));
+        givenSlots(102L, everyFiveMinutesFrom1435(9200L, b));
+    }
+
+    private static AttractionSlot[] everyFiveMinutesFrom1435(long slotIdBase, Attraction attraction) {
+        List<AttractionSlot> slots = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            slots.add(slot(slotIdBase + i, attraction, at("14:35").plusMinutes(5L * i).toLocalTime().toString()));
+        }
+        return slots.toArray(AttractionSlot[]::new);
+    }
+
+    @Test
+    @DisplayName("현재 위치를 주면 그 위치에서 가까운 어트랙션이 첫 방문지가 되고 CURRENT_LOCATION으로 저장된다")
+    void createRouteRecommendation_CurrentLocation_ClosestAttractionFirst() {
+        // given
+        // 허리케인 바로 앞에서 요청 → 허리케인 0분, 아마존 익스프레스 16분
+        givenUsableTicket();
+        givenTwoEquidistantAttractions();
+        givenSaveReturnsArgument();
+        when(attractionLocationRepository.findAllByAttractionIdIn(anyCollection())).thenReturn(List.of(
+                AttractionLocation.of(101L, AMAZON_LAT, AMAZON_LON),
+                AttractionLocation.of(102L, HURRICANE_LAT, HURRICANE_LON)));
+
+        // when
+        SearchRouteRecommendationResponse response = routeRecommendationService
+                .createRouteRecommendation(USER_ID, requestFrom(HURRICANE_LAT, HURRICANE_LON, 101L, 102L));
+
+        // then
+        assertThat(response.startLocation()).isEqualTo(StartLocation.CURRENT_LOCATION);
+        assertThat(response.visits())
+                .extracting(SearchRouteRecommendationResponse.Visit::attractionId)
+                .containsExactly(102L, 101L);
+        assertThat(response.visits().get(0).estimatedMoveMinutes()).isZero();
+        verify(attractionLocationRepository).findAllByAttractionIdIn(anyCollection()); // 추천 1건당 1번
+    }
+
+    @Test
+    @DisplayName("위치 없이 요청하면 정문 출발로 계산하고 좌표를 조회하지 않는다")
+    void createRouteRecommendation_NoLocation_SameAsEntranceStart() {
+        // given
+        givenUsableTicket();
+        givenTwoEquidistantAttractions();
+        givenSaveReturnsArgument();
+
+        // when
+        SearchRouteRecommendationResponse response = routeRecommendationService
+                .createRouteRecommendation(USER_ID, requestFrom(null, null, 101L, 102L));
+
+        // then
+        assertThat(response.startLocation()).isEqualTo(StartLocation.ENTRANCE);
+        assertThat(response.visits())
+                .extracting(SearchRouteRecommendationResponse.Visit::attractionId)
+                .containsExactly(101L, 102L);
+        assertThat(response.visits().get(0).estimatedMoveMinutes()).isEqualTo(10);
+        verifyNoInteractions(attractionLocationRepository);
+    }
+
+    @Test
+    @DisplayName("좌표가 없는 어트랙션은 현재 위치에서 출발해도 정문 기준 시간을 쓴다")
+    void createRouteRecommendation_CurrentLocation_MissingCoordinate_UsesEntranceMinutes() {
+        // given
+        // 아마존 익스프레스 좌표만 있다. 허리케인 앞에서 요청해도 허리케인 첫 이동은 정문 기준 10분
+        givenUsableTicket();
+        givenTwoEquidistantAttractions();
+        givenSaveReturnsArgument();
+        when(attractionLocationRepository.findAllByAttractionIdIn(anyCollection())).thenReturn(List.of(
+                AttractionLocation.of(101L, AMAZON_LAT, AMAZON_LON)));
+
+        // when
+        SearchRouteRecommendationResponse response = routeRecommendationService
+                .createRouteRecommendation(USER_ID, requestFrom(HURRICANE_LAT, HURRICANE_LON, 101L, 102L));
+
+        // then
+        // 아마존 익스프레스 먼저: 16분 → 14:50 슬롯, 허리케인 먼저: 10분 → 14:40 슬롯. 허리케인이 먼저다
+        assertThat(response.visits().get(0).attractionId()).isEqualTo(102L);
+        assertThat(response.visits().get(0).estimatedMoveMinutes()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("공원 범위 밖의 좌표로 요청하면 CURRENT_LOCATION_OUT_OF_PARK 예외가 발생한다")
+    void createRouteRecommendation_LocationOutsidePark_Throws() {
+        assertErrorCode(
+                () -> routeRecommendationService.createRouteRecommendation(
+                        USER_ID, requestFrom(37.5665, 126.9780, 101L)), // 서울시청
+                ErrorCode.CURRENT_LOCATION_OUT_OF_PARK);
+        verifyNoInteractions(ticketRepository);
+    }
+
+    @Test
+    @DisplayName("위도와 경도 중 하나만 보내면 INVALID_CURRENT_LOCATION 예외가 발생한다")
+    void createRouteRecommendation_OnlyLatitude_Throws() {
+        assertErrorCode(
+                () -> routeRecommendationService.createRouteRecommendation(
+                        USER_ID, requestFrom(HURRICANE_LAT, null, 101L)),
+                ErrorCode.INVALID_CURRENT_LOCATION);
     }
 
     @Test

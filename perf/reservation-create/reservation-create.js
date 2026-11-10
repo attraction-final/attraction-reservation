@@ -9,8 +9,10 @@ const runId = __ENV.RUN_ID;
 if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘못된 RUN_ID');
 const scenario = __ENV.SCENARIO || 'sold-out';
 if (!['sold-out','single','spread'].includes(scenario)) throw new Error('잘못된 SCENARIO');
-const expectedSuccess = scenario === 'sold-out' ? 20 : 50;
-const expectedRejection = 50 - expectedSuccess;
+const users = Number(__ENV.TEST_VUS || 50);
+if (![50,100].includes(users)) throw new Error('TEST_VUS는 50 또는 100이어야 합니다.');
+const expectedSuccess = scenario === 'sold-out' ? 20 : users;
+const expectedRejection = users - expectedSuccess;
 const expectedSlots = scenario === 'spread' ? 5 : 1;
 const fixture = new SharedArray('create-fixture', () => open(`/results/${runId}/fixture.jsonl`).trim().split(/\r?\n/).map(row => JSON.parse(row)));
 const sent = new Counter('reservation_create_requests');
@@ -21,23 +23,23 @@ const successDuration = new Trend('reservation_create_success_duration', true);
 const rejectionDuration = new Trend('reservation_create_rejection_duration', true);
 const requestStartedAt = new Gauge('reservation_create_request_started_at_ms');
 export const options = {
-  scenarios: { [scenario]: { executor: 'per-vu-iterations', vus: 50, iterations: 1, maxDuration: '90s', gracefulStop: '10s' } },
+  scenarios: { [scenario]: { executor: 'per-vu-iterations', vus: users, iterations: 1, maxDuration: '90s', gracefulStop: '10s' } },
   summaryTrendStats: ['avg','med','max','p(95)','p(99)'],
   thresholds: {
-    checks: ['rate==1'], reservation_create_requests: ['count==50'],
+    checks: ['rate==1'], reservation_create_requests: [`count==${users}`],
     reservation_create_success: [`count==${expectedSuccess}`], reservation_create_expected_rejection: [`count==${expectedRejection}`],
     reservation_create_unexpected: ['count==0'], 'http_req_failed{endpoint:reservation-create}': ['rate==0'],
   },
 };
 
 export function setup() {
-  if (fixture.length !== 50 || new Set(fixture.map(x => x.userId)).size !== 50
-      || new Set(fixture.map(x => x.ticketId)).size !== 50 || new Set(fixture.map(x => x.slotId)).size !== expectedSlots
-      || fixture.some(x => x.scenario !== scenario)) {
-    throw new Error('회원·티켓 50개와 시나리오별 슬롯 배정을 확인하세요.');
+  if (fixture.length !== users || new Set(fixture.map(x => x.userId)).size !== users
+      || new Set(fixture.map(x => x.ticketId)).size !== users || new Set(fixture.map(x => x.slotId)).size !== expectedSlots
+      || fixture.some(x => x.scenario !== scenario || x.users !== users)) {
+    throw new Error('설정한 회원·티켓 수와 시나리오별 슬롯 배정을 확인하세요.');
   }
   for (const slotId of new Set(fixture.map(x => x.slotId))) {
-    if (fixture.filter(x => x.slotId === slotId).length !== 50 / expectedSlots) throw new Error('슬롯별 회원 배정 불일치');
+    if (fixture.filter(x => x.slotId === slotId).length !== users / expectedSlots) throw new Error('슬롯별 회원 배정 불일치');
   }
   // 실제 서버 시간을 바꾸지 않는다. 토큰은 setup 메모리에서만 전달한다.
   return fixture.map(account => ({ ...account, token: login(account.email, 180) }));

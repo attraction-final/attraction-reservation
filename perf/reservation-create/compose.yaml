@@ -52,6 +52,7 @@ services:
     mem_limit: 512m
     environment:
       RUN_ID: "${RUN_ID:?RUN_ID is required}"
+      TEST_VUS: "${TEST_VUS:-50}"
     volumes:
       - ./:/scripts:ro
       - ../reservation-list/auth.js:/shared/auth.js:ro
@@ -65,6 +66,7 @@ services:
     environment:
       RUN_ID: "${RUN_ID:?RUN_ID is required}"
       SCENARIO: "${SCENARIO:-sold-out}"
+      TEST_VUS: "${TEST_VUS:-50}"
     volumes:
       - ./:/scripts:ro
       - ../reservation-list/auth.js:/shared/auth.js:ro

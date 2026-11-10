@@ -5,6 +5,8 @@ import { BASE, csrfHeaders, login } from '/shared/auth.js';
 
 const runId = __ENV.RUN_ID;
 if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘못된 RUN_ID');
+const users = Number(__ENV.TEST_VUS || 50);
+if (![50,100].includes(users)) throw new Error('TEST_VUS는 50 또는 100이어야 합니다.');
 const prepared = new Counter('accounts_prepared');
 export const options = {
   scenarios: { prepare: { executor: 'shared-iterations', vus: 1, iterations: 1, maxDuration: '10m' } },
@@ -19,7 +21,7 @@ export default function () {
     sleep(1);
   }
   if (!ready) throw new Error('앱 준비 실패. 전용 app 로그를 확인하세요.');
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < users; i++) {
     const suffix = String(i).padStart(2, '0');
     const email = `kan150-${runId}-${suffix}@example.test`;
     const response = http.post(`${BASE}/api/users/signup`, JSON.stringify({

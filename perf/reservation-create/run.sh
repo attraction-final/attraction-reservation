@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_dir="$(cd -- "$script_dir/../.." && pwd)"
 run_id="${1:-}"
 scenario="${2:-sold-out}"
+users="${TEST_VUS:-50}"
 if [[ $# -lt 1 || $# -gt 2 || ! "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,11}$ ]]; then
   echo '사용법: bash perf/reservation-create/run.sh RUN_ID [sold-out|single|spread] (RUN_ID 최대 12자)' >&2
   exit 1
@@ -13,23 +14,27 @@ if [[ "$scenario" != sold-out && "$scenario" != single && "$scenario" != spread 
   echo '시나리오는 sold-out, single, spread만 허용합니다.' >&2
   exit 1
 fi
+if [[ "$users" != 50 && "$users" != 100 ]]; then
+  echo 'TEST_VUS는 현재 단계에서 50 또는 100만 지원합니다.' >&2
+  exit 1
+fi
 groups=1
 capacity=20
 expected_success=20
-expected_rejection=30
-if [[ "$scenario" != sold-out ]]; then capacity=50; expected_success=50; expected_rejection=0; fi
-if [[ "$scenario" == spread ]]; then groups=5; capacity=10; fi
+expected_rejection=$((users - expected_success))
+if [[ "$scenario" != sold-out ]]; then capacity="$users"; expected_success="$users"; expected_rejection=0; fi
+if [[ "$scenario" == spread ]]; then groups=5; capacity=$((users / groups)); fi
 target="$script_dir/results/$run_id"
 if [[ -e "$target" ]]; then echo '기존 결과는 덮어쓰지 않습니다. 새 RUN_ID를 사용하세요.' >&2; exit 1; fi
 jar="$project_dir/build/libs/attraction-reservation-0.0.1-SNAPSHOT.jar"
 if [[ ! -f "$jar" ]]; then echo '먼저 현재 코드로 ./gradlew bootJar를 실행하세요.' >&2; exit 1; fi
-export RUN_ID="$run_id" SCENARIO="$scenario" PERF_UID="$(id -u)" PERF_GID="$(id -g)"
+export RUN_ID="$run_id" SCENARIO="$scenario" TEST_VUS="$users" PERF_UID="$(id -u)" PERF_GID="$(id -g)"
 compose_file="$script_dir/compose.yaml"
 case "$(uname -s)" in MINGW*|MSYS*) compose_file="$(cygpath -w "$compose_file")" ;; esac
 docker_cmd() { MSYS_NO_PATHCONV=1 docker "$@"; }
 compose() { docker_cmd compose -f "$compose_file" "$@"; }
 mysql() { compose exec -T -e MYSQL_PWD=perf-local-only mysql mysql -uperf --default-character-set=utf8mb4 --batch --raw --skip-column-names reservation_create_perf "$@"; }
-sql_file() { { printf "SET @run_id='%s'; SET @scenario='%s';\n" "$run_id" "$scenario"; cat "$1"; } | mysql; }
+sql_file() { { printf "SET @run_id='%s'; SET @scenario='%s'; SET @users=%s;\n" "$run_id" "$scenario" "$users"; cat "$1"; } | mysql; }
 snapshot() {
   curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18107/actuator/prometheus |
     awk '/^(hikaricp_|jvm_gc_|jvm_memory_used_bytes|process_cpu_usage|process_uptime_seconds|http_server_requests_seconds_)/'
@@ -54,10 +59,10 @@ if [[ "$preparation_exit" -ne 0 ]]; then
   echo 'SQL 준비 실패. preparation-errors.txt를 확인하세요.' >&2
   exit "$preparation_exit"
 fi
-if [[ "$(wc -l < "$target/fixture.jsonl")" -ne 50 ]]; then echo '기대 결과 50행 검증 실패' >&2; exit 1; fi
+if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 결과 ${users}행 검증 실패" >&2; exit 1; fi
 {
   echo "runId=$run_id startedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "scenario=$scenario vus=50 iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
+  echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
   echo 'appCpus=2 appMemory=1GiB poolMax=10 poolMin=10 generatorCpus=1 generatorMemory=2GiB'
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
   (cd -- "$project_dir" && git rev-parse HEAD && git status --short)

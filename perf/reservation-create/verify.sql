@@ -2,9 +2,10 @@
 CREATE TEMPORARY TABLE guard (ok TINYINT NOT NULL CHECK (ok = 1));
 INSERT INTO guard SELECT IF(DATABASE()='reservation_create_perf',1,0);
 INSERT INTO guard SELECT IF(@scenario IN ('sold-out','single','spread'),1,0);
+INSERT INTO guard SELECT IF(@users IN (50,100),1,0);
 SET @groups=IF(@scenario='spread',5,1);
-SET @capacity=IF(@scenario='sold-out',20,IF(@scenario='single',50,10));
-SET @expected=IF(@scenario='sold-out',20,50);
+SET @capacity=IF(@scenario='sold-out',20,@users DIV @groups);
+SET @expected=IF(@scenario='sold-out',20,@users);
 CREATE TEMPORARY TABLE run_slots AS
 SELECT s.id AS slot_id FROM attraction_slots s JOIN attractions a ON a.id=s.attraction_id
 WHERE LEFT(a.name,CHAR_LENGTH(CONCAT('KAN150-',@run_id,'-')))=CONCAT('KAN150-',@run_id,'-');

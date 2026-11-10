@@ -10,8 +10,11 @@ if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘�
 const scenario = __ENV.SCENARIO || 'sold-out';
 if (!['sold-out','single','spread'].includes(scenario)) throw new Error('잘못된 SCENARIO');
 const users = Number(__ENV.TEST_VUS || 50);
-if (![50,100,200,500,1000].includes(users)) throw new Error('TEST_VUS는 50, 100, 200, 500, 1000이어야 합니다.');
-const setupTimeoutSeconds = users >= 500 ? 120 : 60;
+if (![50,100,200,500,1000,2000].includes(users)) throw new Error('TEST_VUS는 50, 100, 200, 500, 1000, 2000이어야 합니다.');
+// 2,000명 순차 로그인에만 준비 시간을 늘린다. 예약 요청 timeout은 유지한다.
+const setupTimeoutSeconds = users >= 2000 ? 240 : users >= 500 ? 120 : 60;
+// 2,000 VUs가 공통 발송 전에 준비할 여유를 준다. 실제 발송 범위는 Gauge로 확인한다.
+const requestTargetOffsetMs = users >= 2000 ? 5000 : 1500;
 const expectedSuccess = scenario === 'sold-out' ? 20 : users;
 const expectedRejection = users - expectedSuccess;
 const expectedSlots = scenario === 'spread' ? 5 : 1;
@@ -63,7 +66,7 @@ export function setup() {
 
 export default function (tokens) {
   const readyAt = Date.now();
-  const target = execution.scenario.startTime + 1500;
+  const target = execution.scenario.startTime + requestTargetOffsetMs;
   vuReadyAt.add(readyAt);
   scenarioStartedAt.add(execution.scenario.startTime);
   lateVus.add(readyAt > target ? 1 : 0);

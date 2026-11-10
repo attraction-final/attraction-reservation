@@ -12,7 +12,7 @@
 | spread | 서로 다른 어트랙션 5개에 슬롯 각 1개, 정원 각 10 | 50 | 슬롯별 10건, 총 성공 50, 거절 0 |
 
 single/spread는 회원 수·요청 수·총 정원·예상 성공 건수·자원을 같게 두고 대상 분산만 비교한다.
-위 표는 기본 TEST_VUS=50 조건이다. 현재 50/100/200/500/1000을 지원하며 single의 정원은 요청 수, spread의 슬롯별 정원은 요청 수/5로 맞춘다.
+위 표는 기본 TEST_VUS=50 조건이다. 현재 50/100/200/500/1000/2000을 지원하며 single의 정원은 요청 수, spread의 슬롯별 정원은 요청 수/5로 맞춘다.
 sold-out은 정원 20을 유지해 100명일 때 성공 20·예상 거절 80을 검증한다.
 현재 생성은 슬롯뿐 아니라 어트랙션도 잠그므로 이 비교는 슬롯과 어트랙션 경합 범위가 함께 달라진다. 차이를 특정 락 하나의 효과로 확정하지 않는다.
 매진 테스트의 성공 20건과 분산 테스트의 성공 50건을 직접 비교해 분산 효과라고 주장하지 않는다.
@@ -73,7 +73,7 @@ bash perf/reservation-create/run.sh focus-01
 
 순서: 전용 DB/Redis → 시각 검사 → 앱 재생성 → 회원가입·로그인 확인 → SQL fixture → 실제 pool 검사 → k6 setup 로그인 → 50회 요청 → 종료 상태 보존 → DB 검증.
 첫 단계에서는 별도 warm-up이 없다. 첫 실행 지연과 잠금 경합의 초기 관측으로 취급하고, 이후 비교 시 같은 준비 조건을 유지한다.
-k6는 scenario 시작 1.5초 뒤를 공통 목표로 요청을 모으지만 정확히 같은 순간의 실행을 보장하지 않는다.
+k6는 scenario 시작 1.5초 뒤(2,000명은 5초 뒤)를 공통 목표로 요청을 모으지만 정확히 같은 순간의 실행을 보장하지 않는다.
 reservation_create_request_started_at_ms의 min/max와 수집 시각으로 실제 발송 범위를 확인한다. maxDuration 90초는 목표 부하 유지 시간이 아닌 1회 요청 완료 제한이다.
 
 DB 검증은 k6 실패 후에도 실행한다. 시나리오별 성공/거절 건수와 각 슬롯의 예약 수·인원·소유 관계를 함께 확인해야 정합성 검증 완료다.
@@ -109,7 +109,7 @@ RUN_ID=focus-01 docker compose -f perf/reservation-create/compose.yaml down
 ## 100명 확대 — 첫 단계
 
 50명 집중·분산 반복의 정합성을 확인한 뒤, 자원·코드·앱 재생성·warm-up 없음 조건은 유지하고 요청과 총 정원을 100으로 늘린다.
-TEST_VUS는 회원 준비·fixture 행 수·실제 VUs·성공/거절 기대값·DB 검사에 함께 전달한다. 기본값은 50이고 현재 50/100/200/500/1000을 허용한다.
+TEST_VUS는 회원 준비·fixture 행 수·실제 VUs·성공/거절 기대값·DB 검사에 함께 전달한다. 기본값은 50이고 현재 50/100/200/500/1000/2000을 허용한다.
 SQL과 k6가 같은 인원으로 준비됐는지도 fixture의 users 필드로 확인한다. 기존 실행 결과를 덮어쓰지 않는다.
 
 ```bash
@@ -201,7 +201,7 @@ TEST_VUS=1000 bash perf/reservation-create/run.sh single1k-02 single
 | reservation_create_setup_payload_chars | setup 반환 JSON의 문자 수, 토큰 원문은 저장하지 않음 |
 | reservation_create_vu_ready_at_ms | VU 함수에 진입한 시각의 min/max |
 | reservation_create_scenario_started_at_ms | 공통 scenario 시작 시각 |
-| reservation_create_late_vus | 공통 목표 시각(scenario 시작+1.5초) 이후 함수에 진입한 VU 수 |
+| reservation_create_late_vus | 공통 목표 시각(scenario 시작+1.5초, 2,000명은 +5초) 이후 함수에 진입한 VU 수 |
 
 기존 request_started_at_ms와 함께 VU 진입이 늦었는지, 진입 후 실제 호출이 늦었는지 구분한다.
 이 지표는 네트워크 수신·DB 진입 시각을 보장하지 않는다. k6 메모리·CPU와 HTTP/DB 정합성도 같이 본다.
@@ -229,6 +229,36 @@ full1k-02도 성공 20/예상 거절 980/예상 외 0, DB 예약·인원 20으�
 ```bash
 TEST_VUS=1000 bash perf/reservation-create/run.sh full1k-01 sold-out
 ```
+
+## 2,000명 집중 첫 실행 준비
+
+1,000명 세 시나리오의 반복 검증 후, 먼저 single에서 정원 2,000 슬롯에 서로 다른 회원 2,000명이 한 번씩 요청한다.
+기대값은 HTTP 성공 2,000·거절/예상 외 0, DB 예약·예약 회원·reservedCount·정원 모두 2,000이다.
+
+```bash
+TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-01 single
+```
+
+1,000명 로그인 준비가 약 70초여서 2,000명 setup 한도만 240초, 최소 토큰 수명은 360초로 늘린다.
+첫 실행은 서버·k6 자원, pool 10, 목표 발송 시각 +1,500ms, 요청 timeout 30초, scenario 90초와 gracefulStop 10초를 유지했다.
+로그인은 예약 응답 지연에서 제외한다. 요청 시작 범위·늦은 VU·OOM·수집 상태를 확인하기 전에는 2,000명 동시 처리로 표현하지 않는다.
+예상 외 오류·timeout·정합성 실패나 부하 발생기 문제가 있으면 확대를 멈추고 원인을 구분한다. 지연 합격 기준은 여전히 미설정이다.
+
+single2k-01은 기대한 HTTP·DB 정합성을 통과했다. 성공 p95/p99는 약 22.82/23.59초, 커넥션 timeout과 k6 OOM은 없었다.
+호출 시작 범위는 3,404ms, 목표 시각보다 늦게 준비된 VU는 1,301명이었다. k6 메모리 관측 최대는 1.441GiB였다.
+2,000명 동시 처리로 표현하지 않으며, 다음 비교 전에 VU 준비·발송 조건을 점검한다. 지연 합격 기준은 미설정이다.
+
+### 2,000명 발송 준비 시간 조정 후 반복
+
+single2k-02부터 2,000명만 공통 목표를 scenario 시작 +5초로 늦춘다. 1,000명 이하와 서버·발생기 자원·요청 timeout은 유지한다.
+VU 준비 여유를 주는 도구 변경이며 API 성능 개선이 아니다. 아직 실행하지 않았다.
+
+```bash
+TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-02 single
+```
+
+HTTP·DB 정합성과 함께 늦은 VU·실제 호출 시작 범위가 줄었는지 확인한다. 준비 지연이 줄어도 공통 시각에 깨어나는 비용으로 발송은 분산될 수 있다.
+첫 실행과 유입 패턴이 달라질 수 있으므로 응답 지연만으로 서버 성능의 개선·악화를 판단하지 않는다.
 
 ## 검증 현황
 

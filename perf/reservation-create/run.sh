@@ -14,8 +14,8 @@ if [[ "$scenario" != sold-out && "$scenario" != single && "$scenario" != spread 
   echo '시나리오는 sold-out, single, spread만 허용합니다.' >&2
   exit 1
 fi
-if [[ "$users" != 50 && "$users" != 100 && "$users" != 200 && "$users" != 500 && "$users" != 1000 ]]; then
-  echo 'TEST_VUS는 현재 단계에서 50, 100, 200, 500, 1000만 지원합니다.' >&2
+if [[ "$users" != 50 && "$users" != 100 && "$users" != 200 && "$users" != 500 && "$users" != 1000 && "$users" != 2000 ]]; then
+  echo 'TEST_VUS는 현재 단계에서 50, 100, 200, 500, 1000, 2000만 지원합니다.' >&2
   exit 1
 fi
 groups=1
@@ -65,8 +65,8 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
   echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
   echo 'appCpus=2 appMemory=1GiB poolMax=10 poolMin=10 generatorCpus=1 generatorMemory=2GiB'
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
-  echo 'setupData=tokenArray fixtureData=sharedArray launchDiagnostics=enabled requestTargetOffsetMs=1500'
-  echo "setupTimeoutSeconds=$(( users >= 500 ? 120 : 60 )) minimumTokenValiditySeconds=$(( (users >= 500 ? 120 : 60) + 120 ))"
+  echo "setupData=tokenArray fixtureData=sharedArray launchDiagnostics=enabled requestTargetOffsetMs=$(( users >= 2000 ? 5000 : 1500 ))"
+  echo "setupTimeoutSeconds=$(( users >= 2000 ? 240 : users >= 500 ? 120 : 60 )) minimumTokenValiditySeconds=$(( (users >= 2000 ? 240 : users >= 500 ? 120 : 60) + 120 ))"
   (cd -- "$project_dir" && git rev-parse HEAD && git status --short)
   sha256sum "$jar" "$script_dir/compose.yaml" "$script_dir/reservation-create.js" \
     "$script_dir/prepare.sql" "$script_dir/verify.sql" "$script_dir/run.sh" \

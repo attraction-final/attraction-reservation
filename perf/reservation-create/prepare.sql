@@ -4,7 +4,7 @@ INSERT INTO guard SELECT IF(DATABASE() = 'reservation_create_perf',1,0);
 SET @kst = UTC_TIMESTAMP() + INTERVAL 9 HOUR;
 SET @today = DATE(@kst);
 INSERT INTO guard SELECT IF(@scenario IN ('sold-out','single','spread'),1,0);
-INSERT INTO guard SELECT IF(@users IN (50,100,200,500,1000),1,0);
+INSERT INTO guard SELECT IF(@users IN (50,100,200,500,1000,2000),1,0);
 SET @groups=IF(@scenario='spread',5,1);
 SET @capacity=IF(@scenario='sold-out',20,@users DIV @groups);
 -- 오늘 21:50~22:00 슬롯. 마감 21:20보다 최소 10분 앞서 준비를 마쳐야 한다.

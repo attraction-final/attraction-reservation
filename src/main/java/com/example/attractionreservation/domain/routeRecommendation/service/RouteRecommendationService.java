@@ -65,7 +65,7 @@ public class RouteRecommendationService {
     private final RouteRecommendationProperties properties;
     private final Clock clock;
 
-    // 추천에 고를 수 있는 어트랙션 (삭제되지 않았고 좌표가 있는 어트랙션). 화면이 선택지를 만들 때 쓴다.
+    // 추천에 고를 수 있는 어트랙션 (운영 중이고 좌표가 있는 어트랙션). 화면이 선택지를 만들 때 쓴다.
     @Transactional(readOnly = true)
     public List<RecommendableAttractionResponse> findRecommendableAttractions() {
         return attractionLocationRepository.findRecommendableAttractions();
@@ -160,6 +160,15 @@ public class RouteRecommendationService {
         if (!missingIds.isEmpty()) {
             throw new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND,
                     "어트랙션을 찾을 수 없습니다. attractionIds=" + missingIds);
+        }
+
+        // 점검·운휴 중인 어트랙션은 방문할 수 없으므로 추천하지 않는다. (화면에서도 막지만 서버에서 한 번 더 막는다)
+        List<Long> notOperatingIds = attractionIds.stream()
+                .filter(id -> !byId.get(id).isOperating())
+                .toList();
+        if (!notOperatingIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.ROUTE_ATTRACTION_NOT_OPERATING,
+                    "운영하지 않는 어트랙션이 있어 경로를 추천할 수 없습니다. attractionIds=" + notOperatingIds);
         }
         return byId;
     }

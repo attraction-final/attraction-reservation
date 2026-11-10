@@ -200,10 +200,8 @@ groups:
               conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
 
       # 로깅 규칙 5장: ERROR 로그는 알림 대상이다. 기동 중 ERROR도 잡도록 메트릭이 아니라 로그 줄을 센다.
-      # KAN-135(슬롯 자동 생성 실패) 반영 전에는 매일 00:05에 울리므로 일시정지해 둔다. 반영 뒤 false로 바꾼다.
       - uid: error-logs
         title: ERROR 로그
-        isPaused: true
         condition: C
         for: 0s
         noDataState: OK

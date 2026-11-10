@@ -4,7 +4,7 @@
 EC2(ASG)에서 ECS Fargate로 옮긴 과정과 이유는 [ecs-migration-plan.md](ecs-migration-plan.md), [ecs-migration-rationale.md](ecs-migration-rationale.md)를 참고한다.
 
 - 기준: 2026-11-10 AWS·GitHub 조회 결과 (계정 `793168138824`, 리전 `ap-northeast-2`)
-- 현재 단계: ECS 전환 5단계(트래픽 전환)까지 끝났다. 사용자 트래픽과 스케줄러는 모두 ECS에서 처리하고, EC2 앱 인스턴스는 0대다. 남은 작업은 [8장](#8-남은-작업)에 정리했다.
+- 현재 단계: ECS 전환 5단계(트래픽 전환)와 6단계(알림)를 확인했다. 사용자 트래픽과 스케줄러는 모두 ECS에서 처리하고, EC2 앱 인스턴스는 0대다. 새 CD의 첫 main 실행(4단계)과 정리(7단계)가 남았다. 남은 작업은 [8장](#8-남은-작업)에 정리했다.
 
 ## 1. 전체 구성
 
@@ -104,7 +104,7 @@ EC2(ASG)에서 ECS Fargate로 옮긴 과정과 이유는 [ecs-migration-plan.md]
 
 - 앱 환경변수를 추가하면 SSM `env/`에 파라미터를 만들고, **두 task definition 파일의 `secrets`에도 추가**해야 한다. EC2 때처럼 `env/` 아래를 전부 읽지 않는다.
 - 비밀값은 이미지, 저장소, GitHub에 두지 않는다.
-- 2026-11-10 현재 `APP_VERSION`은 `a262e16`(마지막 EC2 배포)이고, ECS에서는 PR 브랜치 이미지 `b9682e47`이 돈다. ECS로 바뀐 CD의 첫 main 배포가 둘을 main SHA로 맞춘다.
+- 2026-11-10 현재 `APP_VERSION`·`MONITORING_VERSION`은 `cd` 브랜치 시험 배포 커밋 `e401f4f8`이다(main에 없음). ECS로 바뀐 CD의 첫 main 배포가 기준 버전이 main의 조상이 아니라고 보고 앱·모니터링을 모두 다시 배포해 main SHA로 맞춘다.
 
 ### IAM 역할
 
@@ -220,9 +220,10 @@ dev ──릴리스 PR──▶ main push ──▶ CI 성공 ──workflow_run
 
 - 데이터소스: Prometheus, Loki, CloudWatch(RDS·ElastiCache·ALB)
 - 대시보드: `deploy/monitoring/grafana/dashboards/`의 파일로 프로비저닝한다. Grafana 화면에서 고친 내용은 파일로 옮겨야 남는다.
-- 알림: `deploy/monitoring/grafana/provisioning/alerting/alerts.yml`. 규칙은 6개다(api 정상 대상 0, api 메트릭 끊김, worker 스케줄러 멈춤, api 5xx, 결제·환불 최종 실패, ERROR 로그). 알림은 Slack으로 보낸다. ERROR 로그 규칙은 KAN-135 반영 전까지 일시정지 상태다. 자세한 기준은 [ecs-migration-plan.md 6단계](ecs-migration-plan.md#6단계-알림-grafana-alerting)를 참고한다.
+- 알림: `deploy/monitoring/grafana/provisioning/alerting/alerts.yml`. 규칙은 6개다(api 정상 대상 0, api 메트릭 끊김, worker 스케줄러 멈춤, api 5xx, 결제·환불 최종 실패, ERROR 로그). 알림은 Slack으로 보낸다. ERROR 로그 규칙은 운영에서 아직 일시정지 상태이고, 일시정지를 푼 파일이 다음 모니터링 배포 때 반영된다. 자세한 기준은 [ecs-migration-plan.md 6단계](ecs-migration-plan.md#6단계-알림-grafana-alerting)를 참고한다.
 - 로그 형식과 조회 방법은 [logging.md](../logging/logging.md)를 따른다.
-- Cognito나 ALB에 문제가 있으면 SSM 포트 포워딩으로 접속한다. Grafana는 인스턴스 안에서 `127.0.0.1:3000`에만 열려 있다.
+- Grafana는 인스턴스에서 3000 포트로 열려 있고, 보안 그룹이 ALB에서 오는 요청만 받는다. 저장소의 `compose.yml`에는 KAN-154(PR #273)로 반영된다.
+- Cognito나 ALB에 문제가 있으면 SSM 포트 포워딩으로 접속한다. 세션은 20분 동안 쓰지 않으면 끊긴다(Session Manager 기본값).
 
 ```bash
 aws ssm start-session --target i-0b91df092531d5b72 \
@@ -251,7 +252,8 @@ aws ssm start-session --target i-0b91df092531d5b72 \
 
 ECS 전환 (자세한 내용은 [ecs-migration-plan.md](ecs-migration-plan.md))
 - [ ] 4단계: ECS로 바뀐 CD를 첫 main 릴리스로 실행해 api → worker 배포를 확인하고 배포 시간을 잰다. 같은 SHA로 `workflow_dispatch` 재배포도 확인한다. **이 PR이 dev에 머지되기 전에는 main에 push하지 않는다.** 이전 CD가 인스턴스 0대인 ASG에 Instance Refresh를 시도하기 때문이다.
-- [ ] 6단계: 배포 후 Slack 테스트 알림, worker 멈춤·해제 알림 확인. KAN-135 반영 뒤 ERROR 로그 알림 일시정지 해제
+- [x] 6단계: Slack 테스트 알림, worker 멈춤·해제 알림 확인 (2026-11-10 `cd` 시험 배포). ERROR 로그 알림 일시정지 해제는 다음 모니터링 배포 때 운영에 반영된다
+- [ ] KAN-154(PR #273)를 먼저 dev에 머지하고, 이 브랜치에 dev를 합친다. `deploy/monitoring/compose.yml`이 충돌하므로 양쪽을 합친다(`ALERT_WEBHOOK_URL` + 포트 `3000:3000`). 이 순서를 지키지 않으면 main 배포 때 Grafana가 `127.0.0.1:3000`으로 돌아가 ALB 접속이 끊긴다
 - [ ] 7단계: EC2 롤백 경로 정리
   - 삭제할 AWS 리소스: ASG `attraction-reservation-app`(desired 0), Launch Template `lt-068d563012732fb65`, TG `attraction-final`, `ec2-role`, 인라인 정책 `cd-deploy-asg`, S3 앱 실행 구성, SSM `LOKI_URL`, Actions 변수 `ASG_NAME`
   - ECR lifecycle 정책 추가: 3개 저장소 모두 아직 정책이 없다. 앱 이미지 16개가 쌓여 있다
@@ -259,7 +261,7 @@ ECS 전환 (자세한 내용은 [ecs-migration-plan.md](ecs-migration-plan.md))
   - 이 문서와 로깅 규칙 10장을 ECS 기준으로 고친다
 
 조회하다 발견한 것
-- [ ] Environment `production`의 배포 브랜치에서 `cd`를 지운다 (CD를 만들 때 쓰던 임시 브랜치)
+- [ ] 첫 main 배포 뒤 `cd` 브랜치를 지우고, Environment `production`의 배포 브랜치에서도 `cd`를 뺀다 (CD를 만들 때 쓰던 임시 브랜치. 2026-11-10 시험 배포에 다시 썼다)
 - [ ] ECR 저장소 `alloy`의 출처를 확인한다. 저장소 이름 규칙(`attraction-reservation-alloy`)과 맞지 않고 CD가 쓰지 않는다. 쓰지 않으면 지운다
 
 전환과 별개 (범위 밖으로 둔 것)

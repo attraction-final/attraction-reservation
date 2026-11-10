@@ -436,11 +436,41 @@ PERF_FIXED_TIME을 명시한 경우에만 compose.fixed-time.yaml을 추가해 r
 PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 TEST_VUS=50 bash perf/reservation-create/run.sh fixed155-01 single
 ```
 
-이 실행을 확인한 다음 고정 모드의 최적화 전 2,000명 기준값을 별도로 확보한다. 아래 실행은 아직 수행하지 않았다.
+50명 실행에서 성공 50·예상 외 0·DB 정합성과 세 구간 지표 각각 50회 기록을 확인했다.
+이후 아래 실행으로 고정 모드의 최적화 전 2,000명 첫 기준값을 확보했다.
 
 ```bash
 PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh fixed155-02 single
 ```
+
+| fixed155-02 첫 기준값 | 관측 결과 |
+| --- | --- |
+| 요청 / 성공 / 예상 외 | 2,000 / 2,000 / 0 |
+| DB 예약·예약 회원·예약 인원·정원 | 모두 2,000 |
+| API 평균 / p95 / p99 | 12.78 / 21.25 / 21.96초 |
+| 슬롯 조회 success count / 평균 | 2,000 / 90.38ms |
+| 어트랙션 조회 success count / 평균 | 2,000 / 1.03ms |
+| 조회 후 완료 committed count / 평균 | 2,000 / 10.61ms |
+| 발송 범위 / 늦은 VU | 334ms / 0명 |
+| pool pending 최대 / timeout | 190 / 0 |
+
+시작 전 구간 지표는 없었고 종료 후 count/sum에서 평균을 계산했다. 어트랙션 조회는 조회 후 완료 구간에 포함되므로 합산하지 않는다.
+잠금 표본 49개 중 6개에서 슬롯 대기 트랜잭션 9개가 관측됐다. 준비·HTTP·DB·수집·정리 종료 코드는 모두 0, 오류 파일은 비어 있었고 k6 OOM은 없었다.
+JAR SHA-256은 eb5fda0f3e91ae150f8d66a00d2d076710f12a4661b88391fbcb55a5ce7ae85c다. 업무 시각은 2026-11-10T14:00:00+09:00으로 고정했다.
+API 전체 지연과 서비스 내부 구간의 차이에는 측정되지 않은 처리·대기가 포함된다. 이를 특정 원인에 전부 귀속하지 않는다.
+
+같은 고정 시각·자원·JAR로 fixed155-03 반복도 완료했다. 성공 2,000·거절/예상 외 0, DB 예약·회원·인원·정원 모두 2,000이고 세 구간 지표도 각각 2,000회 기록됐다.
+
+| 개선 전 기준값 비교 | fixed155-02 | fixed155-03 |
+| --- | --- | --- |
+| API 평균 / p95 / p99 | 12.78 / 21.25 / 21.96초 | 13.85 / 22.37 / 23.06초 |
+| 슬롯 조회 success 평균 | 90.38ms | 92.37ms |
+| 어트랙션 조회 success 평균 | 1.03ms | 1.00ms |
+| 조회 후 완료 committed 평균 | 10.61ms | 10.75ms |
+| 호출 시작 범위 / 늦은 VU | 334ms / 0명 | 320ms / 0명 |
+
+fixed155-03도 준비·HTTP·DB·수집·정리 종료 코드 모두 0, 오류 파일은 비어 있었고 k6 OOM은 없었다.
+최적화 전 두 기준값을 확보했으며, 실제 DB 잠금 보유 시간이나 세부 정원 확보 작업의 비용을 분리 측정한 결과는 아니다.
 
 - 일반 설정의 ClockConfig는 실제 KST를 제공한다. 전용 profile에서는 @Primary 고정 Clock이 Clock 주입을 받는 구성요소에 우선 적용된다. 예약 생성 외의 Clock 소비자도 영향을 받으므로 이 profile은 전용 부하 환경에만 사용한다.
 - 부하 환경의 기존 스케줄러 비활성화를 유지한다. 다른 팀원의 도구와 공통 application-perf.yaml은 수정하지 않는다.
@@ -448,7 +478,7 @@ PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 P
 - KstTime.now()를 직접 사용하는 취소 등 다른 경로의 시각은 고정되지 않는다. 이번 모드는 예약 생성 부하용이며 전체 API의 시간 제어가 아니다.
 - 고정 시각은 흐르지 않는다. 마감 경과·자정 경계·시간 흐름 정책 검증은 실제 모드 또는 Clock을 이동시키는 별도 통합 테스트로 수행한다.
 - metadata.txt의 businessTimeMode/fixedBusinessTime과 JAR·도구 해시를 함께 확인한다. 실제 모드의 KAN-150 결과와 동일 조건이라고 간주하지 않는다.
-- profile 격리·정상 설정·누락·잘못된 시각은 ReservationPerfClockConfigTest로 검증한다. 아직 이 변경의 테스트나 고정 모드 부하는 실행하지 않았다.
+- profile 격리·정상 설정·누락·잘못된 시각은 ReservationPerfClockConfigTest로 검증한다. 사용자가 설정 테스트 통과를 보고했으며 고정 모드 50명·2,000명 부하 결과도 확인했다.
 
 ## 마무리 및 후속 작업
 

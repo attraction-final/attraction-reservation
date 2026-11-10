@@ -10,7 +10,7 @@ if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘�
 const scenario = __ENV.SCENARIO || 'sold-out';
 if (!['sold-out','single','spread'].includes(scenario)) throw new Error('잘못된 SCENARIO');
 const users = Number(__ENV.TEST_VUS || 50);
-if (![50,100].includes(users)) throw new Error('TEST_VUS는 50 또는 100이어야 합니다.');
+if (![50,100,200].includes(users)) throw new Error('TEST_VUS는 50, 100, 200이어야 합니다.');
 const expectedSuccess = scenario === 'sold-out' ? 20 : users;
 const expectedRejection = users - expectedSuccess;
 const expectedSlots = scenario === 'spread' ? 5 : 1;

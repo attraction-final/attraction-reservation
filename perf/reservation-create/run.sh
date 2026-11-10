@@ -14,8 +14,8 @@ if [[ "$scenario" != sold-out && "$scenario" != single && "$scenario" != spread 
   echo '시나리오는 sold-out, single, spread만 허용합니다.' >&2
   exit 1
 fi
-if [[ "$users" != 50 && "$users" != 100 ]]; then
-  echo 'TEST_VUS는 현재 단계에서 50 또는 100만 지원합니다.' >&2
+if [[ "$users" != 50 && "$users" != 100 && "$users" != 200 ]]; then
+  echo 'TEST_VUS는 현재 단계에서 50, 100, 200만 지원합니다.' >&2
   exit 1
 fi
 groups=1

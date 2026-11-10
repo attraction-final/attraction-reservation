@@ -6,7 +6,7 @@ import { BASE, csrfHeaders, login } from '/shared/auth.js';
 const runId = __ENV.RUN_ID;
 if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/.test(runId || '')) throw new Error('잘못된 RUN_ID');
 const users = Number(__ENV.TEST_VUS || 50);
-if (![50,100].includes(users)) throw new Error('TEST_VUS는 50 또는 100이어야 합니다.');
+if (![50,100,200].includes(users)) throw new Error('TEST_VUS는 50, 100, 200이어야 합니다.');
 const prepared = new Counter('accounts_prepared');
 export const options = {
   scenarios: { prepare: { executor: 'shared-iterations', vus: 1, iterations: 1, maxDuration: '10m' } },

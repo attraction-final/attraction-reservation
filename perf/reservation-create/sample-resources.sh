@@ -8,12 +8,25 @@ fi
 target="$1"
 compose_file="$2"
 k6_name="$3"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+db_locks="${PERF_DB_LOCKS:-0}"
 docker_cmd() { MSYS_NO_PATHCONV=1 docker "$@"; }
 errors="$target/sampling-errors.txt"
 : > "$errors"
 : > "$target/resource-samples.jsonl"
 : > "$target/metrics-samples.txt"
 : > "$target/sampling-boundary-events.txt"
+if [[ "$db_locks" == 1 ]]; then
+  : > "$target/db-lock-samples.jsonl"
+  : > "$target/db-lock-sampling-errors.txt"
+  # 전용 로컬 MySQL의 관측용 연결이다. 앱 계정의 권한은 변경하지 않는다.
+  if ! enabled="$(docker_cmd compose -f "$compose_file" exec -T -e MYSQL_PWD=perf-local-only mysql \
+    mysql -uroot --connect-timeout=3 --batch --raw --skip-column-names \
+    -e 'SELECT @@performance_schema;' 2>> "$target/db-lock-sampling-errors.txt")" || [[ "${enabled//$'\r'/}" != 1 ]]; then
+    echo 'Performance Schema 확인 실패. 잠금 대기 0으로 해석하지 마세요.' >> "$errors"
+    exit 1
+  fi
+fi
 stats_stderr="$target/docker-stats-last-stderr.txt"
 
 base_ids=()
@@ -52,6 +65,16 @@ while [[ ! -e "$target/sampling-stop" ]]; do
     } >> "$target/metrics-samples.txt"
   else
     echo "sample=$sample at=$started_at source=prometheus result=failed" >> "$errors"
+  fi
+
+  if [[ "$db_locks" == 1 ]]; then
+    if lock_sample="$(docker_cmd compose -f "$compose_file" exec -T -e MYSQL_PWD=perf-local-only mysql \
+      mysql -uroot --connect-timeout=3 --default-character-set=utf8mb4 --batch --raw --skip-column-names \
+      < "$script_dir/lock-waits.sql" 2>> "$target/db-lock-sampling-errors.txt")" && [[ -n "$lock_sample" ]]; then
+      printf '%s\n' "$lock_sample" >> "$target/db-lock-samples.jsonl"
+    else
+      echo "sample=$sample at=$started_at source=dbLockSampling result=failed" >> "$errors"
+    fi
   fi
 
   format='{"kind":"dockerStats","sample":'"$sample"',"sampleStartedAt":"'"$started_at"'","stats":{{json .}}}'

@@ -7,6 +7,11 @@ run_id="${1:-}"
 scenario="${2:-sold-out}"
 users="${TEST_VUS:-50}"
 k6_cpus="${PERF_K6_CPUS:-1}"
+db_locks="${PERF_DB_LOCKS:-0}"
+if [[ "$db_locks" != 0 && "$db_locks" != 1 ]]; then
+  echo 'PERF_DB_LOCKS는 0 또는 1만 지원합니다.' >&2
+  exit 1
+fi
 if [[ "$k6_cpus" != 1 && "$k6_cpus" != 2 ]]; then
   echo 'PERF_K6_CPUS는 1 또는 2만 지원합니다.' >&2
   exit 1
@@ -35,6 +40,7 @@ jar="$project_dir/build/libs/attraction-reservation-0.0.1-SNAPSHOT.jar"
 if [[ ! -f "$jar" ]]; then echo '먼저 현재 코드로 ./gradlew bootJar를 실행하세요.' >&2; exit 1; fi
 export RUN_ID="$run_id" SCENARIO="$scenario" TEST_VUS="$users" PERF_UID="$(id -u)" PERF_GID="$(id -g)"
 export PERF_K6_CPUS="$k6_cpus"
+export PERF_DB_LOCKS="$db_locks"
 compose_file="$script_dir/compose.yaml"
 case "$(uname -s)" in MINGW*|MSYS*) compose_file="$(cygpath -w "$compose_file")" ;; esac
 docker_cmd() { MSYS_NO_PATHCONV=1 docker "$@"; }
@@ -71,12 +77,13 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
   echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
   echo "appCpus=2 appMemory=1GiB poolMax=10 poolMin=10 generatorCpus=$k6_cpus generatorMemory=2GiB"
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
+  echo "dbLockSampling=$db_locks dbLockSamplingMode=currentWaitEdges"
   echo "setupData=tokenArray fixtureData=sharedArray launchDiagnostics=enabled requestTargetOffsetMs=$(( users >= 2000 ? 5000 : 1500 ))"
   echo "setupTimeoutSeconds=$(( users >= 2000 ? 240 : users >= 500 ? 120 : 60 )) minimumTokenValiditySeconds=$(( (users >= 2000 ? 240 : users >= 500 ? 120 : 60) + 120 ))"
   (cd -- "$project_dir" && git rev-parse HEAD && git status --short)
   sha256sum "$jar" "$script_dir/compose.yaml" "$script_dir/reservation-create.js" \
     "$script_dir/prepare.sql" "$script_dir/verify.sql" "$script_dir/run.sh" \
-    "$script_dir/prepare-accounts.js" "$script_dir/sample-resources.sh" \
+    "$script_dir/prepare-accounts.js" "$script_dir/sample-resources.sh" "$script_dir/lock-waits.sql" \
     "$script_dir/../reservation-list/auth.js" "$script_dir/../reservation-list/application-perf.yaml"
   mysql -e "SELECT VERSION(),UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 9 HOUR;"
   for service in app mysql redis; do

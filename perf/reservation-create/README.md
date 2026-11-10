@@ -322,6 +322,50 @@ spread2k-02도 성공 2,000·거절/예상 외 0, 슬롯 5개 각각 예약·정
 single2k-04·full2k-02·spread2k-02의 종료 후 pool 스냅샷은 모두 active 0·pending 0·idle 10, timeout 누적 0이었다.
 회복 시간·지속 여부·후속 예약 API 응답은 검증하지 않았으며 장시간 지속 부하도 별도 과제다. 단계별 핵심 결과와 한계는 측정 기록을 따른다.
 
+## 잠금 대기 진단 실행
+
+기존 자원을 유지하고 관측만 추가한다. 기본 PERF_DB_LOCKS=0이며, 1이면 Performance Schema의 현재 잠금 대기 관계를 수집한다.
+
+```bash
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-01 single
+```
+
+- `db-lock-samples.jsonl`: UTC 표본 시각, 대기 관계 수, 대기 트랜잭션 수, 슬롯·어트랙션·회원·기타 테이블별 대기 관계 수
+- `db-lock-sampling-errors.txt`와 `sampling-errors.txt`: 조회 오류. 오류나 표본 누락을 대기 0으로 해석하지 않는다.
+- `sampling-exit-code.txt`: 수집 프로세스 종료 상태. HTTP·DB 통과와 별도로 확인한다.
+
+전용 로컬 MySQL의 기존 root 계정으로 SELECT만 실행한다. 앱 계정 권한이나 DB 설정은 변경하지 않는다.
+한 대기 요청이 여러 잠금에 막히면 관계 수가 여러 개일 수 있다. 관계 수는 요청 수·누적 대기 횟수·대기 시간이 아니다.
+로그인 setup도 수집하므로 summary의 실제 예약 호출 시작 범위와 UTC 표본 시각을 맞춰 해석한다. Prometheus와 DB 조회는 같은 순간이 아니다.
+기존 수집 주기(목표 2초)에 조회를 추가하므로 실제 간격과 관측 오버헤드가 늘 수 있다. 표본 0만으로 잠금 대기 부재를 보장하지 않는다.
+SQL 원문·LOCK_DATA·토큰은 저장하지 않는다.
+
+lock2k-01은 2,000건 성공·DB 정합성과 정상 수집을 확인했다. 잠금 표본 50개 중 6개에서 슬롯 테이블 대기가 관측됐다.
+양수 표본의 대기 트랜잭션은 7~9개, 대기 관계는 28~45개였다. 호출 시작 범위 332ms·늦은 VU 0명, 성공 p95는 약 22.72초였다.
+슬롯 경합은 확인했지만 전체 지연의 유일한 원인으로 단정하지 않는다. 아래 같은 관측을 켠 분산 실행도 완료했다.
+
+```bash
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-02 spread
+```
+
+lock2k-02도 2,000건 성공·슬롯 5개 각각 400건·DB 정합성을 통과했다. 호출 시작 범위 280ms·늦은 VU 0명, p95 약 18.87초였다.
+49개 잠금 표본 중 5개에서 슬롯 대기가 관측됐고 양수 표본의 대기 트랜잭션은 1~4개, 대기 관계는 1~7개였다. pool pending 최대는 집중과 같이 190이었다.
+수집 오류·커넥션 timeout·k6 OOM은 없었다. 아래 분산 → 집중의 역순 반복 중 lock2k-03 분산을 완료했다.
+
+```bash
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-03 spread
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-04 single
+```
+
+lock2k-03도 2,000건 성공·DB 정합성을 통과했다. 호출 시작 범위 314ms·늦은 VU 0명, 성공 p95 약 16.99초였다.
+잠금 표본 48개 중 4개에서 슬롯 대기를 관측했고 양수 표본의 대기 트랜잭션은 1~5개, 대기 관계는 1~11개였다.
+pool pending 최대 190, 커넥션 timeout·수집 오류·k6 OOM은 없었다.
+
+lock2k-04 집중 반복도 2,000건 성공·DB 정합성을 통과했다. p95 약 22.47초·발송 범위 246ms·늦은 VU 0명이었다.
+잠금 표본 50개 중 6개에서 슬롯 대기가 관측됐고 대기 트랜잭션은 8~9개, 관계 수는 36~45개였다. pool pending 최대 190, 커넥션 timeout·수집 오류·k6 OOM은 없었다.
+집중 → 분산 → 분산 → 집중 순서에서 슬롯 경합이 반복 관측됐다. 잠금은 유지하며 비용 검토와 원인별 기여 시간 분리는 후속 과제다.
+현재 fixture는 새 회원이므로 예약 이력이 많은 회원의 검사 쿼리 성능까지 검증한 것은 아니다.
+
 ## 검증 현황
 
 focus-02·03·04에서 SQL 준비, 실제 HTTP 요청 50회(성공 20/예상 거절 30), DB 정합성과 정상 수집·정리를 확인했다.

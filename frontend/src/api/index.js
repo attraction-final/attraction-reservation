@@ -483,6 +483,8 @@ function toRouteResult(res, byId) {
     recommendationId: res.recommendationId,    // 추천 없음(NONE)이면 저장되지 않아서 null
     resultType: res.resultType,                // FULL(전부) | PARTIAL(일부) | NONE(없음)
     ticketId: res.ticketId,
+    startLocation: res.startLocation,          // ENTRANCE(정문 출발) | CURRENT_LOCATION(현재 위치 출발)
+    firstMoveMinutes: stops[0]?.moveMinutes ?? null, // 출발 위치 → 첫 방문지 이동 시간 (방문지가 없으면 null)
     stops,
     totalRideMinutes: res.totalRideMinutes,
     totalWalkMinutes: res.totalMoveMinutes,
@@ -494,10 +496,12 @@ function toRouteResult(res, byId) {
 }
 
 export const routeApi = {
-  // [POST /api/route-recommendations] { ticketId, startAt, endAt, attractionIds }
+  // [POST /api/route-recommendations] { ticketId, startAt, endAt, attractionIds, latitude?, longitude? }
   // 화면은 "14:00" 같은 시간만 주니까, 입장권 날짜를 붙여 "2026-11-02T14:00:00" 으로 만들어요.
   // (백엔드는 입장권 날짜 기준으로 시간을 검사해요)
-  recommend: async ({ ticketId, date, startTime, endTime, attractionIds }) => {
+  // location({ latitude, longitude })을 주면 현재 위치에서 출발하는 루트를 받아요.
+  // 없으면 두 값을 아예 보내지 않아서 기존처럼 정문 출발이에요. (서버는 둘 중 하나만 오면 400)
+  recommend: async ({ ticketId, date, startTime, endTime, attractionIds, location }) => {
     if (!ticketId) throw new Error('입장 완료된 오늘 입장권이 있어야 루트를 추천받을 수 있어요.');
     if (attractionIds.length > 5) throw new Error('어트랙션은 최대 5개까지 고를 수 있어요.');
     const day = date || todayString();
@@ -507,6 +511,7 @@ export const routeApi = {
         startAt: `${day}T${startTime}:00`,
         endAt: `${day}T${endTime}:00`,
         attractionIds: attractionIds.map(Number),
+        ...(location && { latitude: location.latitude, longitude: location.longitude }),
       }),
       attractionApi.list('ALL'),
     ]);

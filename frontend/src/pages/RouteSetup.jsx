@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import { BackHeader, Empty, Loading } from '../components/ui.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { attractionApi, parkApi, routeApi, ticketApi } from '../api/index.js';
+import { getCurrentLocation } from '../api/geolocation.js';
 import { TICKET_TYPE, shortDate } from '../api/labels.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -24,8 +25,16 @@ export default function RouteSetup() {
   const [start, setStart] = useState('14:00');
   const [end, setEnd] = useState('18:00');
   const [picked, setPicked] = useState([]); // 고른 어트랙션 id 목록
+  const [origin, setOrigin] = useState('ENTRANCE'); // 출발 위치: ENTRANCE(정문) | CURRENT_LOCATION(현재 위치)
   const [error, setError] = useState('');
+  const [canUseEntrance, setCanUseEntrance] = useState(false); // 현재 위치로 실패했을 때 "정문 기준으로 추천받기" 버튼을 보일지
   const [submitting, setSubmitting] = useState(false);
+  const [locating, setLocating] = useState(false); // 현재 위치를 받는 중
+  const errorRef = useRef(null);
+
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [error]);
 
   if (!user) {
     return (
@@ -47,17 +56,40 @@ export default function RouteSetup() {
     setPicked([...picked, id]);
   };
 
-  async function submit() {
+  // fromEntrance: "정문 기준으로 추천받기" 버튼으로 다시 요청할 때 true (선택한 출발 위치와 상관없이 정문 출발)
+  async function submit({ fromEntrance = false } = {}) {
     setError('');
+    setCanUseEntrance(false);
     if (start >= end) return setError('종료 시간은 시작 시간보다 늦어야 해요.');
     if (picked.length === 0) return setError('어트랙션을 1개 이상 골라 주세요.');
     setSubmitting(true);
+
+    // 현재 위치를 고르면 버튼을 누른 이때 위치를 받아요. (화면에 들어오자마자 권한 팝업이 뜨지 않게)
+    // 위치를 못 받으면 요청을 보내지 않아요.
+    let location = null;
+    if (origin === 'CURRENT_LOCATION' && !fromEntrance) {
+      setLocating(true);
+      try {
+        location = await getCurrentLocation();
+      } catch (e) {
+        setError(e.message);
+        setCanUseEntrance(true);
+        setSubmitting(false);
+        return;
+      } finally {
+        setLocating(false);
+      }
+    }
+
     try {
-      const result = await routeApi.recommend({ ticketId: ticket?.id, date: ticket?.date, startTime: start, endTime: end, attractionIds: picked });
+      const result = await routeApi.recommend({ ticketId: ticket?.id, date: ticket?.date, startTime: start, endTime: end, attractionIds: picked, location });
       // 결과 화면으로 이동하면서 추천 결과를 같이 넘겨요.
       navigate('/route/result', { state: { result } });
     } catch (e) {
       setError(e.message);
+      // 서버 에러에는 코드가 없고 메시지만 있어요. 그래서 "위치를 보낸 요청이 400"이면
+      // 위치 문제(공원 범위 밖)일 가능성이 높다고 보고 정문 기준으로 다시 받을 수 있게 해요.
+      if (location && e.status === 400) setCanUseEntrance(true);
     } finally {
       setSubmitting(false);
     }
@@ -86,6 +118,19 @@ export default function RouteSetup() {
           <span className="small muted">오후권은 15:00 이후만 선택할 수 있어요. 이미 지난 시작 시간은 지금 시각부터 계산돼요.</span>
         </div>
 
+        <div className="card stack gap-10" style={{ borderRadius: 22, padding: 16, flexShrink: 0 }}>
+          <h2 className="display" style={{ fontSize: 18 }} id="origin-label">출발 위치</h2>
+          <div className="row gap-8" role="radiogroup" aria-labelledby="origin-label">
+            <OriginOption label="정문" value="ENTRANCE" selected={origin} onSelect={setOrigin} />
+            <OriginOption label="현재 위치" value="CURRENT_LOCATION" selected={origin} onSelect={setOrigin} />
+          </div>
+          <span className="small muted">
+            {origin === 'CURRENT_LOCATION'
+              ? '추천받기를 누르면 위치 권한을 물어봐요. 위치는 이번 추천에만 쓰고 저장하지 않아요.'
+              : '정문에서 출발한다고 보고 첫 이동 시간을 계산해요.'}
+          </span>
+        </div>
+
         <div className="stack gap-8">
           <div className="row between" style={{ alignItems: 'baseline' }}>
             <h2 className="display" style={{ fontSize: 18 }}>선호 어트랙션</h2>
@@ -112,16 +157,40 @@ export default function RouteSetup() {
             );
           })}
         </div>
-        {error && <span className="error-text" role="alert">{error}</span>}
+        {(error || canUseEntrance) && (
+          // 목록 아래에 있어서 실패하면 이 영역이 보이도록 스크롤해요.
+          <div ref={errorRef} className="stack gap-8" style={{ flexShrink: 0 }}>
+            {error && <span className="error-text" role="alert">{error}</span>}
+            {canUseEntrance && (
+              <button type="button" className="btn btn-outline" onClick={() => submit({ fromEntrance: true })} disabled={submitting}>
+                정문 기준으로 추천받기
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="bottom-bar">
-        <button type="button" className="btn btn-pink" onClick={submit} disabled={submitting}>
+        <button type="button" className="btn btn-pink" onClick={() => submit()} disabled={submitting}>
           <Icon name="map" size={20} strokeWidth={2} />
-          {submitting ? '추천 중…' : '루트 추천받기'}
+          {locating ? '현재 위치 확인 중…' : submitting ? '추천 중…' : '루트 추천받기'}
         </button>
       </div>
     </div>
+  );
+}
+
+function OriginOption({ label, value, selected, onSelect }) {
+  const on = selected === value;
+  return (
+    <button type="button" role="radio" aria-checked={on} onClick={() => onSelect(value)} className="grow bold"
+      style={{
+        height: 48, borderRadius: 14, fontSize: 15,
+        ...(on ? { background: '#F2F7FF', border: '2px solid var(--blue)', color: 'var(--blue-ink)' }
+          : { background: '#fff', border: '2px solid #E3E8F0' }),
+      }}>
+      {label}
+    </button>
   );
 }
 

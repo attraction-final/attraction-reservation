@@ -12,7 +12,8 @@ export default function RouteResult() {
 
   // 주소로 바로 들어와서 결과가 없으면 조건 화면으로 돌려보내요.
   if (!state?.result) return <Navigate to="/route" replace />;
-  const { stops, totalRideMinutes, totalWalkMinutes, totalWaitMinutes, estimatedEndTime, excluded = [], ticketId } = state.result;
+  const { stops, totalRideMinutes, totalWalkMinutes, totalWaitMinutes, estimatedEndTime, excluded = [], ticketId, startLocation, firstMoveMinutes } = state.result;
+  const originName = startLocation === 'CURRENT_LOCATION' ? '현재 위치' : '정문';
 
   // 추천된 곳을 차례대로 모두 예약 (서버가 잔여석·마감 여부를 다시 확인해요)
   async function reserveAll() {
@@ -42,6 +43,10 @@ export default function RouteResult() {
           <Summary label="총 탑승" value={`${totalRideMinutes}분`} />
           <Summary label="총 이동" value={`${totalWalkMinutes}분`} />
         </div>
+        <span className="row gap-4 small" style={{ color: 'var(--blue-ink)', flexShrink: 0 }}>
+          <Icon name="map" size={14} strokeWidth={2} />
+          <span className="bold">{originName} 출발</span>
+        </span>
 
         {stops.length === 0 ? (
           <div className="stack gap-4" style={{ border: '2px dashed #C9D4E3', borderRadius: 18, padding: '12px 14px', background: 'rgba(255,255,255,0.6)' }}>
@@ -50,6 +55,14 @@ export default function RouteResult() {
           </div>
         ) : (
           <ol style={{ listStyle: 'none', margin: 0, padding: 0 }} className="stack">
+            {/* 출발 위치 → 첫 방문지 이동은 첫 방문 정보에 들어 있어요. */}
+            {firstMoveMinutes != null && (
+              <li className="row gap-4 small muted" style={{ paddingLeft: 44, paddingBottom: 8 }}>
+                <Icon name="walk" size={14} strokeWidth={2} />
+                {originName}에서 도보 약 {firstMoveMinutes}분
+                {stops[0].waitMinutes > 0 && ` · 대기 약 ${stops[0].waitMinutes}분`}
+              </li>
+            )}
             {stops.map((s, i) => {
               const last = i === stops.length - 1;
               return (

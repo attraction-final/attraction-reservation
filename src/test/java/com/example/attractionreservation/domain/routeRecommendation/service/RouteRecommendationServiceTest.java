@@ -97,7 +97,7 @@ class RouteRecommendationServiceTest {
     @Test
     @DisplayName("추천 가능한 어트랙션 목록은 좌표 저장소의 조회 결과를 그대로 돌려준다")
     void findRecommendableAttractions_returnsRepositoryResult() {
-        List<RecommendableAttractionResponse> expected = List.of(new RecommendableAttractionResponse(1L, "범퍼카"));
+        List<RecommendableAttractionResponse> expected = List.of(new RecommendableAttractionResponse(1L, "범퍼카", 37.2923658, 127.1995663));
         when(attractionLocationRepository.findRecommendableAttractions()).thenReturn(expected);
 
         assertThat(service.findRecommendableAttractions()).isEqualTo(expected);

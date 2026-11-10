@@ -8,6 +8,11 @@ scenario="${2:-sold-out}"
 users="${TEST_VUS:-50}"
 k6_cpus="${PERF_K6_CPUS:-1}"
 db_locks="${PERF_DB_LOCKS:-0}"
+pool_size="${PERF_DB_POOL_SIZE:-10}"
+if [[ "$pool_size" != 10 && "$pool_size" != 20 ]]; then
+  echo 'PERF_DB_POOL_SIZE는 10 또는 20만 지원합니다.' >&2
+  exit 1
+fi
 if [[ "$db_locks" != 0 && "$db_locks" != 1 ]]; then
   echo 'PERF_DB_LOCKS는 0 또는 1만 지원합니다.' >&2
   exit 1
@@ -41,6 +46,7 @@ if [[ ! -f "$jar" ]]; then echo '먼저 현재 코드로 ./gradlew bootJar를 �
 export RUN_ID="$run_id" SCENARIO="$scenario" TEST_VUS="$users" PERF_UID="$(id -u)" PERF_GID="$(id -g)"
 export PERF_K6_CPUS="$k6_cpus"
 export PERF_DB_LOCKS="$db_locks"
+export PERF_DB_POOL_SIZE="$pool_size"
 compose_file="$script_dir/compose.yaml"
 case "$(uname -s)" in MINGW*|MSYS*) compose_file="$(cygpath -w "$compose_file")" ;; esac
 docker_cmd() { MSYS_NO_PATHCONV=1 docker "$@"; }
@@ -75,7 +81,7 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
 {
   echo "runId=$run_id startedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "scenario=$scenario vus=$users iterationsPerVu=1 slots=$groups attractions=$groups capacityPerSlot=$capacity expectedSuccess=$expected_success expectedRejection=$expected_rejection"
-  echo "appCpus=2 appMemory=1GiB poolMax=10 poolMin=10 generatorCpus=$k6_cpus generatorMemory=2GiB"
+  echo "appCpus=2 appMemory=1GiB poolMax=$pool_size poolMin=$pool_size generatorCpus=$k6_cpus generatorMemory=2GiB"
   echo 'warmup=none successAndRejectionLatencySeparated=true performanceSlo=unset'
   echo "dbLockSampling=$db_locks dbLockSamplingMode=currentWaitEdges"
   echo "setupData=tokenArray fixtureData=sharedArray launchDiagnostics=enabled requestTargetOffsetMs=$(( users >= 2000 ? 5000 : 1500 ))"
@@ -93,12 +99,12 @@ if [[ "$(wc -l < "$target/fixture.jsonl")" -ne "$users" ]]; then echo "기대 �
 } > "$target/metadata.txt"
 snapshot > "$target/metrics-before.txt"
 awk '/^hikaricp_connections_(max|min)[{]/' "$target/metrics-before.txt" > "$target/pool-config-check.txt"
-if ! awk '
-  /^hikaricp_connections_max[{]/ { maxSeen++; maxOk=($NF+0 == 10) }
-  /^hikaricp_connections_min[{]/ { minSeen++; minOk=($NF+0 == 10) }
+if ! awk -v expected="$pool_size" '
+  /^hikaricp_connections_max[{]/ { maxSeen++; maxOk=($NF+0 == expected) }
+  /^hikaricp_connections_min[{]/ { minSeen++; minOk=($NF+0 == expected) }
   END { exit !(maxSeen == 1 && minSeen == 1 && maxOk && minOk) }
 ' "$target/pool-config-check.txt"; then
-  echo '실제 pool max/min 10/10 검증 실패' >&2
+  echo "실제 pool max/min $pool_size/$pool_size 검증 실패" >&2
   exit 1
 fi
 container_name="reservation-create-$run_id"

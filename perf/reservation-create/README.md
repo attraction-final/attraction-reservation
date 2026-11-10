@@ -366,6 +366,40 @@ lock2k-04 집중 반복도 2,000건 성공·DB 정합성을 통과했다. p95 �
 집중 → 분산 → 분산 → 집중 순서에서 슬롯 경합이 반복 관측됐다. 잠금은 유지하며 비용 검토와 원인별 기여 시간 분리는 후속 과제다.
 현재 fixture는 새 회원이므로 예약 이력이 많은 회원의 검사 쿼리 성능까지 검증한 것은 아니다.
 
+## 중복·시간 충돌 검사 실행계획
+
+`explain-checks.sql`은 lock2k-04의 기존 회원·슬롯을 선택하고 실제 인덱스와 EXPLAIN ANALYZE를 출력한다.
+Querydsl의 중복·시간 충돌 조건을 옮긴 동등 SQL이며 Hibernate가 생성한 SQL 원문을 캡처한 것은 아니다.
+읽기 전용 트랜잭션에서 SELECT만 실행하고 데이터·인덱스·통계는 변경하지 않는다. EXPLAIN ANALYZE는 조회를 실제 실행하므로 부하 실행과 겹치지 않게 수행한다.
+
+```bash
+mkdir perf/reservation-create/results/plans2k-01
+RUN_ID=plans2k-01 MSYS_NO_PATHCONV=1 docker compose -f perf/reservation-create/compose.yaml exec -T -e MYSQL_PWD=perf-local-only mysql mysql -uperf --default-character-set=utf8mb4 --table reservation_create_perf < perf/reservation-create/explain-checks.sql > perf/reservation-create/results/plans2k-01/check-query-plans.txt
+```
+
+새 결과 폴더 이름을 사용한다. mkdir가 실패하면 다음 명령을 실행하지 않는다. SQL 오류가 출력되면 결과를 정상 자료로 취급하지 않는다.
+fixture_found=1인지 먼저 확인하고 index lookup·actual rows·loops·actual time을 확인한다. 계획의 cost는 밀리초가 아니다.
+기존 부하가 끝난 뒤 해당 회원에게 예약이 생긴 상태다. 요청 전 예약이 없던 상태나 예약 이력이 많은 회원의 비용을 재현하지 않으며, 동시 부하 중 잠금 대기 시간도 측정하지 않는다.
+plans2k-01은 fixture_found=1·전체 예약 28,580건·회원 예약 1건이었다. 세 조회 모두 예약 인덱스 lookup에서 실제 1행을 읽었다.
+최상위 actual time은 중복 있음 0.677ms·시간 충돌 있음 1.62ms·충돌 없음 0.0434ms였다. 이번 조건에서 바로 쿼리·인덱스를 바꿀 근거는 확보하지 못했다.
+이 결과만으로 쿼리가 전체 지연의 원인이라고 확정하지 않는다.
+
+## pool 20 비교
+
+PERF_DB_POOL_SIZE는 10(기본) 또는 20만 허용하며 Hikari max/min을 함께 지정한다. 실제 max/min은 HTTP 부하 전에 검증한다.
+pool2k-01은 이전 집중 진단과 서버·DB·k6 자원·발송 목표·잠금 관측을 유지하고 pool만 20/20으로 바꾼다.
+
+```bash
+PERF_DB_POOL_SIZE=20 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh pool2k-01 single
+```
+
+기대값은 성공 2,000·예상 외 0·DB 예약/회원/인원 2,000이다. 응답 지연과 pool·잠금 대기를 함께 비교한다.
+pool 증가는 DB 잠금 대기를 늘릴 수 있으므로 성능 개선으로 가정하지 않는다. 운영 설정은 변경하지 않는다.
+
+pool2k-01은 실제 max/min 20/20에서 2,000건 성공·DB 정합성을 통과했다. 발송 범위 269ms·늦은 VU 0명, p95 약 23.66초였다.
+pool pending 최대는 190에서 180으로 줄었지만, 슬롯 대기 양수 표본의 트랜잭션은 8~9개에서 18~19개로 늘었다(lock2k-04와 비교).
+수집 오류·커넥션 timeout·k6 OOM은 없었다. 이번 실행에서 지연 개선은 확인되지 않았으며 단일 실행으로 항상 느리다고 단정하지 않는다. 기본 pool 10은 유지한다.
+
 ## 검증 현황
 
 focus-02·03·04에서 SQL 준비, 실제 HTTP 요청 50회(성공 20/예상 거절 30), DB 정합성과 정상 수집·정리를 확인했다.

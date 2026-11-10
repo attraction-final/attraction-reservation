@@ -256,7 +256,9 @@ public class AttractionSlotService {
 
         AttractionSlot slot = findAttractionSlotById(slotId);
 
-        if (entityManager.getLockMode(slot) != LockModeType.PESSIMISTIC_WRITE) {
+        LockModeType lockMode = entityManager.getLockMode(slot);
+
+        if (lockMode != LockModeType.PESSIMISTIC_WRITE && lockMode != LockModeType.PESSIMISTIC_FORCE_INCREMENT) {
             throw new IllegalStateException("슬롯 정원 확보에는 비관적 쓰기 잠금이 필요합니다.");
         }
 

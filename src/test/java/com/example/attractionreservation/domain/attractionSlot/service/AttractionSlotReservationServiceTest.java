@@ -127,7 +127,32 @@ class AttractionSlotReservationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = LockModeType.class, names = "PESSIMISTIC_WRITE", mode = EnumSource.Mode.EXCLUDE)
+    @EnumSource(value = LockModeType.class, names = {"PESSIMISTIC_WRITE", "PESSIMISTIC_FORCE_INCREMENT"})
+    @DisplayName("이미 보유한 두 비관적 쓰기 잠금 모드에서 정원을 확보할 수 있다")
+    void acquireCapacityWithExistingWriteLockMode(LockModeType lockMode) {
+        // given
+        Attraction attraction = mock(Attraction.class);
+        when(attraction.getDurationMinutes()).thenReturn(10);
+        AttractionSlot slot = AttractionSlot.create(
+                attraction, LocalDateTime.of(2026, 10, 25, 16, 0), 10);
+        when(attractionSlotRepository.findById(SLOT_ID)).thenReturn(Optional.of(slot));
+        // 이미 보유한 모드의 검사만 검증하며 새 잠금이나 버전 증가를 요청하지 않는다.
+        when(entityManager.getLockMode(slot)).thenReturn(lockMode);
+
+        // when
+        attractionSlotService.tryReservationCapacity(SLOT_ID);
+
+        // then
+        assertThat(slot.getReservedCount()).isEqualTo(1);
+        assertThat(slot.getRemainingCount()).isEqualTo(9);
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
+        verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+        verify(entityManager, never()).refresh(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = LockModeType.class,
+            names = {"PESSIMISTIC_WRITE", "PESSIMISTIC_FORCE_INCREMENT"}, mode = EnumSource.Mode.EXCLUDE)
     @DisplayName("비관적 쓰기 잠금을 보유하지 않으면 인원 변경 전에 호출을 거부한다")
     void rejectCapacityAcquisitionWithoutWriteLock(LockModeType lockMode) {
         // given

@@ -21,7 +21,7 @@
       "environment": [
         {
           "name": "SPRING_PROFILES_ACTIVE",
-          "value": "prod,api"
+          "value": "prod,api,oauth"
         }
       ],
       "secrets": [
@@ -64,6 +64,30 @@
         {
           "name": "SPRING_DATA_REDIS_SSL_ENABLED",
           "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/SPRING_DATA_REDIS_SSL_ENABLED"
+        },
+        {
+          "name": "KAKAO_CLIENT_ID",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/KAKAO_CLIENT_ID"
+        },
+        {
+          "name": "KAKAO_CLIENT_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/KAKAO_CLIENT_SECRET"
+        },
+        {
+          "name": "GOOGLE_CLIENT_ID",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/GOOGLE_CLIENT_ID"
+        },
+        {
+          "name": "GOOGLE_CLIENT_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/GOOGLE_CLIENT_SECRET"
+        },
+        {
+          "name": "OAUTH2_SUCCESS_REDIRECT_URI",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/OAUTH2_SUCCESS_REDIRECT_URI"
+        },
+        {
+          "name": "OAUTH2_FAILURE_REDIRECT_URI",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/OAUTH2_FAILURE_REDIRECT_URI"
         }
       ],
       "stopTimeout": 30,

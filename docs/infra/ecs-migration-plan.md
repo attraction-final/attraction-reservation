@@ -191,6 +191,12 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - [ ] dev → main 릴리스(새 CD 첫 실행)가 api → worker 순으로 끝나고, 배포 시간 측정
 - [ ] `workflow_dispatch`: 같은 SHA로 재배포해 경로 확인. 이전 SHA로 되돌리는 확인은 다음 main 배포 뒤에 한다
 
+cd 브랜치 시험 배포 (2026-11-10, 5·6단계 확인용. 위 두 항목은 main 실행으로 확인하므로 체크하지 않는다)
+- `cd` 브랜치에 dev(KAN-135 포함), KAN-154(cd에만 있던 대시보드·Grafana ALB 커밋을 dev로 옮기는 PR #273), 이 브랜치를 머지하고 push → CD 실행 42780458500, `e401f4f8`
+- `cd` 전용 임시 변경 2개: cd push 트리거(기존), "Verify version is on main" step을 `workflow_dispatch`에서만 실행(main에 없는 커밋이라)
+- 결과: 변경 감지 10초, 모니터링 배포 25초, 앱 배포(이미지 빌드 → api → worker) 9분 49초. `api:3`, `worker:2` `COMPLETED`, `APP_VERSION`·`MONITORING_VERSION` = `e401f4f8`
+- 다음 main 배포는 기준 버전(`e401f4f8`)이 main의 조상이 아니므로 앱·모니터링을 모두 다시 배포한다
+
 ### 5단계: 트래픽 전환
 
 시작 조건
@@ -218,14 +224,15 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - [x] 헤더 없는 요청이 ECS에서 응답: `/readyz` 200(전환 전에는 ASG가 받아 401), `/api/attractions` 200, `/api/auth/csrf` 200
 - [x] 443 리스너 규칙이 기본 규칙(`attraction-app-ecs`)과 Grafana 규칙만 남음
 - [x] 스케줄러 실행 메트릭(`tasks_scheduled_execution_seconds_count`)이 `service=worker`에서만 6개(주기 5개 + `generateDaily`) 나오고, EC2 `instance` 메트릭은 종료 뒤 끊김. api·worker `up` = 1
-- [ ] Loki에서 api·worker ERROR 0건 → worker ERROR 2건(WARN 4건): 슬롯 생성 스케줄러가 기동 시(`STARTUP`)와 00:05(`DAILY`) 모두 실패. 아래 "발견한 문제" 참고. 전환으로 생긴 오류는 없고 api는 WARN·ERROR 0건
+- [x] Loki에서 api·worker ERROR 0건 → worker ERROR 2건(WARN 4건): 슬롯 생성 스케줄러가 기동 시(`STARTUP`)와 00:05(`DAILY`) 모두 실패. 아래 "발견한 문제" 참고. 전환으로 생긴 오류는 없고 api는 WARN·ERROR 0건
+  - 2026-11-10 KAN-135를 포함한 cd 시험 배포 뒤 api·worker ERROR·WARN 0건. worker `ATTRACTION_SLOT_GENERATION_FINISHED trigger=STARTUP`이 INFO, `failedCount=0`. 스케줄러 메트릭은 worker에서만 5개(`generateDaily`는 첫 00:05 실행 뒤 생긴다), api·worker `up` = 1
 - [x] 슬롯 수가 전환 전과 같음 (어트랙션 0건이라 0건 유지)
 - 결제 승인·웹훅은 실제 흐름이 없어 이 단계에서 확인하지 않는다. 결제 연동을 실제로 쓰기 시작할 때 확인한다.
 
 발견한 문제: 슬롯 자동 생성이 항상 실패 (앱 코드, 전환과 무관)
 - `Cannot execute statement in a READ ONLY transaction` (`select a1_0.id from attractions ... for update`)
 - `AttractionRepository.findAllActiveIds()`에 `@Lock(PESSIMISTIC_WRITE)`가 붙어 있는데, 호출하는 `AttractionSlotGenerationService.findTargetAttractionIds()`가 `@Transactional(readOnly = true)`라 MySQL이 `FOR UPDATE`를 거부한다. 어트랙션별 잠금은 `generateSlots()`의 `findActiveByIdForUpdate()`가 이미 한다.
-- 어트랙션이 0건이라 지금은 피해가 없다. KAN-135(PR #247)에서 `@Lock`을 제거하고 MySQL 회귀 테스트를 추가했다. 운영 확인은 dev → main 릴리스 뒤 worker 기동 로그로 한다.
+- 어트랙션이 0건이라 지금은 피해가 없다. KAN-135(PR #247)에서 `@Lock`을 제거하고 MySQL 회귀 테스트를 추가했다. 운영에서는 2026-11-10 cd 시험 배포 뒤 worker 기동 로그로 확인했다(위 검증 항목).
 
 롤백
 - ALB 기본 규칙을 `attraction-final`로 되돌리고 worker desired 0 → ASG min 1 / desired 1. 인스턴스는 `APP_VERSION`(main SHA)의 S3 실행 구성으로 뜬다(4단계에서 S3 업로드를 유지한 이유). 이전 버전이 아니라 main SHA로 돌아간다.
@@ -260,7 +267,7 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - 스케줄러 실행 실패(`exception!="none"`)는 따로 두지 않는다. 예외를 잡는 스케줄러는 ERROR 로그로 남기므로 "ERROR 로그"가 잡고, 잡지 않은 예외도 Spring이 ERROR로 남긴다.
 - 응답 지연, DB 커넥션 고갈, RDS·ElastiCache·task 자원 알림은 넣지 않는다. 실제 트래픽이 없어 기준을 정할 수 없고, 자원이 다해 task가 죽으면 위 규칙이 잡는다. 부하가 생기면 추가한다.
 - CD 실패는 GitHub Actions 실패 알림으로 받는다.
-- "ERROR 로그"는 `isPaused: true`로 넣고, KAN-135(슬롯 자동 생성 실패 수정)가 운영에 반영된 뒤 `false`로 바꿔 배포한다. 반영 전에 켜면 매일 00:05에 울린다. "결제·환불 최종 실패"는 슬롯 생성과 무관해 바로 켠다.
+- "ERROR 로그"는 `isPaused: true`로 넣고, KAN-135(슬롯 자동 생성 실패 수정)가 운영에 반영된 뒤 `false`로 바꿔 배포한다. 반영 전에 켜면 매일 00:05에 울린다. "결제·환불 최종 실패"는 슬롯 생성과 무관해 바로 켠다. (2026-11-10 KAN-135 운영 확인 뒤 일시정지를 풀었다. 다음 모니터링 배포부터 적용)
 
 알림 정책
 - 채널 하나, 심각도 구분 없음
@@ -279,9 +286,11 @@ ALB ─443─▶ TG(ip) ─▶ ECS 서비스 api     task 1~N개, 프로필 prod
 - [x] 로컬 Grafana 13.3.0 + Loki 3.7.9 + Prometheus: 규칙 6개(ERROR 로그만 일시정지), contact point, 알림 정책이 로드됨 (2026-11-09)
 - [x] 로컬 Loki에 가짜 `REFUND_RETRY_EXHAUSTED`와 일반 ERROR 로그를 넣음: 결제 규칙 쿼리는 `REFUND_RETRY_EXHAUSTED`(pgId)만, ERROR 로그 쿼리는 일반 ERROR만 셈. 결제 규칙이 Firing되어 가짜 webhook 수신기(Slack처럼 `ok` 응답)에 Slack 형식 메시지가 감(요약에 이벤트·pgId·건수). 5분 창이 지나자 `[RESOLVED]` 해제 알림도 옴
 - [x] `deploy-monitoring` Run Command 스크립트를 가짜 aws·docker로 렌더링·실행: `.env`에 두 값이 그대로 쓰이고(`$`, `#` 포함), Slack 형식이 아니면 실패. actionlint(shellcheck 포함) 통과 (기존 `concurrency.queue` 경고만)
-- [ ] 배포 후 contact point 테스트 알림이 Slack에 옴
-- [ ] worker desired 0으로 잠깐 내려 "worker 스케줄러 멈춤" 알림이 오고, 되돌리면 해제 알림이 옴
-- [ ] KAN-135 반영 뒤 "ERROR 로그" 일시정지 해제
+- [x] 배포 후 contact point 테스트 알림이 Slack에 옴 (2026-11-10 cd 시험 배포. 규칙 6개 로드, active 5·paused 1)
+- [x] worker desired 0으로 잠깐 내려 "worker 스케줄러 멈춤" 알림이 오고, 되돌리면 해제 알림이 옴 (2026-11-10, UTC)
+  - 08:36 desired 0 → 08:46:50 Pending → 08:47:57 Firing, Slack 수신 (약 12분: 10분 창에서 마지막 실행이 빠지고 `for: 1m`)
+  - 08:48:56 desired 1 → 08:50:41 Normal, Slack 해제 알림 수신 (약 1분 45초)
+- [x] KAN-135 반영 뒤 "ERROR 로그" 일시정지 해제 (`isPaused` 제거. 운영 반영은 다음 모니터링 배포)
 
 ### 7단계: 정리
 

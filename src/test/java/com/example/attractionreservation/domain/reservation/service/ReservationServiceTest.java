@@ -21,6 +21,10 @@ import com.example.attractionreservation.domain.user.service.UserService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import io.micrometer.core.instrument.MockClock;
+import io.micrometer.core.instrument.simple.SimpleConfig;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,15 +33,18 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -76,8 +83,10 @@ class ReservationServiceTest {
     @Mock
     private AttractionSlotService attractionSlotService;
 
-    @InjectMocks
     private ReservationService reservationService;
+
+    private SimpleMeterRegistry meterRegistry;
+    private MockClock metricsClock;
 
     private User user;
     private Ticket ticket;
@@ -87,6 +96,13 @@ class ReservationServiceTest {
 
     @BeforeEach
     void setUp() {
+        metricsClock = new MockClock();
+        meterRegistry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, metricsClock);
+        reservationService = new ReservationService(
+                reservationRepository, userService, ticketService, attractionSlotService, meterRegistry);
+        // Mockito 직접 호출에는 Spring 트랜잭션이 없으므로 callback 등록 환경만 준비한다.
+        // 실제 commit/rollback 검증은 ReservationConcurrencyIntegrationTest에서 수행한다.
+        TransactionSynchronizationManager.initSynchronization();
         user = mock(User.class);
         ticket = mock(Ticket.class);
         slot = mock(AttractionSlot.class);
@@ -126,6 +142,84 @@ class ReservationServiceTest {
                 .thenReturn(attraction);
         lenient().when(attraction.isOperating()).thenReturn(true);
         lenient().when(attraction.getName()).thenReturn("롤러코스터");
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        meterRegistry.close();
+    }
+
+    @Test
+    @DisplayName("슬롯 조회 성공은 즉시 기록하고 완료 전에는 후속 구간을 기록하지 않는다")
+    void recordSuccessfulLookupBeforeTransactionCompletion() {
+        // given
+        stubReservationSave();
+        when(attractionSlotService.findSlot(SLOT_ID)).thenAnswer(invocation -> {
+            metricsClock.add(Duration.ofMillis(25));
+            return slot;
+        });
+
+        // when
+        createReservationAt(NOW);
+
+        // then
+        assertThat(meterRegistry.get("reservation.create.slot.lookup")
+                .tag("result", "success").timer().count()).isEqualTo(1);
+        assertThat(meterRegistry.get("reservation.create.slot.lookup")
+                .tag("result", "success").timer().totalTime(TimeUnit.MILLISECONDS)).isEqualTo(25.0);
+        assertThat(meterRegistry.find("reservation.create.slot.lookup")
+                .tag("result", "failure").timer()).isNull();
+        assertThat(meterRegistry.find("reservation.create.slot.postlookup").timer()).isNull();
+        assertThat(TransactionSynchronizationManager.getSynchronizations()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("슬롯 조회 실패는 원래 예외를 유지하고 실패 시간만 기록한다")
+    void recordFailedLookupWithoutPostLookupMeasurement() {
+        // given
+        BusinessException failure = new BusinessException(ErrorCode.SLOT_NOT_FOUND);
+        when(attractionSlotService.findSlot(SLOT_ID)).thenAnswer(invocation -> {
+            metricsClock.add(Duration.ofMillis(15));
+            throw failure;
+        });
+
+        // when & then
+        assertThatThrownBy(() -> createReservationAt(NOW)).isSameAs(failure);
+        assertThat(meterRegistry.get("reservation.create.slot.lookup")
+                .tag("result", "failure").timer().count()).isEqualTo(1);
+        assertThat(meterRegistry.get("reservation.create.slot.lookup")
+                .tag("result", "failure").timer().totalTime(TimeUnit.MILLISECONDS)).isEqualTo(15.0);
+        assertThat(meterRegistry.find("reservation.create.slot.lookup")
+                .tag("result", "success").timer()).isNull();
+        assertThat(meterRegistry.find("reservation.create.slot.postlookup").timer()).isNull();
+        assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
+        verify(attractionSlotService, never()).findAttractionByIdForUpdate(any());
+        verify(reservationRepository, never()).save(any(Reservation.class));
+    }
+
+    @Test
+    @DisplayName("완료 상태를 알 수 없는 callback은 unknown으로 한 번 기록한다")
+    void recordUnknownTransactionCompletion() {
+        // given
+        stubReservationSave();
+        createReservationAt(NOW);
+        TransactionSynchronization synchronization =
+                TransactionSynchronizationManager.getSynchronizations().get(0);
+
+        // when
+        // 단위 테스트의 callback 상태 분기 검증이며 실제 DB 완료를 모사한 결과는 아니다.
+        synchronization.afterCompletion(TransactionSynchronization.STATUS_UNKNOWN);
+
+        // then
+        assertThat(meterRegistry.get("reservation.create.slot.postlookup")
+                .tag("result", "unknown").timer().count()).isEqualTo(1);
+        assertThat(meterRegistry.find("reservation.create.slot.postlookup")
+                .tag("result", "committed").timer()).isNull();
+        assertThat(meterRegistry.find("reservation.create.slot.postlookup")
+                .tag("result", "rolledback").timer()).isNull();
     }
 
     @Test

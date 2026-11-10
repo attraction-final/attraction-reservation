@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
@@ -83,7 +85,7 @@ import static org.mockito.Mockito.mockStatic;
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, UserService.class,
+@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class, UserService.class,
         TicketService.class, AttractionSlotService.class, AttractionService.class,
         ReservationUpcomingReservationReader.class, ReservationSlotConcurrencyIntegrationTest.MySqlConfig.class})
 class ReservationSlotConcurrencyIntegrationTest {

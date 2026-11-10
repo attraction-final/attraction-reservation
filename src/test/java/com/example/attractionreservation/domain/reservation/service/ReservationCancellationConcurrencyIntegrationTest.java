@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -81,7 +83,7 @@ import static org.mockito.Mockito.mockStatic;
 @Import({
         JpaConfig.class,
         QuerydslConfig.class,
-        ReservationService.class,
+        ReservationService.class, SimpleMeterRegistry.class,
         UserService.class,
         UserWithdrawalService.class,
         TicketService.class,

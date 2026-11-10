@@ -17,11 +17,15 @@ import com.example.attractionreservation.domain.user.service.UserService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -40,6 +44,8 @@ public class ReservationService {
     private final UserService userService;
     private final TicketService ticketService;
     private final AttractionSlotService attractionSlotService;
+    // 예약 생성의 구간별 처리 시간을 기록할 Timer를 등록하고 관리한다.
+    private final MeterRegistry meterRegistry;
 
     // 예약 생성
     @Transactional
@@ -64,8 +70,37 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.TICKET_RESERVATION_NOT_ALLOWED_STATUS);
         }
 
-        // 티켓 날짜와 슬롯 날짜 검증
-        AttractionSlot attractionSlot = attractionSlotService.findSlot(request.slotId());
+        // 슬롯 잠금 조회: 잠금 대기뿐 아니라 SQL 실행과 엔티티 조회 시간도 포함한다.
+        AttractionSlot attractionSlot;
+        Timer.Sample sample = Timer.start(meterRegistry);
+        boolean isFind = false;
+        try {
+            attractionSlot = attractionSlotService.findSlot(request.slotId());
+            isFind = true;
+
+        } finally {
+            // 조회가 예외로 끝나도 시간을 기록한다. 측정 종료가 DB 잠금 해제를 의미하지는 않는다.
+            // 이름에 해당하는 Timer를 가져와 이번 경과 시간과 호출 횟수를 누적한다.
+            sample.stop(meterRegistry.timer("reservation.create.slot.lookup", "result", isFind ? "success" : "failure"));
+        }
+        Timer.Sample postLookupSample = Timer.start(meterRegistry);
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+
+                    @Override
+                    public void afterCompletion(int status) {
+                        String result;
+                        if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                            result = "committed";
+                        } else if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                            result = "rolledback";
+                        } else {
+                            result = "unknown";
+                        }
+                        postLookupSample.stop(meterRegistry.timer("reservation.create.slot.postlookup", "result", result));
+                    }
+                }
+        );
         Attraction attraction = attractionSlotService.findAttractionByIdForUpdate(
                 attractionSlot.getAttraction().getId()
         );

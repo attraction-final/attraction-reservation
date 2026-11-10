@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
 import com.example.attractionreservation.domain.reservation.dto.SearchReservationCondition;
 import com.example.attractionreservation.domain.reservation.dto.SearchReservationResponse;
@@ -71,7 +73,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class,
+@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class,
         ReservationListIndexIntegrationTest.MySqlConfig.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Tag("performance")

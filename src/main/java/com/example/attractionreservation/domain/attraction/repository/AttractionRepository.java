@@ -29,7 +29,6 @@ public interface AttractionRepository extends JpaRepository<Attraction, Long>, A
     @Query("SELECT a FROM Attraction a WHERE a.id = :attractionId AND a.deletedAt IS NULL")
     Optional<Attraction> findActiveByIdForUpdate(@Param("attractionId") Long attractionId);
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
     // 슬롯 자동 생성 대상: 삭제되지 않은 어트랙션 ID 전체 (ID 순)
     @Query("SELECT a.id FROM Attraction a WHERE a.deletedAt IS NULL ORDER BY a.id")
     List<Long> findAllActiveIds();

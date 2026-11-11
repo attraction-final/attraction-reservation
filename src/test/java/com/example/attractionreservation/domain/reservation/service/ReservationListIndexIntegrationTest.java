@@ -29,6 +29,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -51,6 +52,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -276,6 +278,20 @@ class ReservationListIndexIntegrationTest {
 
     private void seedData() {
         Timestamp createdAt = Timestamp.from(FIRST_DAY.atStartOfDay(KstTime.ZONE).toInstant());
+        // Flyway 초기 상품은 유지하고, 측정용 상품의 자동 생성 ID를 주문 항목에 연결한다.
+        GeneratedKeyHolder productKey = new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO ticket_products (created_at,updated_at,description,name,price,status,stock,type,version) "
+                            + "VALUES (?,?, '인덱스 측정용','측정용 종일권',10000,'ON_SALE',1000000,'ALL_DAY',0)",
+                    Statement.RETURN_GENERATED_KEYS);
+            statement.setTimestamp(1, createdAt);
+            statement.setTimestamp(2, createdAt);
+            return statement;
+        }, productKey);
+        Number generatedProductId = productKey.getKey();
+        assertThat(generatedProductId).as("측정용 상품의 자동 생성 ID").isNotNull();
+        long productId = generatedProductId.longValue();
         List<Object[]> users = new ArrayList<>();
         List<Object[]> orders = new ArrayList<>();
         List<Object[]> items = new ArrayList<>();
@@ -287,7 +303,7 @@ class ReservationListIndexIntegrationTest {
                 int ticketId = (user - 1) * DAY_COUNT + day + 1;
                 LocalDate date = FIRST_DAY.plusDays(day);
                 orders.add(new Object[]{ticketId, createdAt, createdAt, "COMPLETED", 10000, date, user});
-                items.add(new Object[]{ticketId, 10000, 1, ticketId, 1});
+                items.add(new Object[]{ticketId, 10000, 1, ticketId, productId});
                 tickets.add(new Object[]{ticketId, createdAt, createdAt, "KAN130-T-" + ticketId,
                         Timestamp.from(date.atTime(10, 0).atZone(KstTime.ZONE).toInstant()),
                         "측정용 종일권", "IN_USE", "ALL_DAY", date, ticketId});
@@ -295,8 +311,6 @@ class ReservationListIndexIntegrationTest {
         }
         batch("INSERT INTO users (id,created_at,updated_at,email,nickname,password,provider,role,status) "
                 + "VALUES (?,?,?,?,?,?,?,?,?)", users);
-        jdbc.update("INSERT INTO ticket_products (id,created_at,updated_at,description,name,price,status,stock,type,version) "
-                + "VALUES (1,?,?, '인덱스 측정용','측정용 종일권',10000,'ON_SALE',1000000,'ALL_DAY',0)", createdAt, createdAt);
         batch("INSERT INTO orders (id,created_at,updated_at,status,total_amount,visit_date,user_id) VALUES (?,?,?,?,?,?,?)", orders);
         batch("INSERT INTO order_items (id,price,quantity,order_id,ticket_product_id) VALUES (?,?,?,?,?)", items);
         batch("INSERT INTO tickets (id,created_at,updated_at,code,entered_at,name,status,type,valid_date,order_item_id) "

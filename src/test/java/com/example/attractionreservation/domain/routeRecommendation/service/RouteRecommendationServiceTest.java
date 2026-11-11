@@ -3,570 +3,440 @@ package com.example.attractionreservation.domain.routeRecommendation.service;
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.entity.enums.OperationStatus;
 import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
-import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
-import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
-import com.example.attractionreservation.domain.reservation.entity.Reservation;
-import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
-import com.example.attractionreservation.domain.reservation.repository.ReservationRepository;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.CandidateSelector;
-import com.example.attractionreservation.domain.routeRecommendation.algorithm.RouteSearcher;
+import com.example.attractionreservation.domain.routeRecommendation.RouteFixture;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.GeoPoint;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.HaversineStartLegEstimator;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.VisitOrderOptimizer;
+import com.example.attractionreservation.domain.routeRecommendation.config.RouteRecommendationProperties;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
-import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
-import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
-import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
-import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
-import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
-import com.example.attractionreservation.domain.routeRecommendation.repository.RouteRecommendationRepository;
-import com.example.attractionreservation.domain.user.entity.User;
-import com.example.attractionreservation.domain.ticket.entity.Ticket;
-import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
-import com.example.attractionreservation.domain.ticket.repository.TicketRepository;
-import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Leg;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.LegBasis;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.LegFromType;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.LocationWarning;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.UnavailablePath;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.UnavailableReason;
+import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Visit;
+import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionLocation;
+import com.example.attractionreservation.domain.routeRecommendation.entity.AttractionPath;
+import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionLocationRepository;
+import com.example.attractionreservation.domain.routeRecommendation.repository.AttractionPathRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
-import com.example.attractionreservation.global.util.KstTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationSummaryResponse;
-import com.example.attractionreservation.domain.routeRecommendation.repository.StopCount;
-import com.example.attractionreservation.global.response.PageableDto;
-import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import java.util.Set;
+import java.util.function.Predicate;
 
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.AMAZON;
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.BUMPER_CAR;
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.EXAMPLE_FIVE;
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.HURRICANE;
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.MONIMO;
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.SPACE_FIGHTER;
+import static com.example.attractionreservation.domain.routeRecommendation.RouteFixture.THUNDER_FALLS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.mockito.ArgumentMatchers.anyIterable;
 
+/**
+ * 저장소(Repository)만 Mock 으로 두고, 알고리즘(VisitOrderOptimizer)과 첫 구간 추정(HaversineStartLegEstimator)은
+ * 실제 객체를 써서 "서비스 + 알고리즘" 흐름 전체를 검증한다.
+ * 기대값은 docs/sql 실측 데이터로 Python 에서 따로 계산한 값이다.
+ */
 @ExtendWith(MockitoExtension.class)
 class RouteRecommendationServiceTest {
 
-    private static final Clock FIXED_CLOCK =
-            Clock.fixed(Instant.parse("2026-10-20T05:00:00Z"), KstTime.ZONE);
-    private static final LocalDate VISIT_DATE = LocalDate.of(2026, 10, 20);
-    private static final Long USER_ID = 7L;
-    private static final Long TICKET_ID = 5001L;
-
-    @Mock
-    private RouteRecommendationRepository routeRecommendationRepository;
-
-    @Mock
-    private TicketRepository ticketRepository;
+    // 2025-11-06 12:00:00 KST
+    private static final Instant NOW = Instant.parse("2025-11-06T03:00:00Z");
 
     @Mock
     private AttractionRepository attractionRepository;
+    @Mock
+    private AttractionLocationRepository attractionLocationRepository;
+    @Mock
+    private AttractionPathRepository attractionPathRepository;
 
-    @Mock
-    private AttractionSlotRepository attractionSlotRepository;
-    private RouteRecommendationService routeRecommendationService;
-    @Mock
-    private ReservationRepository reservationRepository;
+    private RouteRecommendationService service;
 
     @BeforeEach
     void setUp() {
-
-        routeRecommendationService = new RouteRecommendationService(
-                routeRecommendationRepository,
-                ticketRepository,
+        RouteRecommendationProperties properties = new RouteRecommendationProperties();
+        service = new RouteRecommendationService(
                 attractionRepository,
-                attractionSlotRepository,
-                reservationRepository,
-                new CandidateSelector(),
-                new RouteSearcher(),
-                FIXED_CLOCK
-        );
+                attractionLocationRepository,
+                attractionPathRepository,
+                new HaversineStartLegEstimator(properties),
+                new VisitOrderOptimizer(),
+                properties,
+                Clock.fixed(NOW, ZoneId.of("Asia/Seoul")));
     }
 
-    //  공통 헬퍼
+    // ===== 추천 가능한 어트랙션 목록 =====
 
-    private static LocalDateTime at(String hhmm) {
-        return LocalDateTime.parse("2026-10-20T" + hhmm + ":00");
+    @Test
+    @DisplayName("추천 가능한 어트랙션 목록은 좌표 저장소의 조회 결과를 그대로 돌려준다")
+    void findRecommendableAttractions_returnsRepositoryResult() {
+        List<RecommendableAttractionResponse> expected = List.of(new RecommendableAttractionResponse(1L, "범퍼카", 37.2923658, 127.1995663));
+        when(attractionLocationRepository.findRecommendableAttractions()).thenReturn(expected);
+
+        assertThat(service.findRecommendableAttractions()).isEqualTo(expected);
+        verifyNoInteractions(attractionRepository, attractionPathRepository);
     }
 
-    private RouteRecommendation recommendationOwnedBy(Long userId) {
-        RouteRecommendation recommendation = RouteRecommendation.create(
-                userId,
-                TICKET_ID,
-                at("13:00"),
-                at("18:00"),
-                List.of(
-                        RouteRecommendationStop.of(1, 102L, 9201L, "사파리", 10, at("13:10"), at("13:30"), at("13:50")),
-                        RouteRecommendationStop.of(2, 101L, 9001L, "T익스프레스", 15, at("14:05"), at("14:30"), at("14:40"))),
-                List.of(RouteRecommendationExclusion.of(104L, "어트랙션 D", ExclusionReason.SLOT_FULL)));
-        ReflectionTestUtils.setField(recommendation, "id", 1L);
-        return recommendation;
+    // ===== 정상 =====
+
+    @Test
+    @DisplayName("1. 정상: 예시 5개 → 범퍼카→썬더폴스→우주전투기→모니모→아마존, 28분 1478m, DB 조회 3번")
+    void recommend_exampleFive() {
+        givenData(EXAMPLE_FIVE, path -> true);
+
+        CreateRouteRecommendationResponse response = service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE));
+
+        assertThat(response.visits()).extracting(Visit::attractionId)
+                .containsExactly(BUMPER_CAR, THUNDER_FALLS, SPACE_FIGHTER, MONIMO, AMAZON);
+        assertThat(response.visits()).extracting(Visit::attractionName)
+                .containsExactly("범퍼카", "썬더폴스", "우주전투기", "모니모 러쉬", "아마존 익스프레스");
+        assertThat(response.visits().get(0).latitude()).isEqualTo(37.2923658);
+        assertThat(response.totalMoveMinutes()).isEqualTo(28);
+        assertThat(response.totalDistanceM()).isEqualTo(1478);
+        assertThat(response.evaluatedOrderCount()).isEqualTo(120);
+        assertThat(response.validOrderCount()).isEqualTo(120);
+        assertThat(response.unavailablePaths()).isEmpty();
+        assertThat(response.estimatedPathIncluded()).isFalse();
+
+        // 첫 구간: 사용자 위치 → 범퍼카 (직선 145m, 추정 도보 244m, 5분)
+        assertThat(response.legs()).hasSize(5);
+        assertThat(response.legs().get(0)).isEqualTo(new Leg(
+                1, LegFromType.USER_LOCATION, null, BUMPER_CAR, 145, 244, 5, true, LegBasis.HAVERSINE_ESTIMATE));
+        // 두 번째 구간: 범퍼카 → 썬더폴스 실측 141m, 3분
+        assertThat(response.legs().get(1)).isEqualTo(new Leg(
+                2, LegFromType.ATTRACTION, BUMPER_CAR, THUNDER_FALLS, null, 141, 3, false, LegBasis.ATTRACTION_PATH));
+        // 합계 = 구간 합
+        assertThat(response.legs().stream().mapToInt(Leg::moveMinutes).sum()).isEqualTo(response.totalMoveMinutes());
+        assertThat(response.legs().stream().mapToInt(Leg::distanceM).sum()).isEqualTo(response.totalDistanceM());
+
+        // 120가지를 계산해도 DB 조회는 각 1번
+        verify(attractionRepository, times(1)).findAllById(anyIterable());
+        verify(attractionLocationRepository, times(1)).findAllByAttractionIdIn(anyCollection());
+        verify(attractionPathRepository, times(1)).findAllBetween(anyCollection());
     }
 
-    // 생성 헬퍼
+    @Test
+    @DisplayName("2. 사용자 위치가 바뀌면 순서가 바뀐다: 아마존 근처 → 아마존→모니모→우주전투기→범퍼카→썬더폴스, 25분")
+    void recommend_userLocationChanged() {
+        givenData(EXAMPLE_FIVE, path -> true);
 
-    private Ticket ticket(Long ownerId, TicketStatus status, TicketType type) {
-        Ticket ticket = mock(Ticket.class, RETURNS_DEEP_STUBS);
-        lenient().when(ticket.getId()).thenReturn(TICKET_ID);
-        lenient().when(ticket.getOrderItem().getOrder().getUser().getId()).thenReturn(ownerId);
-        lenient().doReturn(status).when(ticket).getStatus();
-        lenient().when(ticket.getType()).thenReturn(type);
-        lenient().when(ticket.getValidDate()).thenReturn(VISIT_DATE);
-        return ticket;
+        CreateRouteRecommendationResponse response =
+                service.recommend(request(RouteFixture.USER_NEAR_AMAZON, EXAMPLE_FIVE));
+
+        assertThat(response.visits()).extracting(Visit::attractionId)
+                .containsExactly(AMAZON, MONIMO, SPACE_FIGHTER, BUMPER_CAR, THUNDER_FALLS);
+        assertThat(response.totalMoveMinutes()).isEqualTo(25);
+        assertThat(response.totalDistanceM()).isEqualTo(1285);
     }
 
-    private void givenUsableTicket() {
-        Ticket ticket = ticket(USER_ID, TicketStatus.IN_USE, TicketType.ALL_DAY);
-        when(ticketRepository.findById(TICKET_ID)).thenReturn(Optional.of(ticket));
+    @Test
+    @DisplayName("3. 선택 목록이 바뀌면(썬더폴스 → 허리케인) 허리케인→범퍼카→우주전투기→모니모→아마존, 27분")
+    void recommend_selectionChanged() {
+        List<Long> selection = List.of(BUMPER_CAR, SPACE_FIGHTER, AMAZON, MONIMO, HURRICANE);
+        givenData(selection, path -> true);
+
+        CreateRouteRecommendationResponse response = service.recommend(request(RouteFixture.USER_CENTER, selection));
+
+        assertThat(response.visits()).extracting(Visit::attractionId)
+                .containsExactly(HURRICANE, BUMPER_CAR, SPACE_FIGHTER, MONIMO, AMAZON);
+        assertThat(response.totalMoveMinutes()).isEqualTo(27);
+        assertThat(response.totalDistanceM()).isEqualTo(1508);
     }
 
-    private static Attraction attraction(Long id, String name, int durationMinutes, int moveMinutes) {
-        Attraction attraction = Attraction.create(name, "설명", "A구역", durationMinutes, moveMinutes);
-        ReflectionTestUtils.setField(attraction, "id", id);
-        return attraction;
+    @Test
+    @DisplayName("3-1. 같은 5개를 다른 순서로 보내도 결과는 같다")
+    void recommend_sameSelectionDifferentInputOrder_sameResult() {
+        List<Long> shuffled = List.of(AMAZON, THUNDER_FALLS, MONIMO, BUMPER_CAR, SPACE_FIGHTER);
+        givenData(shuffled, path -> true);
+
+        CreateRouteRecommendationResponse response = service.recommend(request(RouteFixture.USER_CENTER, shuffled));
+
+        assertThat(response.visits()).extracting(Visit::attractionId)
+                .containsExactly(BUMPER_CAR, THUNDER_FALLS, SPACE_FIGHTER, MONIMO, AMAZON);
     }
 
-    private static AttractionSlot slot(Long id, Attraction attraction, String startHhmm) {
-        AttractionSlot slot = AttractionSlot.create(attraction, at(startHhmm), 30);
-        ReflectionTestUtils.setField(slot, "id", id);
-        return slot;
+    // ===== 경로 데이터 처리 =====
+
+    @Test
+    @DisplayName("8. 비활성 구간(범퍼카→썬더폴스)은 계산에서 빼고 INACTIVE 로 알려준다")
+    void recommend_inactivePath() {
+        givenData(EXAMPLE_FIVE, path -> !(path.getFromAttractionId() == BUMPER_CAR
+                && path.getToAttractionId() == THUNDER_FALLS));
+
+        CreateRouteRecommendationResponse response = service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE));
+
+        assertThat(response.unavailablePaths())
+                .containsExactly(new UnavailablePath(BUMPER_CAR, THUNDER_FALLS, UnavailableReason.INACTIVE));
+        assertThat(response.validOrderCount()).isEqualTo(96);
+        assertThat(response.visits()).extracting(Visit::attractionId)
+                .containsExactly(THUNDER_FALLS, BUMPER_CAR, SPACE_FIGHTER, MONIMO, AMAZON);
+        assertThat(response.totalMoveMinutes()).isEqualTo(28);
+        assertThat(response.totalDistanceM()).isEqualTo(1485);
     }
 
-    private void givenSlots(Long attractionId, AttractionSlot... slots) {
-        when(attractionSlotRepository.findSlotsByAttractionIdAndDate(eq(attractionId), any(), any(), eq(false)))
-                .thenReturn(List.of(slots));
+    @Test
+    @DisplayName("9. 구간 데이터가 없으면(범퍼카→썬더폴스 행 없음) 값을 만들지 않고 MISSING 으로 알려준다")
+    void recommend_missingPath() {
+        givenAttractionsAndLocations(EXAMPLE_FIVE);
+        List<AttractionPath> paths = new ArrayList<>(paths(EXAMPLE_FIVE, path -> true));
+        paths.removeIf(path -> path.getFromAttractionId() == BUMPER_CAR && path.getToAttractionId() == THUNDER_FALLS);
+        when(attractionPathRepository.findAllBetween(anyCollection())).thenReturn(paths);
+
+        CreateRouteRecommendationResponse response = service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE));
+
+        assertThat(response.unavailablePaths())
+                .containsExactly(new UnavailablePath(BUMPER_CAR, THUNDER_FALLS, UnavailableReason.MISSING));
+        assertThat(response.validOrderCount()).isEqualTo(96);
+        assertThat(response.totalMoveMinutes()).isEqualTo(28);
     }
 
-    private static CreateRouteRecommendationRequest request(String startHhmm, String endHhmm, Long... attractionIds) {
-        return new CreateRouteRecommendationRequest(TICKET_ID, at(startHhmm), at(endHhmm), List.of(attractionIds));
+    @Test
+    @DisplayName("is_estimated = true 인 구간을 쓰면 해당 구간과 응답 전체에 추정 표시가 된다")
+    void recommend_estimatedPath() {
+        givenAttractionsAndLocations(EXAMPLE_FIVE);
+        List<AttractionPath> paths = new ArrayList<>();
+        for (long[] row : RouteFixture.pathRowsBetween(EXAMPLE_FIVE)) {
+            boolean estimated = row[0] == BUMPER_CAR && row[1] == THUNDER_FALLS;
+            paths.add(AttractionPath.of(row[0], row[1], (int) row[2], (int) row[3], estimated, true));
+        }
+        when(attractionPathRepository.findAllBetween(anyCollection())).thenReturn(paths);
+
+        CreateRouteRecommendationResponse response = service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE));
+
+        assertThat(response.estimatedPathIncluded()).isTrue();
+        assertThat(response.legs().get(1).estimated()).isTrue();
+        assertThat(response.legs().get(2).estimated()).isFalse();
     }
 
-    private void givenTwoReachableAttractions() {
-        Attraction a = attraction(101L, "T익스프레스", 10, 10);
-        Attraction b = attraction(102L, "사파리", 20, 10);
-        // 요청 순서와 상관없이 DB 는 순서를 보장하지 않는다 → 서비스가 요청 순서로 다시 맞추는지까지 확인
-        when(attractionRepository.findAllById(anyIterable())).thenReturn(List.of(a, b));
-        givenSlots(101L, slot(9001L, a, "15:00"));
-        givenSlots(102L, slot(9201L, b, "15:30"));
+    @Test
+    @DisplayName("모든 구간이 비활성이면 ROUTE_NO_VALID_ORDER")
+    void recommend_noValidOrder() {
+        givenData(EXAMPLE_FIVE, path -> false);
+
+        assertBusinessError(() -> service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE)),
+                ErrorCode.ROUTE_NO_VALID_ORDER);
     }
 
-    private void givenSaveReturnsArgument() {
-        when(routeRecommendationRepository.save(any(RouteRecommendation.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+    // ===== 입력·데이터 검증 =====
+
+    @Test
+    @DisplayName("4. 중복 ID 는 DB 조회 없이 DUPLICATE_ROUTE_ATTRACTION")
+    void recommend_duplicateIds() {
+        List<Long> duplicated = List.of(BUMPER_CAR, BUMPER_CAR, AMAZON, MONIMO, THUNDER_FALLS);
+
+        assertBusinessError(() -> service.recommend(request(RouteFixture.USER_CENTER, duplicated)),
+                ErrorCode.DUPLICATE_ROUTE_ATTRACTION);
+        verifyNoInteractions(attractionRepository, attractionLocationRepository, attractionPathRepository);
     }
 
-    private static void assertErrorCode(Runnable action, ErrorCode errorCode) {
-        assertThatThrownBy(action::run)
+    @Test
+    @DisplayName("위치 정확도가 100m 이상이면 DB 조회 없이 LOCATION_ACCURACY_TOO_LOW")
+    void recommend_accuracyTooLow() {
+        CreateRouteRecommendationRequest request = request(RouteFixture.USER_CENTER, EXAMPLE_FIVE, 100.0, null);
+
+        assertBusinessError(() -> service.recommend(request), ErrorCode.LOCATION_ACCURACY_TOO_LOW);
+        verifyNoInteractions(attractionRepository, attractionLocationRepository, attractionPathRepository);
+    }
+
+    @Test
+    @DisplayName("위치 정확도 99.9m 는 허용한다 (기준: 100m 미만)")
+    void recommend_accuracyJustBelowLimit_ok() {
+        givenData(EXAMPLE_FIVE, path -> true);
+
+        CreateRouteRecommendationResponse response =
+                service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE, 99.9, null));
+
+        assertThat(response.location().accuracy()).isEqualTo(99.9);
+    }
+
+    @Test
+    @DisplayName("6. 존재하지 않는 ID 는 ATTRACTION_NOT_FOUND, 메시지에 없는 ID 를 담는다")
+    void recommend_attractionNotFound() {
+        when(attractionRepository.findAllById(anyIterable()))
+                .thenReturn(attractions(List.of(BUMPER_CAR, SPACE_FIGHTER, AMAZON, MONIMO)));
+
+        assertThatThrownBy(() -> service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE)))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode")
-                .isEqualTo(errorCode);
-    }
-
-    private void givenReservationAt(String slotStartHhmm) {
-        Attraction attraction = attraction(201L, "회전목마", 10, 5);
-        Reservation reservation = new Reservation(mock(User.class), mock(Ticket.class),
-                slot(9901L, attraction, slotStartHhmm));
-        when(reservationRepository.findAllWithSlotByTicketIdAndStatus(TICKET_ID, ReservationStatus.RESERVED))
-                .thenReturn(List.of(reservation));
-    }
-
-    // 생성: 정상
-
-    @Test
-    @DisplayName("모든 어트랙션을 방문할 수 있으면 최적 순서로 저장하고 FULL 로 응답한다")
-    void createRouteRecommendation_AllReachable_SavesFull() {
-        // given
-        givenUsableTicket();
-        givenTwoReachableAttractions();
-        givenSaveReturnsArgument();
-
-        // when
-        SearchRouteRecommendationResponse response = routeRecommendationService
-                .createRouteRecommendation(USER_ID, request("14:00", "18:00", 102L, 101L));
-
-        // then
-        assertThat(response.resultType()).isEqualTo(RouteResultType.FULL);
-        assertThat(response.totalSelectedAttractions()).isEqualTo(2);
-        assertThat(response.totalRecommendedAttractions()).isEqualTo(2);
-        assertThat(response.visits())
-                .extracting(SearchRouteRecommendationResponse.Visit::attractionId)
-                .containsExactly(101L, 102L);
-        assertThat(response.totalDurationMinutes()).isEqualTo(110);
-        assertThat(response.estimatedEndAt()).isEqualTo(at("15:50"));
-        assertThat(response.excludedAttractions()).isEmpty();
-        verify(routeRecommendationRepository).save(any(RouteRecommendation.class));
+                .hasMessageContaining("[5]")
+                .extracting("errorCode").isEqualTo(ErrorCode.ATTRACTION_NOT_FOUND);
+        verify(attractionPathRepository, never()).findAllBetween(anyCollection());
     }
 
     @Test
-    @DisplayName("운영하지 않는 어트랙션은 제외 사유와 함께 응답하고 나머지로 PARTIAL 경로를 저장한다")
-    void createRouteRecommendation_OneNotOperating_SavesPartial() {
-        // given
-        givenUsableTicket();
-        Attraction a = attraction(101L, "T익스프레스", 10, 10);
-        Attraction b = attraction(102L, "사파리", 20, 10);
-        b.changeOperationStatus(OperationStatus.MAINTENANCE);
-        when(attractionRepository.findAllById(List.of(101L, 102L))).thenReturn(List.of(a, b));
-        givenSlots(101L, slot(9001L, a, "15:00"));
-        givenSaveReturnsArgument();
+    @DisplayName("운영하지 않는 어트랙션이 있으면 ROUTE_ATTRACTION_NOT_OPERATING, 좌표·구간은 조회하지 않는다")
+    void recommend_notOperatingAttraction() {
+        List<Attraction> attractions = attractions(EXAMPLE_FIVE);
+        attractions.get(1).changeOperationStatus(OperationStatus.MAINTENANCE);
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(attractions);
 
-        // when
-        SearchRouteRecommendationResponse response = routeRecommendationService
-                .createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L, 102L));
-
-        // then
-        assertThat(response.resultType()).isEqualTo(RouteResultType.PARTIAL);
-        assertThat(response.visits())
-                .extracting(SearchRouteRecommendationResponse.Visit::attractionId)
-                .containsExactly(101L);
-        assertThat(response.excludedAttractions())
-                .extracting(SearchRouteRecommendationResponse.ExcludedAttraction::reasonCode)
-                .containsExactly("NOT_OPERATING");
+        assertThatThrownBy(() -> service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("[" + EXAMPLE_FIVE.get(1) + "]")
+                .extracting("errorCode").isEqualTo(ErrorCode.ROUTE_ATTRACTION_NOT_OPERATING);
+        verifyNoInteractions(attractionLocationRepository, attractionPathRepository);
     }
 
     @Test
-    @DisplayName("방문 가능한 어트랙션이 없으면 저장하지 않고 NONE 과 제외 사유를 응답한다")
-    void createRouteRecommendation_NothingReachable_ReturnsNoneWithoutSaving() {
-        // given: 14:20 슬롯의 예약 마감은 13:50 → 14:00 기준 이미 지남
-        givenUsableTicket();
-        Attraction a = attraction(101L, "T익스프레스", 10, 10);
-        when(attractionRepository.findAllById(List.of(101L))).thenReturn(List.of(a));
-        givenSlots(101L, slot(9001L, a, "14:20"));
+    @DisplayName("삭제된 어트랙션도 ATTRACTION_NOT_FOUND")
+    void recommend_deletedAttraction() {
+        List<Attraction> attractions = attractions(EXAMPLE_FIVE);
+        ReflectionTestUtils.setField(attractions.get(0), "deletedAt", NOW);
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(attractions);
 
-        // when
-        SearchRouteRecommendationResponse response = routeRecommendationService
-                .createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L));
-
-        // then
-        assertThat(response.isNone()).isTrue();
-        assertThat(response.recommendationId()).isNull();
-        assertThat(response.totalSelectedAttractions()).isEqualTo(1);
-        assertThat(response.visits()).isEmpty();
-        assertThat(response.excludedAttractions())
-                .extracting(SearchRouteRecommendationResponse.ExcludedAttraction::reasonCode)
-                .containsExactly("RESERVATION_CLOSED");
-        verify(routeRecommendationRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("시작 시각이 이미 지났으면 현재 시각부터 추천한다")
-    void createRouteRecommendation_PastStartAt_CorrectedToNow() {
-        // given
-        givenUsableTicket();
-        givenTwoReachableAttractions();
-        givenSaveReturnsArgument();
-
-        // when
-        SearchRouteRecommendationResponse response = routeRecommendationService
-                .createRouteRecommendation(USER_ID, request("12:00", "18:00", 101L, 102L));
-
-        // then
-        assertThat(response.startAt()).isEqualTo(at("14:00"));
-        assertThat(response.totalDurationMinutes()).isEqualTo(110);
-    }
-
-    @Test
-    @DisplayName("취소 마감이 지났고 끝나지 않은 예약이 있으면 ROUTE_RECOMMENDATION_BLOCKED 예외가 발생한다")
-    void createRouteRecommendation_BlockedByReservation_ThrowsException() {
-        // given: 14:20 탑승 → 취소 마감 13:50 지남, 종료 14:30 전 (현재 14:00)
-        givenUsableTicket();
-        givenReservationAt("14:20");
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L)),
-                ErrorCode.ROUTE_RECOMMENDATION_BLOCKED);
-        verifyNoInteractions(attractionRepository);
-    }
-
-    @ParameterizedTest(name = "예약 탑승 {0}")
-    @CsvSource({
-            "15:00",   // 취소 마감 14:30 전 → 아직 취소 가능
-            "13:00"    // 13:10 에 이미 끝남
-    })
-    @DisplayName("취소 가능하거나 이미 끝난 예약은 추천 생성을 막지 않는다")
-    void createRouteRecommendation_NotBlockingReservation_Creates(String slotStartHhmm) {
-        // given
-        givenUsableTicket();
-        givenReservationAt(slotStartHhmm);
-        givenTwoReachableAttractions();
-        givenSaveReturnsArgument();
-
-        // when
-        SearchRouteRecommendationResponse response = routeRecommendationService
-                .createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L, 102L));
-
-        // then
-        assertThat(response.resultType()).isEqualTo(RouteResultType.FULL);
-    }
-
-    //생성: 검증 실패
-
-    @Test
-    @DisplayName("같은 어트랙션을 중복 선택하면 DB 를 조회하지 않고 INVALID_ATTRACTION_SELECTION 예외가 발생한다")
-    void createRouteRecommendation_DuplicateAttraction_ThrowsException() {
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L, 101L)),
-                ErrorCode.INVALID_ATTRACTION_SELECTION);
-        verifyNoInteractions(ticketRepository, attractionRepository, routeRecommendationRepository);
-    }
-
-    @Test
-    @DisplayName("없는 입장권이면 TICKET_NOT_FOUND 예외가 발생한다")
-    void createRouteRecommendation_TicketNotFound_ThrowsException() {
-        // given
-        when(ticketRepository.findById(TICKET_ID)).thenReturn(Optional.empty());
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L)),
-                ErrorCode.TICKET_NOT_FOUND);
-    }
-
-    @Test
-    @DisplayName("다른 회원의 입장권이면 TICKET_NOT_OWNED 예외가 발생한다")
-    void createRouteRecommendation_OtherUsersTicket_ThrowsException() {
-        // given
-        Ticket otherUsersTicket = ticket(8L, TicketStatus.IN_USE, TicketType.ALL_DAY);
-        when(ticketRepository.findById(TICKET_ID)).thenReturn(Optional.of(otherUsersTicket));
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L)),
-                ErrorCode.TICKET_NOT_OWNED);
-    }
-
-    @Test
-    @DisplayName("사용 중이 아닌 입장권이면 TICKET_NOT_AVAILABLE 예외가 발생한다")
-    void createRouteRecommendation_TicketNotInUse_ThrowsException() {
-        // given
-        Ticket unusedTicket = ticket(USER_ID, TicketStatus.UNUSED, TicketType.ALL_DAY);
-        when(ticketRepository.findById(TICKET_ID)).thenReturn(Optional.of(unusedTicket));
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L)),
-                ErrorCode.TICKET_NOT_AVAILABLE);
-    }
-
-    @ParameterizedTest(name = "{0} ~ {1}")
-    @CsvSource({
-            "15:00, 15:00",   // 시작 = 종료
-            "16:00, 15:00",   // 시작 > 종료
-            "15:00, 22:30",   // 폐장 이후 종료
-            "13:00, 13:30"    // 시작이 14:00 으로 보정되면 종료보다 늦다
-    })
-    @DisplayName("이용 시간 범위가 잘못되면 알고리즘을 실행하지 않고 INVALID_TIME_RANGE 예외가 발생한다")
-    void createRouteRecommendation_InvalidTimeRange_ThrowsException(String startHhmm, String endHhmm) {
-        // given
-        givenUsableTicket();
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request(startHhmm, endHhmm, 101L)),
-                ErrorCode.INVALID_TIME_RANGE);
-        verifyNoInteractions(attractionRepository, attractionSlotRepository);
-    }
-
-    @Test
-    @DisplayName("오후권으로 15:00 이전부터 추천을 요청하면 INVALID_TIME_RANGE 예외가 발생한다")
-    void createRouteRecommendation_AfternoonTicketBeforeUsableTime_ThrowsException() {
-        // given
-        Ticket afternoonTicket = ticket(USER_ID, TicketStatus.IN_USE, TicketType.AFTERNOON);
-        when(ticketRepository.findById(TICKET_ID)).thenReturn(Optional.of(afternoonTicket));
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L)),
-                ErrorCode.INVALID_TIME_RANGE);
-    }
-
-    @Test
-    @DisplayName("없거나 삭제된 어트랙션이 포함되면 ATTRACTION_NOT_FOUND 예외가 발생한다")
-    void createRouteRecommendation_AttractionNotFound_ThrowsException() {
-        // given: 102 는 조회되지 않음
-        givenUsableTicket();
-        when(attractionRepository.findAllById(List.of(101L, 102L)))
-                .thenReturn(List.of(attraction(101L, "T익스프레스", 10, 10)));
-
-        // when & then
-        assertErrorCode(
-                () -> routeRecommendationService.createRouteRecommendation(USER_ID, request("14:00", "18:00", 101L, 102L)),
+        assertBusinessError(() -> service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE)),
                 ErrorCode.ATTRACTION_NOT_FOUND);
-        verify(routeRecommendationRepository, never()).save(any());
-    }
-
-    // 상세 조회
-
-    @Test
-    @DisplayName("본인 추천을 조회하면 방문 순서·시간·제외 사유를 응답으로 변환한다")
-    void findRouteRecommendationById_Owner_ReturnsResponse() {
-        // given
-        when(routeRecommendationRepository.findDetailById(1L)).thenReturn(Optional.of(recommendationOwnedBy(7L)));
-
-        // when
-        SearchRouteRecommendationResponse response = routeRecommendationService.findRouteRecommendationById(7L, 1L);
-
-        // then
-        assertThat(response.recommendationId()).isEqualTo(1L);
-        assertThat(response.ticketId()).isEqualTo(TICKET_ID);
-        assertThat(response.resultType()).isEqualTo(RouteResultType.PARTIAL);
-        assertThat(response.totalSelectedAttractions()).isEqualTo(3);
-        assertThat(response.totalRecommendedAttractions()).isEqualTo(2);
-        assertThat(response.visits())
-                .extracting(SearchRouteRecommendationResponse.Visit::attractionName)
-                .containsExactly("사파리", "T익스프레스");
-        assertThat(response.visits().get(0).estimatedWaitMinutes()).isEqualTo(20);
-        assertThat(response.excludedAttractions())
-                .extracting(SearchRouteRecommendationResponse.ExcludedAttraction::reasonCode)
-                .containsExactly("SLOT_FULL");
     }
 
     @Test
-    @DisplayName("없거나 삭제된 추천을 조회하면 ROUTE_RECOMMENDATION_NOT_FOUND 예외가 발생한다")
-    void findRouteRecommendationById_NotFound_ThrowsException() {
-        // given
-        when(routeRecommendationRepository.findDetailById(999L)).thenReturn(Optional.empty());
+    @DisplayName("좌표가 없는 어트랙션이 있으면 ATTRACTION_LOCATION_NOT_FOUND")
+    void recommend_locationMissing() {
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(attractions(EXAMPLE_FIVE));
+        when(attractionLocationRepository.findAllByAttractionIdIn(anyCollection()))
+                .thenReturn(locations(List.of(BUMPER_CAR, SPACE_FIGHTER, AMAZON, MONIMO)));
 
-        // when & then
-        assertErrorCode(() -> routeRecommendationService.findRouteRecommendationById(7L, 999L),
-                ErrorCode.ROUTE_RECOMMENDATION_NOT_FOUND);
+        assertThatThrownBy(() -> service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("[5]")
+                .extracting("errorCode").isEqualTo(ErrorCode.ATTRACTION_LOCATION_NOT_FOUND);
+        verify(attractionPathRepository, never()).findAllBetween(anyCollection());
     }
 
     @Test
-    @DisplayName("다른 회원의 추천을 조회하면 NOT_ROUTE_OWNER 예외가 발생한다")
-    void findRouteRecommendationById_OtherUser_ThrowsException() {
-        // given
-        when(routeRecommendationRepository.findDetailById(1L)).thenReturn(Optional.of(recommendationOwnedBy(7L)));
+    @DisplayName("7. 공원에서 2km 넘게 떨어진 위치(서울시청)는 LOCATION_OUT_OF_SERVICE_AREA")
+    void recommend_outOfServiceArea() {
+        givenAttractionsAndLocations(EXAMPLE_FIVE);
 
-        // when & then
-        assertErrorCode(() -> routeRecommendationService.findRouteRecommendationById(8L, 1L),
-                ErrorCode.NOT_ROUTE_OWNER);
+        assertBusinessError(() -> service.recommend(request(new GeoPoint(37.5665, 126.9780), EXAMPLE_FIVE)),
+                ErrorCode.LOCATION_OUT_OF_SERVICE_AREA);
+        verify(attractionPathRepository, never()).findAllBetween(anyCollection());
     }
 
-    //삭제
+    // ===== 위치 정보 응답 =====
 
     @Test
-    @DisplayName("본인 추천을 삭제하면 서버 시각으로 삭제 시각이 기록된다")
-    void deleteRouteRecommendation_Owner_SoftDeletes() {
-        // given
-        RouteRecommendation recommendation = recommendationOwnedBy(7L);
-        when(routeRecommendationRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(recommendation));
+    @DisplayName("측정 시각이 5분보다 오래되면 STALE_POSITION 경고, 측정 시각은 KST 로 돌려준다")
+    void recommend_stalePosition_warns() {
+        givenData(EXAMPLE_FIVE, path -> true);
+        long tenMinutesAgo = NOW.minus(Duration.ofMinutes(10)).toEpochMilli();
 
-        // when
-        routeRecommendationService.deleteRouteRecommendation(7L, 1L);
+        CreateRouteRecommendationResponse response =
+                service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE, 30.0, tenMinutesAgo));
 
-        // then
-        assertThat(recommendation.getDeletedAt()).isEqualTo(Instant.parse("2026-10-20T05:00:00Z"));
-    }
-
-    @Test
-    @DisplayName("없거나 이미 삭제된 추천을 삭제하면 ROUTE_RECOMMENDATION_NOT_FOUND 예외가 발생한다")
-    void deleteRouteRecommendation_NotFound_ThrowsException() {
-        // given
-        when(routeRecommendationRepository.findByIdAndDeletedAtIsNull(999L)).thenReturn(Optional.empty());
-
-        // when & then
-        assertErrorCode(() -> routeRecommendationService.deleteRouteRecommendation(7L, 999L),
-                ErrorCode.ROUTE_RECOMMENDATION_NOT_FOUND);
+        assertThat(response.location().warnings()).containsExactly(LocationWarning.STALE_POSITION);
+        assertThat(response.location().measuredAt()).isEqualTo(LocalDateTime.of(2025, 11, 6, 11, 50));
     }
 
     @Test
-    @DisplayName("다른 회원의 추천을 삭제하면 NOT_ROUTE_OWNER 예외가 발생하고 삭제되지 않는다")
-    void deleteRouteRecommendation_OtherUser_ThrowsExceptionAndKeeps() {
-        // given
-        RouteRecommendation recommendation = recommendationOwnedBy(7L);
-        when(routeRecommendationRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(recommendation));
+    @DisplayName("측정 시각이 최근이거나 없으면 경고가 없다")
+    void recommend_freshOrMissingTimestamp_noWarning() {
+        givenData(EXAMPLE_FIVE, path -> true);
+        long oneMinuteAgo = NOW.minus(Duration.ofMinutes(1)).toEpochMilli();
 
-        // when & then
-        assertErrorCode(() -> routeRecommendationService.deleteRouteRecommendation(8L, 1L),
-                ErrorCode.NOT_ROUTE_OWNER);
-        assertThat(recommendation.isDeleted()).isFalse();
-    }
+        assertThat(service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE, 30.0, oneMinuteAgo))
+                .location().warnings()).isEmpty();
 
-    // ---------- 목록 조회 ----------
-
-    @Test
-    @DisplayName("목록 항목에 집계한 방문지 개수를 담고 페이지 정보를 반환한다")
-    void findRouteRecommendations_Recommendations_MapsStopCounts() {
-        // given: 추천 2개. 방문지 개수는 엔티티가 아니라 집계 쿼리 결과(3, 1)를 써야 한다
-        RouteRecommendation first = recommendationOwnedBy(7L);    // id = 1
-        RouteRecommendation second = recommendationOwnedBy(7L);
-        ReflectionTestUtils.setField(second, "id", 2L);
-
-        when(routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(eq(7L), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(first, second), PageRequest.of(0, 10), 2));
-        when(routeRecommendationRepository.countStopsByRecommendationIds(List.of(1L, 2L)))
-                .thenReturn(List.of(new StopCount(1L, 3L), new StopCount(2L, 1L)));
-
-        // when
-        PageableDto<SearchRouteRecommendationSummaryResponse> result =
-                routeRecommendationService.findRouteRecommendations(7L, 0, 10);
-
-        // then
-        assertThat(result.content())
-                .extracting(SearchRouteRecommendationSummaryResponse::totalRecommendedAttractions)
-                .containsExactly(3, 1);
-        assertThat(result.page()).isZero();
-        assertThat(result.size()).isEqualTo(10);
-        assertThat(result.totalElements()).isEqualTo(2);
-        assertThat(result.hasNext()).isFalse();
+        CreateRouteRecommendationResponse withoutTimestamp =
+                service.recommend(request(RouteFixture.USER_CENTER, EXAMPLE_FIVE, 30.0, null));
+        assertThat(withoutTimestamp.location().warnings()).isEmpty();
+        assertThat(withoutTimestamp.location().measuredAt()).isNull();
     }
 
     @Test
-    @DisplayName("추천이 없으면 빈 목록을 반환하고 방문지 개수 쿼리를 보내지 않는다")
-    void findRouteRecommendations_Empty_SkipsStopCountQuery() {
-        // given
-        when(routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(eq(7L), any(Pageable.class)))
-                .thenReturn(Page.empty(PageRequest.of(0, 10)));
+    @DisplayName("계산에 쓰지 않는 Geolocation 값(고도·방향·속도)도 응답에 그대로 돌려준다")
+    void recommend_echoesGeolocationFields() {
+        givenData(EXAMPLE_FIVE, path -> true);
+        CreateRouteRecommendationRequest request = new CreateRouteRecommendationRequest(
+                37.2930, 127.2010, 30.0, 45.2, 10.0, 180.0, 1.5, null, EXAMPLE_FIVE);
 
-        // when
-        PageableDto<SearchRouteRecommendationSummaryResponse> result =
-                routeRecommendationService.findRouteRecommendations(7L, 0, 10);
+        CreateRouteRecommendationResponse response = service.recommend(request);
 
-        // then
-        assertThat(result.content()).isEmpty();
-        assertThat(result.totalElements()).isZero();
-        verify(routeRecommendationRepository, never()).countStopsByRecommendationIds(any());
+        assertThat(response.location().altitude()).isEqualTo(45.2);
+        assertThat(response.location().altitudeAccuracy()).isEqualTo(10.0);
+        assertThat(response.location().heading()).isEqualTo(180.0);
+        assertThat(response.location().speed()).isEqualTo(1.5);
     }
 
-    @Test
-    @DisplayName("최신순(생성 시각 내림차순, 같으면 id 내림차순)과 요청한 페이지로 조회한다")
-    void findRouteRecommendations_PassesNewestFirstPageable() {
-        // given
-        when(routeRecommendationRepository.findAllByUserIdAndDeletedAtIsNull(eq(7L), any(Pageable.class)))
-                .thenReturn(Page.empty(PageRequest.of(2, 5)));
+    // ===== 테스트 도우미 =====
 
-        // when
-        routeRecommendationService.findRouteRecommendations(7L, 2, 5);
+    private CreateRouteRecommendationRequest request(GeoPoint user, List<Long> attractionIds) {
+        return request(user, attractionIds, 30.0, null);
+    }
 
-        // then: 리포지토리에 실제로 넘어간 Pageable 을 꺼내서 확인한다
-        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(routeRecommendationRepository).findAllByUserIdAndDeletedAtIsNull(eq(7L), captor.capture());
-        Pageable pageable = captor.getValue();
-        assertThat(pageable.getPageNumber()).isEqualTo(2);
-        assertThat(pageable.getPageSize()).isEqualTo(5);
-        assertThat(pageable.getSort())
-                .isEqualTo(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+    private CreateRouteRecommendationRequest request(GeoPoint user, List<Long> attractionIds,
+                                                     Double accuracy, Long timestamp) {
+        return new CreateRouteRecommendationRequest(
+                user.latitude(), user.longitude(), accuracy, null, null, null, null, timestamp, attractionIds);
+    }
+
+    private void givenData(List<Long> attractionIds, Predicate<AttractionPath> active) {
+        givenAttractionsAndLocations(attractionIds);
+        when(attractionPathRepository.findAllBetween(anyCollection())).thenReturn(paths(attractionIds, active));
+    }
+
+    private void givenAttractionsAndLocations(List<Long> attractionIds) {
+        when(attractionRepository.findAllById(anyIterable())).thenReturn(attractions(attractionIds));
+        when(attractionLocationRepository.findAllByAttractionIdIn(anyCollection())).thenReturn(locations(attractionIds));
+    }
+
+    private List<Attraction> attractions(List<Long> ids) {
+        return ids.stream().map(id -> {
+            Attraction attraction = Attraction.create(RouteFixture.NAMES.get(id), "설명", "구역", 5, 10);
+            ReflectionTestUtils.setField(attraction, "id", id);
+            return attraction;
+        }).toList();
+    }
+
+    private List<AttractionLocation> locations(List<Long> ids) {
+        return ids.stream().map(id -> {
+            GeoPoint point = RouteFixture.LOCATIONS.get(id);
+            return AttractionLocation.of(id, point.latitude(), point.longitude());
+        }).toList();
+    }
+
+    // active 조건을 만족하는 구간만 is_active = true 로 만든다
+    private List<AttractionPath> paths(List<Long> ids, Predicate<AttractionPath> active) {
+        Set<Long> selected = Set.copyOf(ids);
+        List<AttractionPath> paths = new ArrayList<>();
+        for (long[] row : RouteFixture.PATHS) {
+            if (!selected.contains(row[0]) || !selected.contains(row[1])) {
+                continue;
+            }
+            AttractionPath probe = AttractionPath.of(row[0], row[1], (int) row[2], (int) row[3], false, true);
+            paths.add(AttractionPath.of(row[0], row[1], (int) row[2], (int) row[3], false, active.test(probe)));
+        }
+        return paths;
+    }
+
+    private void assertBusinessError(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, ErrorCode errorCode) {
+        assertThatThrownBy(call)
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(errorCode);
     }
 }

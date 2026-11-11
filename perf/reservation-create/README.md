@@ -1,0 +1,490 @@
+# KAN-150 예약 생성 집중 요청 검증
+
+첫 단계는 정원 20명의 빈 슬롯에 **서로 다른 회원 50명이 각 1회** 예약하는 시나리오다.
+목록 조회처럼 같은 요청을 5분 반복하지 않는다. 쓰기 요청은 정원과 예약 데이터를 바꾸기 때문이다.
+
+## 지원 시나리오
+
+| 두 번째 인자 | 어트랙션/슬롯 | 총 정원 | HTTP 기대 결과 |
+| --- | --- | ---: | --- |
+| sold-out (기본) | 1개, 정원 20 | 20 | 성공 20, 정원 소진 거절 30 |
+| single | 1개, 정원 50 | 50 | 성공 50, 거절 0 |
+| spread | 서로 다른 어트랙션 5개에 슬롯 각 1개, 정원 각 10 | 50 | 슬롯별 10건, 총 성공 50, 거절 0 |
+
+single/spread는 회원 수·요청 수·총 정원·예상 성공 건수·자원을 같게 두고 대상 분산만 비교한다.
+위 표는 기본 TEST_VUS=50 조건이다. 현재 50/100/200/500/1000/2000을 지원하며 single의 정원은 요청 수, spread의 슬롯별 정원은 요청 수/5로 맞춘다.
+sold-out은 정원 20을 유지해 100명일 때 성공 20·예상 거절 80을 검증한다.
+현재 생성은 슬롯뿐 아니라 어트랙션도 잠그므로 이 비교는 슬롯과 어트랙션 경합 범위가 함께 달라진다. 차이를 특정 락 하나의 효과로 확정하지 않는다.
+매진 테스트의 성공 20건과 분산 테스트의 성공 50건을 직접 비교해 분산 효과라고 주장하지 않는다.
+
+## 검증 목적
+
+| 항목 | 기대 결과 |
+| --- | --- |
+| HTTP 요청 | 실제 로그인 후 POST /api/reservations 총 50회 |
+| 예약 성공 | HTTP 201, 20회, 요청한 티켓·슬롯·RESERVED 상태 반환 |
+| 예상 업무 거절 | HTTP 409, 30회, 슬롯 마감/정원 확보 실패 메시지 |
+| 예상하지 못한 응답 | 0회 (다른 409 사유도 실패) |
+| DB | 예약 20건·서로 다른 회원 20명·reservedCount 20·capacity 20 |
+| 슬롯 | CLOSED, autoClosed=true |
+| 데이터 소유 관계 | 예약 회원=티켓 주문 회원, 오늘의 IN_USE 티켓 |
+
+현재 공통 오류 응답에 errorCode 필드가 없어 실제 ErrorCode의 메시지로 거절 사유를 구분한다.
+409 전체를 성공으로 간주하지 않는다. k6의 expectedStatuses(201,409)는 HTTP 실패율 분류용이며 별도 응답 검증이 최종 판단을 보완한다.
+성공과 거절 지연을 각각 집계한다. 첫 실행에서는 생성 지연 분포를 관측하며 목록 조회의 p95 200ms 목표를 자동 적용하지 않는다.
+단 50회인 집중 요청 검증이므로 최대 처리량·장시간 안정성을 입증하지 않는다.
+
+## 격리 환경과 데이터
+
+- Compose project: attraction-reservation-create-perf
+- 전용 DB: reservation_create_perf, 별도 네트워크·mysql-data 볼륨
+- 앱: 2 CPU·메모리 1GiB·heap 256~512MiB·pool max/min 10/10
+- MySQL: 1 CPU·메모리 1GiB, Redis: 0.5 CPU·256MiB
+- 측정 k6: 1 CPU·메모리 2GiB
+- host 앱/관리 포트: 18106 / 18107 (localhost에만 공개)
+- RUN_ID마다 새 회원 50명·주문/티켓 50개·시나리오에 맞는 어트랙션/슬롯 1개 또는 5개를 추가한다. 기존 데이터 삭제·재설정 없음
+
+SQL은 테스트 조건을 만들기 위해 결제 완료 주문과 입장된 티켓을 직접 준비한다. 결제·발급·입장 API의 업무 검증은 이번 범위 밖이다.
+비밀번호는 가입 API의 실제 PasswordEncoder로 생성하고, 로그인 토큰은 setup 메모리에서만 전달한다.
+목록 환경의 auth.js와 application-perf.yaml은 읽기 전용으로 재사용하며 DB URL만 전용 CLI 인자로 덮어쓴다.
+해당 overlay의 외부 PG 더미값·쓰기 스케줄러 비활성화를 유지한다. 원래 목록 도구·팀원 도구·프로덕션 코드는 수정하지 않는다.
+목록 환경과 동시에 띄울 수 있는 포트/볼륨 구성이지만, 성능 비교 시 호스트 자원 경쟁을 줄이기 위해 불필요한 환경은 사용자가 종료하는 것이 좋다.
+
+## 시간 조건
+
+기본 실제 시각 모드는 **실제 KST 10:00 이상~21:10 미만**에 실행한다. 오늘 21:50~22:00 슬롯을 사용하며 예약 마감은 21:20이다.
+실행기와 준비 SQL이 시각을 검사한다. KAN-155 고정 모드는 아래의 명시적 PERF_FIXED_TIME 설정으로 별도 실행하며 서버·Docker의 시스템 시계는 변경하지 않는다.
+준비가 길어져 마감을 넘기면 유효한 정원 소진 테스트가 아니므로 새 실행으로 재검증한다.
+슬롯은 마감까지 여유가 있는 고정 조건이며 시간 경계 검증 시나리오는 아니다.
+
+## 실행 방법 — 프로젝트 루트 Git Bash
+
+최신 소스에 맞춰 JAR을 사용자가 먼저 빌드한다.
+
+```bash
+./gradlew bootJar
+```
+
+시간 조건을 충족할 때 새 RUN_ID로 실행한다. 현재 허용 범위는 영문·숫자·하이픈, 최대 12자다.
+
+```bash
+bash perf/reservation-create/run.sh focus-01
+```
+
+순서: 전용 DB/Redis → 시각 검사 → 앱 재생성 → 회원가입·로그인 확인 → SQL fixture → 실제 pool 검사 → k6 setup 로그인 → 50회 요청 → 종료 상태 보존 → DB 검증.
+첫 단계에서는 별도 warm-up이 없다. 첫 실행 지연과 잠금 경합의 초기 관측으로 취급하고, 이후 비교 시 같은 준비 조건을 유지한다.
+k6는 scenario 시작 1.5초 뒤(2,000명은 5초 뒤)를 공통 목표로 요청을 모으지만 정확히 같은 순간의 실행을 보장하지 않는다.
+reservation_create_request_started_at_ms의 min/max와 수집 시각으로 실제 발송 범위를 확인한다. maxDuration 90초는 목표 부하 유지 시간이 아닌 1회 요청 완료 제한이다.
+
+DB 검증은 k6 실패 후에도 실행한다. 시나리오별 성공/거절 건수와 각 슬롯의 예약 수·인원·소유 관계를 함께 확인해야 정합성 검증 완료다.
+전체 실행 exit 0만으로 수집 품질까지 보장하지 않으므로 아래 결과 파일을 함께 읽는다.
+사용자 중단 시 정리 전 상태가 running=true일 수 있으며 DB 검증까지 완료되지 않을 수 있다. 같은 RUN_ID 재실행은 거절한다.
+
+## 결과와 해석
+
+results/RUN_ID는 Git에서 제외한다. 토큰·전체 요청/응답 본문·setup_data는 저장하지 않는다.
+
+| 파일 | 확인 내용 |
+| --- | --- |
+| fixture.jsonl | 회원·티켓·슬롯 50행, 토큰 없음 |
+| preparation-errors.txt / preparation-exit-code.txt | SQL 준비 단계 오류와 종료 코드. 준비 실패 시 본 측정은 시작하지 않음 |
+| metadata.txt | 코드 HEAD·JAR/도구 hash·시각·전용 환경 자원 |
+| pool-config-check.txt | 실제 max/min 10/10 |
+| summary.json / exit-code.txt | 요청 50·시나리오별 성공/거절 건수·예상 외 0, 응답/지연 분리·HTTP 종료 코드 |
+| db-verification.txt / db-verification-exit-code.txt / db-verification-errors.txt | DB 스냅샷·정합성 검사 결과와 실패 원인 |
+| metrics-before.txt / metrics-after.txt | Hikari/JVM/HTTP 누적 메트릭, setup 포함 |
+| resource-samples.jsonl / metrics-samples.txt | 주기별 자원·커넥션 표본, 순간 최대를 보장하지 않음 |
+| sampling-errors.txt / sampling-boundary-events.txt / sampling-exit-code.txt | 수집 오류·종료 경계·프로세스 상태 |
+| measurement-state-before-cleanup.json | 정리 전 OOMKilled·종료 코드·실제 k6 메모리 한도 |
+| cleanup-errors.txt / cleanup-exit-code.txt | 이번 실행 소유의 측정용 k6 정리 결과 |
+
+샘플러는 목록 도구를 복사해 새 관리 포트만 맞췄다. 짧은 요청 폭주가 표본 사이에 끝날 수 있어 pending 0을 대기 부재로 해석하지 않는다.
+결과 파일은 기존 실행을 덮어쓰지 않는다. 실행별 핵심 수치만 트러블슈팅 문서에 기록한다.
+종료 후 앱/DB/Redis는 남아 있다. 필요하면 사용자가 아래 명령으로 종료하며 볼륨은 유지한다.
+
+```bash
+RUN_ID=focus-01 docker compose -f perf/reservation-create/compose.yaml down
+```
+
+## 100명 확대 — 첫 단계
+
+50명 집중·분산 반복의 정합성을 확인한 뒤, 자원·코드·앱 재생성·warm-up 없음 조건은 유지하고 요청과 총 정원을 100으로 늘린다.
+TEST_VUS는 회원 준비·fixture 행 수·실제 VUs·성공/거절 기대값·DB 검사에 함께 전달한다. 기본값은 50이고 현재 50/100/200/500/1000/2000을 허용한다.
+SQL과 k6가 같은 인원으로 준비됐는지도 fixture의 users 필드로 확인한다. 기존 실행 결과를 덮어쓰지 않는다.
+
+```bash
+TEST_VUS=100 bash perf/reservation-create/run.sh single100-01 single
+```
+
+기대 결과는 100건 성공, DB 예약/서로 다른 회원/reservedCount/정원 모두 100이다.
+새 계정·티켓을 100개 준비하므로 준비 시간이 늘 수 있다. 데이터 수와 경합이 함께 늘어나는 부하 단계 비교이며 동일 부하에서의 최적화 비교는 아니다.
+single100-01과 spread100-01에서 각 100건 성공·DB 정합성을 확인했다. 성공 p95는 각각 약 2.58/2.57초였다.
+분산에서는 pending 최대 55개가 관측됐지만 timeout은 0이었다. 짧은 표본으로 분산 효과나 특정 병목을 확정하지 않는다.
+생성 지연 합격 기준은 아직 미설정이다. 예상 외 응답·timeout·정합성 위반이 생기면 부하를 더 올리지 않고 먼저 분석한다.
+spread100-02·single100-02 반복도 각 100건 성공·DB 정합성을 통과했다. 집중/분산 각각 두 번 확인했으며 핵심 비교는 측정 기록에 정리했다.
+반복 p95는 집중 약 2.65초, 분산 약 2.49초였다. pending은 각각 최대 53/67개로 관측됐으며 timeout은 없었다.
+## 200명 확대
+
+100명 단계와 동일한 앱 2 CPU/1GiB/pool 10·MySQL 1 CPU/1GiB·k6 1 CPU/2GiB·앱 재생성·warm-up 없음 조건을 유지한다.
+먼저 집중 조건으로 회원 200명이 각 1회 요청한다. 성공 200·거절/예상 외 0, DB 예약/회원/reservedCount/정원 200을 기대한다.
+
+```bash
+TEST_VUS=200 bash perf/reservation-create/run.sh single200-01 single
+```
+
+분산 조건은 집중 결과 확인 후 진행하며 슬롯 5개에 각 40명씩 배정한다. 매진 모드는 정원 20을 유지해 성공 20/거절 180을 기대한다.
+계정 준비·로그인 시간과 k6 자원도 확인한다. 지연 합격 기준은 미설정이다. 예상 외 응답·timeout·정합성 위반이 나오면 추가 증량을 멈추고 분석한다.
+single200-01·spread200-01은 각각 200건 성공·슬롯별 DB 정합성을 통과했다. 성공 p95는 집중 약 4.48초, 분산 약 3.88초였다.
+pending은 최대 76/186개로 관측됐으며 timeout은 없었다. 첫 비교라 분산 효과는 미확정이고 지연 합격 기준은 미설정이다.
+spread200-02·single200-02 반복도 각 200건 성공과 DB 정합성을 통과했다. 집중/분산의 성공 p95는 반복에서 약 4.46/4.08초였다.
+핵심 비교표와 한계는 측정 기록에 정리했다. 현재 200명까지 집중·분산 각각 두 번 확인했다.
+
+## 500명 확대
+
+앱·DB·Redis·k6 자원과 pool 10, 앱 재생성·warm-up 없음·각 회원 1회 요청은 유지한다.
+먼저 single에서 정원 500 슬롯 1개에 500명이 요청해 성공 500·거절/예상 외 0, DB 예약/회원/reservedCount/정원 500을 기대한다.
+
+```bash
+TEST_VUS=500 bash perf/reservation-create/run.sh single500-01 single
+```
+
+회원가입·티켓 준비·fixture·VU·HTTP/DB 검증을 500명으로 맞췄다. spread는 5개 슬롯에 각 100명, sold-out은 성공 20/예상 거절 480이다.
+500명 setup 로그인에만 최대 120초를 허용한다. 기존 단계는 60초를 유지하고, 요청 timeout 30초·scenario maxDuration 90초·gracefulStop 10초는 바꾸지 않는다.
+토큰 수명 검사는 setup 한도+120초로 맞춰 500명일 때 최소 240초를 요구한다. setup 시작/종료 Gauge도 기록하며 로그인은 요청 지연 Trend에서 제외한다.
+이 준비 한도 변경은 API 개선이 아니다. k6 자원과 setup 시간을 포함한 실행 Counter rate를 최대 처리량으로 해석하지 않는다.
+single500-01·spread500-01에서 각각 500건 성공과 DB 정합성을 확인했다. p95는 집중 약 7.27초, 분산 약 6.62초였다.
+요청 호출은 각각 약 0.91/0.85초에 분포했고 pending은 최대 190개가 관측됐다. 정확한 동시 DB 진입이나 분산 효과를 확정하지 않는다.
+spread500-02·single500-02 반복도 각 500건 성공·DB 정합성을 통과했다. 집중/분산 반복 p95는 약 7.19/6.95초였고 대기는 남아 있다.
+다음은 정원 20명에 500명이 요청하는 매진 검증이다. 성공 20/예상 거절 480/예상 외 0과 DB 예약/인원 20을 기대한다.
+
+```bash
+TEST_VUS=500 bash perf/reservation-create/run.sh full500-01 sold-out
+```
+
+기존 모드를 재사용한다. 성공/거절 지연을 분리하고, 거절된 요청이 추가 예약이나 인원 증가를 남기지 않았는지도 검증한다.
+full500-01에서 성공 20/예상 거절 480/예상 외 0과 DB 예약·인원 20을 확인했다. 성공/거절 p95는 약 1.59/4.17초였다.
+full500-02 반복도 성공 20/예상 거절 480/예상 외 0과 DB 예약·인원 20을 확인했다. 성공/거절 p95는 약 1.34/3.96초였다.
+두 실행 모두 준비·수집·정리 오류, 커넥션 timeout, k6 OOM은 없었다. 500명 집중·분산·매진 각각 두 번 정합성을 확인했다.
+예상 외 응답·timeout·정합성 위반·부하 발생기 한계가 나오면 증량을 멈추고 분석한다.
+핵심 수치는 측정 기록에 정리했다. 1,000명 집중 첫 실행도 아래와 같이 완료했다.
+
+## 1,000명 확대
+
+500명 단계와 자원·pool 10·앱 재생성·warm-up 없음·회원당 요청 1회 조건을 유지한다.
+회원·티켓·fixture·VU·HTTP/DB 검증에서 1,000명을 허용한다. single 정원은 1,000, spread는 5개 슬롯 각 200, sold-out은 정원 20이다.
+
+```bash
+TEST_VUS=1000 bash perf/reservation-create/run.sh single1k-01 single
+```
+
+먼저 성공 1,000/거절·예상 외 0, DB 예약·서로 다른 예약 회원·reservedCount·정원 모두 1,000을 기대한다.
+RUN_ID는 최대 12자라 single1k-01처럼 짧은 이름을 쓴다. setup 한도 120초와 최소 토큰 수명 240초는 500명과 동일하게 유지한다.
+계정 준비와 로그인 시간이 늘 수 있다. 실제 요청 시작 Gauge·k6 CPU/메모리·OOMKilled·timeout을 함께 확인한다.
+지연 합격 기준은 미설정이다. 오류·timeout·정합성 위반·부하 발생기 제약이 나오면 증량을 멈추고 분석한다. 2,000명 지원은 아직 없다.
+single1k-01은 1,000건 성공과 DB 정합성을 통과했으며 p95는 약 5.56초였다. 다만 요청 호출이 8.43초에 걸쳐 분포했다.
+정확히 동시 1,000명 성공으로 기록하지 않는다. 500명 실행과 유입 패턴이 달라 지연 수치만으로 개선을 판단하지 않는다.
+setup 로그인은 약 67.65초, k6 메모리 관측 최대는 약 1.417GiB였다. 상세 한계는 측정 기록에 남겼다.
+다음은 증량 전에 부하 발생기의 데이터 전달·VU 준비·발송 분포를 확인하는 단계다. 원인과 분산 1,000명 결과는 아직 확인하지 않았다.
+
+### 발송 지연 점검: 같은 1,000명·같은 자원으로 재측정
+
+setup 반환값을 회원/티켓/슬롯/토큰 전체 객체 배열에서 토큰 배열로 줄였다. 회원별 요청 데이터는 기존 SharedArray의 해당 한 항목에서 읽는다.
+실제 로그인과 JWT 인증은 유지하고 토큰을 파일로 저장하지 않는다. 토큰 배열도 VU에 전달되므로 복제 비용 전체를 제거한 것은 아니다.
+서버·DB·k6 자원, pool, 요청 수·정원, setup 한도·목표 요청 시각 1.5초는 유지한다. 서버 코드 최적화가 아닌 부하 도구 변경이다.
+
+```bash
+TEST_VUS=1000 bash perf/reservation-create/run.sh single1k-02 single
+```
+
+| 새 지표 | 해석 |
+| --- | --- |
+| reservation_create_setup_payload_chars | setup 반환 JSON의 문자 수, 토큰 원문은 저장하지 않음 |
+| reservation_create_vu_ready_at_ms | VU 함수에 진입한 시각의 min/max |
+| reservation_create_scenario_started_at_ms | 공통 scenario 시작 시각 |
+| reservation_create_late_vus | 공통 목표 시각(scenario 시작+1.5초, 2,000명은 +5초) 이후 함수에 진입한 VU 수 |
+
+기존 request_started_at_ms와 함께 VU 진입이 늦었는지, 진입 후 실제 호출이 늦었는지 구분한다.
+이 지표는 네트워크 수신·DB 진입 시각을 보장하지 않는다. k6 메모리·CPU와 HTTP/DB 정합성도 같이 본다.
+이전 실행에는 VU 진입/반환 문자 수 지표가 없어 같은 수치의 직접 전후 비교는 불가하다. 기존 발송 범위·메모리·응답 결과는 비교한다.
+single1k-02에서 1,000건 성공과 DB 정합성을 확인했다. 호출 시작 범위는 8.43초→168ms, k6 메모리 관측 최대는 1.417GiB→496.7MiB였다.
+모든 VU가 목표 시각 전에 함수에 진입했으며 late_vus는 0이었다. 토큰 배열도 VU에 전달되므로 복제 비용 전체가 제거됐다는 뜻은 아니다.
+같은 서버 JAR에서 성공 p95는 약 12.68초였다. 유입이 더 집중된 조건이므로 기존 p95 5.56초와 코드 개선/퇴화 전후로 비교하지 않는다.
+실제 네트워크/DB 도착 시각을 보장하지 않으며 새 도구 조건의 반복 검증은 아직 없다. 다음은 인원을 유지한 분산 비교다.
+
+```bash
+TEST_VUS=1000 bash perf/reservation-create/run.sh spread1k-01 spread
+```
+
+spread1k-01은 슬롯 5개에 각 200건 성공과 총 DB 예약/회원 1,000을 확인했다. 성공 p95는 약 11.76초, 호출 시작 범위는 234ms였다.
+목표 이후 함수 진입 VU는 13명, k6 메모리 관측 최대는 492MiB였다. 예상 외 응답·timeout·수집/정리 오류와 OOM은 없었다.
+spread1k-02·single1k-03도 각 1,000건 성공과 DB 정합성을 통과했다. 반복 p95는 분산 약 11.35초, 집중 약 13.31초였다.
+반복 발송 범위는 각각 207/155ms, 늦게 진입한 VU는 모두 0이었다. k6 메모리 관측 최대는 501.3/495.5MiB였다.
+변경한 도구에서 집중·분산 각각 두 번 정합성을 확인했지만 지연 기준은 미설정이며 대기는 남아 있다. 핵심 수치와 한계는 측정 기록을 따른다.
+full1k-01 매진 검증은 성공 20/예상 거절 980/예상 외 0, DB 예약·인원 20을 확인했다.
+호출 시작 범위는 151ms, 늦은 VU는 0이었다. 성공/거절 p95는 약 1.50/7.15초이고 timeout·수집/정리 오류와 OOM은 없었다.
+full1k-02도 성공 20/예상 거절 980/예상 외 0, DB 예약·인원 20으로 통과했다. 호출 시작 범위는 226ms, 늦은 VU는 0이었다.
+성공/거절 p95는 약 1.88/8.23초, 커넥션 timeout은 0이며 수집·정리 오류와 k6 OOM은 없었다.
+변경한 도구에서 1,000명 집중·분산·매진을 각각 두 번 확인했다. 지연 목표는 여전히 미설정이다.
+
+```bash
+TEST_VUS=1000 bash perf/reservation-create/run.sh full1k-01 sold-out
+```
+
+## 2,000명 집중 첫 실행 준비
+
+1,000명 세 시나리오의 반복 검증 후, 먼저 single에서 정원 2,000 슬롯에 서로 다른 회원 2,000명이 한 번씩 요청한다.
+기대값은 HTTP 성공 2,000·거절/예상 외 0, DB 예약·예약 회원·reservedCount·정원 모두 2,000이다.
+
+```bash
+TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-01 single
+```
+
+1,000명 로그인 준비가 약 70초여서 2,000명 setup 한도만 240초, 최소 토큰 수명은 360초로 늘린다.
+첫 실행은 서버·k6 자원, pool 10, 목표 발송 시각 +1,500ms, 요청 timeout 30초, scenario 90초와 gracefulStop 10초를 유지했다.
+로그인은 예약 응답 지연에서 제외한다. 요청 시작 범위·늦은 VU·OOM·수집 상태를 확인하기 전에는 2,000명 동시 처리로 표현하지 않는다.
+예상 외 오류·timeout·정합성 실패나 부하 발생기 문제가 있으면 확대를 멈추고 원인을 구분한다. 지연 합격 기준은 여전히 미설정이다.
+
+single2k-01은 기대한 HTTP·DB 정합성을 통과했다. 성공 p95/p99는 약 22.82/23.59초, 커넥션 timeout과 k6 OOM은 없었다.
+호출 시작 범위는 3,404ms, 목표 시각보다 늦게 준비된 VU는 1,301명이었다. k6 메모리 관측 최대는 1.441GiB였다.
+2,000명 동시 처리로 표현하지 않으며, 다음 비교 전에 VU 준비·발송 조건을 점검한다. 지연 합격 기준은 미설정이다.
+
+### 2,000명 발송 준비 시간 조정 후 반복
+
+single2k-02부터 2,000명만 공통 목표를 scenario 시작 +5초로 늦춘다. 1,000명 이하와 서버·발생기 자원·요청 timeout은 유지한다.
+VU 준비 여유를 주는 도구 변경이며 API 성능 개선이 아니다.
+
+```bash
+TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-02 single
+```
+
+HTTP·DB 정합성과 함께 늦은 VU·실제 호출 시작 범위가 줄었는지 확인한다. 준비 지연이 줄어도 공통 시각에 깨어나는 비용으로 발송은 분산될 수 있다.
+첫 실행과 유입 패턴이 달라질 수 있으므로 응답 지연만으로 서버 성능의 개선·악화를 판단하지 않는다.
+
+single2k-02는 HTTP 성공 2,000·예상 외 0, DB 예약·예약 회원·인원 모두 2,000으로 통과했다.
+늦은 VU는 1,301명에서 0명으로 줄었지만 호출 시작 범위는 여전히 2,778ms였다(이전 3,404ms).
+성공 p95/p99는 약 23.02/23.52초이며 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+준비 완료와 발송 집중은 별개이며, 완전한 동시 2,000명 처리로 표현하지 않는다.
+
+### k6 CPU 2개로 발송 범위 비교
+
+single2k-03은 측정용 k6만 1 CPU에서 2 CPU로 늘린다. 기본값은 1이며 PERF_K6_CPUS는 1 또는 2만 허용한다.
+서버 2 CPU·DB 1 CPU·pool 10·k6 메모리 2GiB·목표 발송 +5초·요청 timeout은 유지한다. accounts 서비스 자원은 변경하지 않는다.
+
+```bash
+PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-03 single
+```
+
+metadata.txt의 generatorCpus와 measurement-state-before-cleanup.json의 nanoCpus로 설정·실제 CPU 제한을 확인한다.
+single2k-02의 호출 시작 범위 2,778ms와 비교하고 HTTP·DB 정합성, 늦은 VU, 응답 지연, 수집·OOM 상태를 함께 확인한다.
+발송 범위가 줄어도 서버 코드 개선으로 해석하지 않는다. 같은 Docker 호스트의 자원을 공유하므로 CPU 제한 변경과 호스트 경합의 영향은 단일 실행만으로 분리할 수 없다.
+
+single2k-03은 실제 nanoCpus=2000000000으로 실행됐고 HTTP 성공 2,000·예상 외 0, DB 예약·예약 회원·인원 모두 2,000을 확인했다.
+호출 시작 범위는 309ms, 늦은 VU는 0이었다. 성공 p95/p99는 약 22.61/23.30초, k6 메모리 관측 최대는 1.431GiB였다.
+커넥션 timeout·수집/정리 오류·k6 OOM은 없었다. 아래 같은 조건의 반복도 완료했다.
+
+```bash
+PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh single2k-04 single
+```
+
+single2k-04도 HTTP 성공 2,000·예상 외 0, DB 예약·예약 회원·인원 모두 2,000으로 통과했다.
+호출 시작 범위 272ms·늦은 VU 0명, 성공 p95/p99 약 20.97/21.71초였다. 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+같은 2 CPU 조건에서 집중 발송과 정합성을 두 번 확인했으며, 지연 합격 기준은 여전히 미설정이다.
+
+### 2,000명 매진
+
+full2k-01은 k6 2 CPU·목표 발송 +5초에서 성공 20·정상 거절 1,980·예상 외 0, DB 예약·회원·인원·정원 모두 20으로 통과했다.
+호출 시작 범위 292ms·늦은 VU 0명, 성공/거절 p95는 약 1.85/12.42초였다. 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+정상 거절도 대기가 남아 있으며 지연 합격 기준은 미설정이다. 아래 같은 조건의 반복도 완료했다.
+
+```bash
+PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh full2k-02 sold-out
+```
+
+full2k-02도 성공 20·정상 거절 1,980·예상 외 0, DB 예약·회원·인원·정원 모두 20으로 통과했다.
+호출 시작 범위 320ms·늦은 VU 0명, 성공/거절 p95는 약 1.84/12.55초였다. 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+2 CPU 발생기 조건에서 2,000명 집중·매진을 각각 두 번 확인했다.
+
+### 2,000명 분산
+
+spread2k-01은 k6 2 CPU·목표 발송 +5초에서 성공 2,000·거절/예상 외 0으로 통과했다.
+서로 다른 어트랙션의 슬롯 5개에 각각 정원·예약·reservedCount 400, 전체 예약·회원 2,000을 확인했다.
+호출 시작 범위 319ms·늦은 VU 0명, 성공 평균/p95/p99는 약 12.47/20.46/20.96초였다.
+커넥션 timeout·수집/정리 오류·k6 OOM은 없었다. 단일 실행으로 분산 효과를 확정하지 않으며 지연 합격 기준은 미설정이다.
+아래 같은 조건의 반복도 완료했다.
+
+```bash
+PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh spread2k-02 spread
+```
+
+spread2k-02도 성공 2,000·거절/예상 외 0, 슬롯 5개 각각 예약·정원·reservedCount 400, 전체 예약·회원 2,000으로 통과했다.
+호출 시작 범위 279ms·늦은 VU 0명, 성공 p95/p99는 약 22.17/22.76초였다. 커넥션 timeout·수집/정리 오류·k6 OOM은 없었다.
+2 CPU 발생기 조건에서 2,000명 집중·매진·분산 각각 두 번 정합성을 확인했다. 집중·분산 지연 범위는 겹치며 지연 합격 기준은 미설정이다.
+single2k-04·full2k-02·spread2k-02의 종료 후 pool 스냅샷은 모두 active 0·pending 0·idle 10, timeout 누적 0이었다.
+회복 시간·지속 여부·후속 예약 API 응답은 검증하지 않았으며 장시간 지속 부하도 별도 과제다. 단계별 핵심 결과와 한계는 측정 기록을 따른다.
+
+## 잠금 대기 진단 실행
+
+기존 자원을 유지하고 관측만 추가한다. 기본 PERF_DB_LOCKS=0이며, 1이면 Performance Schema의 현재 잠금 대기 관계를 수집한다.
+
+```bash
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-01 single
+```
+
+- `db-lock-samples.jsonl`: UTC 표본 시각, 대기 관계 수, 대기 트랜잭션 수, 슬롯·어트랙션·회원·기타 테이블별 대기 관계 수
+- `db-lock-sampling-errors.txt`와 `sampling-errors.txt`: 조회 오류. 오류나 표본 누락을 대기 0으로 해석하지 않는다.
+- `sampling-exit-code.txt`: 수집 프로세스 종료 상태. HTTP·DB 통과와 별도로 확인한다.
+
+전용 로컬 MySQL의 기존 root 계정으로 SELECT만 실행한다. 앱 계정 권한이나 DB 설정은 변경하지 않는다.
+한 대기 요청이 여러 잠금에 막히면 관계 수가 여러 개일 수 있다. 관계 수는 요청 수·누적 대기 횟수·대기 시간이 아니다.
+로그인 setup도 수집하므로 summary의 실제 예약 호출 시작 범위와 UTC 표본 시각을 맞춰 해석한다. Prometheus와 DB 조회는 같은 순간이 아니다.
+기존 수집 주기(목표 2초)에 조회를 추가하므로 실제 간격과 관측 오버헤드가 늘 수 있다. 표본 0만으로 잠금 대기 부재를 보장하지 않는다.
+SQL 원문·LOCK_DATA·토큰은 저장하지 않는다.
+
+lock2k-01은 2,000건 성공·DB 정합성과 정상 수집을 확인했다. 잠금 표본 50개 중 6개에서 슬롯 테이블 대기가 관측됐다.
+양수 표본의 대기 트랜잭션은 7~9개, 대기 관계는 28~45개였다. 호출 시작 범위 332ms·늦은 VU 0명, 성공 p95는 약 22.72초였다.
+슬롯 경합은 확인했지만 전체 지연의 유일한 원인으로 단정하지 않는다. 아래 같은 관측을 켠 분산 실행도 완료했다.
+
+```bash
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-02 spread
+```
+
+lock2k-02도 2,000건 성공·슬롯 5개 각각 400건·DB 정합성을 통과했다. 호출 시작 범위 280ms·늦은 VU 0명, p95 약 18.87초였다.
+49개 잠금 표본 중 5개에서 슬롯 대기가 관측됐고 양수 표본의 대기 트랜잭션은 1~4개, 대기 관계는 1~7개였다. pool pending 최대는 집중과 같이 190이었다.
+수집 오류·커넥션 timeout·k6 OOM은 없었다. 아래 분산 → 집중의 역순 반복 중 lock2k-03 분산을 완료했다.
+
+```bash
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-03 spread
+PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh lock2k-04 single
+```
+
+lock2k-03도 2,000건 성공·DB 정합성을 통과했다. 호출 시작 범위 314ms·늦은 VU 0명, 성공 p95 약 16.99초였다.
+잠금 표본 48개 중 4개에서 슬롯 대기를 관측했고 양수 표본의 대기 트랜잭션은 1~5개, 대기 관계는 1~11개였다.
+pool pending 최대 190, 커넥션 timeout·수집 오류·k6 OOM은 없었다.
+
+lock2k-04 집중 반복도 2,000건 성공·DB 정합성을 통과했다. p95 약 22.47초·발송 범위 246ms·늦은 VU 0명이었다.
+잠금 표본 50개 중 6개에서 슬롯 대기가 관측됐고 대기 트랜잭션은 8~9개, 관계 수는 36~45개였다. pool pending 최대 190, 커넥션 timeout·수집 오류·k6 OOM은 없었다.
+집중 → 분산 → 분산 → 집중 순서에서 슬롯 경합이 반복 관측됐다. 잠금은 유지하며 비용 검토와 원인별 기여 시간 분리는 후속 과제다.
+현재 fixture는 새 회원이므로 예약 이력이 많은 회원의 검사 쿼리 성능까지 검증한 것은 아니다.
+
+## 중복·시간 충돌 검사 실행계획
+
+`explain-checks.sql`은 lock2k-04의 기존 회원·슬롯을 선택하고 실제 인덱스와 EXPLAIN ANALYZE를 출력한다.
+Querydsl의 중복·시간 충돌 조건을 옮긴 동등 SQL이며 Hibernate가 생성한 SQL 원문을 캡처한 것은 아니다.
+읽기 전용 트랜잭션에서 SELECT만 실행하고 데이터·인덱스·통계는 변경하지 않는다. EXPLAIN ANALYZE는 조회를 실제 실행하므로 부하 실행과 겹치지 않게 수행한다.
+
+```bash
+mkdir perf/reservation-create/results/plans2k-01
+RUN_ID=plans2k-01 MSYS_NO_PATHCONV=1 docker compose -f perf/reservation-create/compose.yaml exec -T -e MYSQL_PWD=perf-local-only mysql mysql -uperf --default-character-set=utf8mb4 --table reservation_create_perf < perf/reservation-create/explain-checks.sql > perf/reservation-create/results/plans2k-01/check-query-plans.txt
+```
+
+새 결과 폴더 이름을 사용한다. mkdir가 실패하면 다음 명령을 실행하지 않는다. SQL 오류가 출력되면 결과를 정상 자료로 취급하지 않는다.
+fixture_found=1인지 먼저 확인하고 index lookup·actual rows·loops·actual time을 확인한다. 계획의 cost는 밀리초가 아니다.
+기존 부하가 끝난 뒤 해당 회원에게 예약이 생긴 상태다. 요청 전 예약이 없던 상태나 예약 이력이 많은 회원의 비용을 재현하지 않으며, 동시 부하 중 잠금 대기 시간도 측정하지 않는다.
+plans2k-01은 fixture_found=1·전체 예약 28,580건·회원 예약 1건이었다. 세 조회 모두 예약 인덱스 lookup에서 실제 1행을 읽었다.
+최상위 actual time은 중복 있음 0.677ms·시간 충돌 있음 1.62ms·충돌 없음 0.0434ms였다. 이번 조건에서 바로 쿼리·인덱스를 바꿀 근거는 확보하지 못했다.
+이 결과만으로 쿼리가 전체 지연의 원인이라고 확정하지 않는다.
+
+## pool 20 비교
+
+PERF_DB_POOL_SIZE는 10(기본) 또는 20만 허용하며 Hikari max/min을 함께 지정한다. 실제 max/min은 HTTP 부하 전에 검증한다.
+pool2k-01은 이전 집중 진단과 서버·DB·k6 자원·발송 목표·잠금 관측을 유지하고 pool만 20/20으로 바꾼다.
+
+```bash
+PERF_DB_POOL_SIZE=20 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh pool2k-01 single
+```
+
+기대값은 성공 2,000·예상 외 0·DB 예약/회원/인원 2,000이다. 응답 지연과 pool·잠금 대기를 함께 비교한다.
+pool 증가는 DB 잠금 대기를 늘릴 수 있으므로 성능 개선으로 가정하지 않는다. 운영 설정은 변경하지 않는다.
+
+pool2k-01은 실제 max/min 20/20에서 2,000건 성공·DB 정합성을 통과했다. 발송 범위 269ms·늦은 VU 0명, p95 약 23.66초였다.
+pool pending 최대는 190에서 180으로 줄었지만, 슬롯 대기 양수 표본의 트랜잭션은 8~9개에서 18~19개로 늘었다(lock2k-04와 비교).
+수집 오류·커넥션 timeout·k6 OOM은 없었다. 이번 실행에서 지연 개선은 확인되지 않았으며 단일 실행으로 항상 느리다고 단정하지 않는다. 기본 pool 10은 유지한다.
+
+## KAN-155 슬롯 잠금 구간 측정과 정원 확보 개선
+
+정원 확보·flush SQL을 일반 자리 2→1회, 마지막 자리 3→1회로 줄였다.
+고정 업무 시각의 2,000건 집중 부하에서 변경 전후 각각 두 번 비교했고, 변경 후 매진·분산 정합성도 확인했다.
+
+| 비교 항목 | 변경 전 2회 | 변경 후 2회 |
+| --- | --- | --- |
+| API p95 | 21.25~22.37초 | 19.11~19.43초 |
+| 조회 후 완료 평균 | 10.61~10.75ms | 9.51~9.64ms |
+| 집중 요청 성공 / 예상 외 | 매회 2,000 / 0 | 매회 2,000 / 0 |
+
+전체 흐름, 실행별 수치, 잠금 모드 회귀와 검증 한계는 [KAN-155 트러블슈팅](../../docs/troubleshooting/reservation-slot-lock-duration.md)에 정리했다.
+이 결과만으로 운영 성능·완전한 동시 실행·지연 목표 충족을 보장하지 않는다.
+
+### 구간 지표 수집
+
+Timer는 metrics-before.txt·metrics-samples.txt·metrics-after.txt에 수집한다.
+metadata의 수집 활성화 표시는 필터 설정이므로 실제 지표 존재와 count도 확인한다.
+
+| Prometheus 접두어 | result | 구간 |
+| --- | --- | --- |
+| reservation_create_slot_lookup_seconds | success / failure | 슬롯 조회 직전부터 반환 또는 예외까지 |
+| reservation_create_slot_postlookup_seconds | committed / rolledback / unknown | 조회 지표 기록 직후부터 afterCompletion callback까지 |
+| reservation_create_attraction_lookup_seconds | success / failure | 어트랙션 잠금 조회. postlookup에 포함 |
+
+평균은 동일 tag의 시작 전후 sum 차이 / count 차이이며 단위는 초다.
+슬롯·어트랙션 조회에는 SQL·엔티티 조회와 잠금 대기가 포함되고, postlookup은 실제 DB 잠금 보유 시간 자체가 아니다.
+어트랙션 조회와 postlookup을 합산하지 않는다. 구간 histogram/percentile 설정은 없으므로 구간 p95/p99를 제공한다고 가정하지 않는다.
+2,000건 모두 성공한 실행은 세 지표의 success 또는 committed count 증가가 각각 2,000인지 확인한다.
+매진은 조회 success와 예약 성공이 다르며 committed 20·rolledback 1,980을 확인한다. 누락 지표를 0으로 간주하지 않는다.
+
+### 고정 업무 시각 실행
+
+PERF_FIXED_TIME을 명시한 경우에만 compose.fixed-time.yaml을 추가해 reservation-create-perf-time profile과 reservation.perf.fixed-time을 전달한다.
+실행기는 YYYY-MM-DDT14:00:00+09:00만 허용하고 SQL 방문일·슬롯·티켓 날짜도 맞춘다.
+변수를 지정하지 않으면 기존 실제 시각 모드와 KST 10:00 이상~21:10 미만 제한을 유지한다.
+아래 RUN_ID는 예시다. 기존 결과 폴더가 있으면 새 이름(최대 12자)을 사용하며 덮어쓰지 않는다.
+
+```bash
+./gradlew bootJar
+PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 TEST_VUS=50 bash perf/reservation-create/run.sh smoke155-new single
+```
+
+50건에서 날짜·profile·지표 연결을 확인한 뒤 집중 부하를 실행한다.
+
+```bash
+PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh measure155-1 single
+```
+
+- 실제 ClockConfig는 기본으로 유지되며 전용 profile에서 고정 Clock이 우선 주입된다. Clock을 주입받는 다른 구성요소도 영향을 받으므로 이 profile은 전용 부하 환경에서만 사용한다.
+- 기존 스케줄러 비활성화를 유지한다. 팀원 도구와 공통 application-perf.yaml은 변경하지 않는다.
+- JWT·로그·Micrometer 경과 시간·SQL created_at/updated_at은 실제 시각을 유지한다. KstTime.now()를 직접 쓰는 취소 등 다른 경로까지 고정하지 않는다.
+- 고정 시각은 흐르지 않는다. 마감 경과·자정 경계는 별도 테스트로 확인한다.
+- metadata의 businessTimeMode/fixedBusinessTime·JAR/도구 해시·실제 자원과 발송 범위를 확인한다. KAN-150 실제 시각 결과와 동일 조건으로 취급하지 않는다.
+
+### 확인한 테스트와 남은 범위
+
+설정 격리·측정 기록·정원 확보 SQL·자동 마감·rollback·잠금 전제를 검증했고, 진단 제거 후 예약 생성/취소/마감/슬롯 변경 동시성 회귀 29개도 통과했다.
+프로젝트 전체 테스트·CI는 별도 확인 대상이다. 기존 예약 이력이 많은 회원, 장시간 지속 부하·회복, 실제 시각 모드 개선 후 비교 등의 [후속 과제](../../docs/troubleshooting/reservation-slot-lock-duration.md#8-완료-범위와-후속-과제)는 미완료로 남긴다.
+
+## 마무리 및 후속 작업
+
+KAN-150은 예약 생성 부하의 정합성 검증·병목 진단으로 마무리한다. 최종 기본 pool 10·측정 k6 2 CPU 조건에서 2,000명 집중·매진·분산을 각각 두 번 확인했다.
+서버 비즈니스 코드와 운영 설정은 변경하지 않았으며, 지연 합격·운영 최대 수용량·완전한 동시 실행을 보장하는 결과는 아니다.
+추후 테스트의 우선순위와 검증 한계는 [측정 기록의 후속 검증 목록](../../docs/troubleshooting/reservation-create-load-test.md#작업-마무리와-후속-검증)에 모았다.
+잠금 구간 측정, 예약 이력이 많은 회원, HTTP 동시성 회귀, 지속 부하·회복, pool 반복 비교 등을 후속 작업으로 다룬다.
+
+## 초기 50명 검증 기록
+
+focus-02·03·04에서 SQL 준비, 실제 HTTP 요청 50회(성공 20/예상 거절 30), DB 정합성과 정상 수집·정리를 확인했다.
+최신 dev 반영 후 focus-03을 현재 코드의 기준 결과로 기록했다. 지연 합격 기준은 미설정이며 warm-up은 없다.
+수치와 해석 한계는 [측정 기록](../../docs/troubleshooting/reservation-create-load-test.md)에 남긴다.
+focus-03·04는 동일 JAR이며 지연에 편차가 남아 있다. single-01·spread-01도 각각 50건 성공과 DB 정합성을 통과했다.
+집중·분산 각각 두 번의 결과를 측정 기록에 정리했다. 아래 역순 반복도 완료했으며 네 실행 모두 50건 성공과 DB 정합성을 통과했다.
+
+```bash
+bash perf/reservation-create/run.sh spread-02 spread
+```
+
+spread-02 결과 확인 후 집중 조건을 반복한다. 앱 재생성이 포함되므로 동시에 실행하지 않는다.
+
+```bash
+bash perf/reservation-create/run.sh single-02 single
+```
+
+양쪽 모두 앱 재생성·warm-up 없음이다. 집중 single-02의 p95는 약 3.82초였고 pending 최대 40개가 관측됐다.
+정합성 통과와 지연 편차는 구분한다. 성능 안정성이나 특정 잠금 병목을 확정하지 않는다. 회원별 중복/시간 충돌 HTTP 대표 사례는 아직 미실행이다.
+이 절은 초기 50명 단계의 기록이다. 이후 2,000명까지 확장·검증했으며 현재 결과와 한계는 위 마무리 및 측정 기록을 따른다.

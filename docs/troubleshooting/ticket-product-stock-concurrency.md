@@ -1,11 +1,14 @@
 # 관리자 상품 변경과 주문·재고 복구 경합 트러블슈팅
 
 > **KAN-95 · 재고 변경 유실 재현 및 잠금·version 검증 적용**
->
-> 관리자 상품 삭제가 주문의 재고 차감을 덮어쓰는 문제를 실제 MySQL에서 재현했다.
-> 관리자 수정·삭제에 상품 행 잠금을 적용하고, 오래된 관리자 수정 요청은 version 비교로 거절하도록 변경했다.
-> 최신 로컬 XML에서 동시성 및 version 통합 테스트 8개의 통과를 확인했다.
-> 기존 테이블·데이터를 대상으로 한 migration 검증은 아직 완료하지 않았다.
+
+| 항목 | 핵심 내용 |
+| --- | --- |
+| 재현 | 주문이 재고를 10→8로 차감한 뒤 관리자 삭제가 재고를 10으로 덮어씀 |
+| 동시 변경 방어 | 관리자 수정·삭제도 기존 상품 행 비관적 잠금에 참여 |
+| 오래된 화면 방어 | @Version과 요청 version 비교로 충돌 거절, flush 후 응답 version 생성 |
+| 검증 | 동시성·version 통합 테스트 8개는 당시 XML 확인, 관련 전체 통과는 사용자 보고 |
+| 범위 | 기존 DB migration·클라이언트 version 연동은 당시 미검증. 수동 SQL 절은 Flyway 도입 전 이력 |
 
 ## 1. 무엇이 문제였나
 
@@ -215,10 +218,9 @@ if (!ticketProduct.getVersion().equals(request.version())) {
 
 [TicketProductStockConcurrencyIntegrationTest.java](../../src/test/java/com/example/attractionreservation/domain/ticketProduct/service/TicketProductStockConcurrencyIntegrationTest.java)의 로컬 XML 보고서를 확인했다.
 
-```text
-시작 시각: 2026-11-02 16:12:55 KST
-tests=8, failures=0, errors=0, skipped=0
-```
+| XML로 확인한 범위 | 테스트 수 | 결과 | 시작 시각(KST) |
+| --- | ---: | --- | --- |
+| 재고 동시성·version 통합 테스트 | 8 | 실패·오류·건너뜀 0 | 2026-11-02 16:12:55 |
 
 검증한 8개 실행 케이스는 다음과 같다.
 

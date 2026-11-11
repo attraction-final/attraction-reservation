@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -57,6 +59,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -72,6 +75,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 // 개선 전에는 실패할 수 있는 재현 테스트다. 예약 조회·상태 변경·정원 복구는 실제 MySQL에서 실행한다.
 @DataJpaTest(properties = "spring.datasource.hikari.maximum-pool-size=10")
@@ -81,7 +85,7 @@ import static org.mockito.Mockito.mockStatic;
 @Import({
         JpaConfig.class,
         QuerydslConfig.class,
-        ReservationService.class,
+        ReservationService.class, SimpleMeterRegistry.class,
         UserService.class,
         UserWithdrawalService.class,
         TicketService.class,
@@ -95,6 +99,7 @@ class ReservationCancellationConcurrencyIntegrationTest {
 
     @Autowired
     private ReservationService reservationService;
+
 
     @Autowired
     private UserWithdrawalService userWithdrawalService;
@@ -115,6 +120,9 @@ class ReservationCancellationConcurrencyIntegrationTest {
     @MockitoBean
     private RefreshTokenRepository refreshTokenRepository;
 
+    @MockitoBean
+    private Clock clock;
+
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
     private int mysqlLogOffset;
@@ -132,6 +140,9 @@ class ReservationCancellationConcurrencyIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // 예약 생성의 업무 시각은 모든 작업 스레드에 주입되는 Clock으로 제어한다.
+        when(clock.getZone()).thenReturn(KstTime.ZONE);
+        when(clock.instant()).thenReturn(NOW.atZone(KstTime.ZONE).toInstant());
         transactionTemplate = new TransactionTemplate(transactionManager);
         try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
             time.when(KstTime::now).thenReturn(NOW);

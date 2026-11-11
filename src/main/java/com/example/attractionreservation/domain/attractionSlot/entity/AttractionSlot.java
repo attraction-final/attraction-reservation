@@ -4,6 +4,8 @@ import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
 import com.example.attractionreservation.domain.attractionSlot.entity.enums.UnavailableReason;
 import com.example.attractionreservation.global.entity.BaseTimeEntity;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -187,6 +189,26 @@ public class AttractionSlot extends BaseTimeEntity {
 
         // 정원 부족으로 자동 마감된 슬롯만 자리가 생기면 다시 연다.
         // 관리자 마감·운영 중단·취소 상태는 기존 정책에 따라 유지한다.
+        syncStatusWithRemainingCount();
+    }
+
+    /**
+     * 예약 가능한 슬롯의 한 자리를 확보하고, 마지막 자리라면 자동 마감한다.
+     * 같은 트랜잭션에서 비관적 쓰기 잠금으로 조회한 관리 상태 엔티티에 호출한다.
+     * 이 메서드는 엔티티 상태만 변경하며 직접 SQL을 실행하거나 잠금을 획득하지 않는다.
+     *
+     * @throws BusinessException 슬롯이 OPEN이 아니거나 잔여 정원이 없는 경우
+     */
+    public void acquireReservationCapacity() {
+        // 호출 측은 같은 트랜잭션에서 이 슬롯의 비관적 쓰기 잠금을 보유해야 한다.
+        // 이 메서드의 상태 검사와 필드 변경만으로 동시 요청을 직렬화할 수는 없다.
+        if (this.status != SlotStatus.OPEN || isFull()) {
+            // 수동 마감·운영 중단·취소 상태 또는 정원 부족이면 기존 자리 확보 오류를 유지한다.
+            throw new BusinessException(ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
+        }
+        // 관리 상태 엔티티라면 flush 시 dirty checking으로 DB에 반영한다.
+        this.reservedCount++;
+        // 마지막 자리가 찼다면 CLOSED, autoClosed=true로 함께 변경한다.
         syncStatusWithRemainingCount();
     }
 }

@@ -1,5 +1,9 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import com.example.attractionreservation.global.config.ClockConfig;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -20,6 +24,7 @@ import com.example.attractionreservation.global.config.QuerydslConfig;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
 import org.hibernate.SessionFactory;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +34,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -65,7 +71,7 @@ import static org.assertj.core.api.SoftAssertions.assertSoftly;
 })
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class,
+@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class, ClockConfig.class,
         AdminReservationListQueryIntegrationTest.MySqlConfig.class})
 class AdminReservationListQueryIntegrationTest {
 
@@ -79,6 +85,9 @@ class AdminReservationListQueryIntegrationTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private CountSqlInspector countSqlInspector;
 
     // 목록이 사용하지 않는 협력 Service만 mock으로 대체한다. Repository·DTO는 실제 실행한다.
     @MockitoBean
@@ -100,6 +109,16 @@ class AdminReservationListQueryIntegrationTest {
         MySQLContainer mysqlContainer() {
             // 프로젝트의 Flyway 문서·운영 RDS와 같은 버전으로 측정한다.
             return new MySQLContainer(DockerImageName.parse("mysql:8.4"));
+        }
+
+        @Bean
+        CountSqlInspector countSqlInspector() {
+            return new CountSqlInspector();
+        }
+
+        @Bean
+        HibernatePropertiesCustomizer countSqlCustomizer(CountSqlInspector inspector) {
+            return properties -> properties.put("hibernate.session_factory.statement_inspector", inspector);
         }
     }
 
@@ -306,6 +325,87 @@ class AdminReservationListQueryIntegrationTest {
         assertThat(page.hasNext()).isEqualTo(pageNumber + 1 < page.getTotalPages());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "false, false, false",
+            "true, false, false",
+            "false, true, false",
+            "false, false, true",
+            "true, true, false",
+            "true, false, true",
+            "false, true, true",
+            "true, true, true"
+    })
+    @DisplayName("회원·시설·날짜 조합별 전체 건수를 유지하고 필요한 count 연관 조회만 수행한다")
+    void findAdminReservationAll_filterCombinations_preserveCountAndAvoidUnnecessaryJoins(
+            boolean withUser, boolean withAttraction, boolean withDate) {
+        // given
+        ExpectedReservation target = expectedReservations.get(0);
+        SearchAdminReservationCondition condition = new SearchAdminReservationCondition(
+                withUser ? target.userId() : null,
+                withAttraction ? target.attractionId() : null,
+                ReservationStatus.RESERVED,
+                withDate ? DAY : null);
+        List<Long> expectedIds = expectedReservations.stream()
+                .filter(item -> !withUser || item.userId().equals(target.userId()))
+                .filter(item -> !withAttraction || item.attractionId().equals(target.attractionId()))
+                .filter(item -> !withDate || item.startsAt().toLocalDate().equals(DAY))
+                .map(ExpectedReservation::reservationId).sorted(Comparator.reverseOrder()).toList();
+
+        // when
+        CountQueryResult result = captureCountQuery(condition);
+
+        // then
+        assertReservationIds(result.page(), expectedIds, expectedIds.size());
+        assertThat(result.page().getContent()).allSatisfy(item ->
+                assertThat(item.status()).isEqualTo(ReservationStatus.RESERVED));
+        if (!withAttraction && !withDate) {
+            assertThat(result.sql()).as("예약 필드만 검색하면 count에 연관 테이블 접근이 없어야 함")
+                    .doesNotContain(" join ", "attraction_slots", " attractions ");
+        } else {
+            // 정확한 join 개수나 alias를 고정하지 않고, 검색에 필요한 슬롯 접근이 남는지 확인한다.
+            assertThat(result.sql()).contains("attraction_slots");
+            if (withAttraction) {
+                assertThat(result.sql()).contains("attraction_id");
+            }
+            if (withDate) {
+                assertThat(result.sql()).contains("starts_at");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("예약이 없는 회원 검색은 count join 없이 전체 건수 0의 빈 페이지를 반환한다")
+    void findAdminReservationAll_nonexistentUser_returnsEmptyPageWithoutCountJoins() {
+        // given
+        SearchAdminReservationCondition condition =
+                new SearchAdminReservationCondition(Long.MAX_VALUE, null, ReservationStatus.RESERVED, null);
+
+        // when
+        CountQueryResult result = captureCountQuery(condition);
+
+        // then
+        assertReservationIds(result.page(), List.of(), 0);
+        assertThat(result.page().getTotalPages()).isZero();
+        assertThat(result.page().hasNext()).isFalse();
+        assertThat(result.sql()).doesNotContain(" join ", "attraction_slots", " attractions ");
+    }
+
+    private CountQueryResult captureCountQuery(SearchAdminReservationCondition condition) {
+        List<String> statements;
+        Page<SearchAdminReservationResponse> page;
+        countSqlInspector.start();
+        try {
+            page = queryForRegression(condition, 0, 50);
+        } finally {
+            statements = countSqlInspector.stop();
+        }
+        List<String> counts = statements.stream().map(sql -> sql.replaceAll("\\s+", " ").toLowerCase(Locale.ROOT))
+                .filter(sql -> sql.contains("count(")).toList();
+        assertThat(counts).as("실제 Service가 실행한 count SQL").hasSize(1);
+        return new CountQueryResult(page, counts.get(0));
+    }
+
     private Page<SearchAdminReservationResponse> queryForRegression(
             SearchAdminReservationCondition condition, int pageNumber, int pageSize) {
         // 조건별 검증에서도 fixture와 이전 조회의 1차 캐시·통계 영향을 제외한다.
@@ -429,5 +529,37 @@ class AdminReservationListQueryIntegrationTest {
     }
 
     private record Measurement(Page<SearchAdminReservationResponse> page, long statementCount) {
+    }
+
+    private record CountQueryResult(Page<SearchAdminReservationResponse> page, String sql) {
+    }
+
+    // KAN-133: 검증 구간의 실제 Hibernate SQL만 수집하며 SQL·결과는 변경하지 않는다.
+    static class CountSqlInspector implements StatementInspector {
+        private final ThreadLocal<List<String>> statements = new ThreadLocal<>();
+
+        void start() {
+            if (statements.get() != null) {
+                throw new IllegalStateException("SQL 수집을 중첩 실행할 수 없습니다.");
+            }
+            statements.set(new ArrayList<>());
+        }
+
+        List<String> stop() {
+            try {
+                return List.copyOf(statements.get());
+            } finally {
+                statements.remove();
+            }
+        }
+
+        @Override
+        public String inspect(String sql) {
+            List<String> captured = statements.get();
+            if (captured != null) {
+                captured.add(sql);
+            }
+            return sql;
+        }
     }
 }

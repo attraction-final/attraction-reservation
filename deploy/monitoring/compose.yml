@@ -3,7 +3,8 @@
 #
 # 앱 인스턴스의 Alloy가 로그는 Loki(3100)로, 메트릭은 Prometheus remote_write(9090)로 보낸다.
 # 두 포트는 보안 그룹에서 앱 인스턴스에만 연다.
-# Grafana는 인스턴스 안에서만 열고(127.0.0.1) SSM 포트 포워딩으로 접속한다.
+# Grafana는 ALB(grafana.xevbn.click, Cognito 인증)에서만 접근하도록 보안 그룹으로 제한한다.
+# SSM 포트 포워딩은 비상 접속용으로 남긴다.
 #
 # 인스턴스가 준비할 값 (.env). user-data가 처음 만들고, CD(deploy-monitoring)가 배포마다 다시 만든다.
 #   GRAFANA_ADMIN_PASSWORD   Parameter Store monitoring/GRAFANA_ADMIN_PASSWORD
@@ -61,5 +62,5 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/etc/grafana/dashboards:ro
       - /data/grafana:/var/lib/grafana
-    ports: ["127.0.0.1:3000:3000"]
+    ports: ["3000:3000"]
     logging: *logging

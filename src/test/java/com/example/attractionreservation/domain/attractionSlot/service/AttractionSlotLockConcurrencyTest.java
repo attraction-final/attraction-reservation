@@ -75,7 +75,7 @@ class AttractionSlotLockConcurrencyTest {
         Future<?> customer = runSecondBeforeFirstCommits(
                 () -> attractionSlotService.updateAttractionSlotCapacity(ADMIN_ID, 
                         slotId, new UpdateAttractionSlotCapacityRequest(6)),   // 관리자: 정원 5 → 6
-                () -> attractionSlotService.tryReservationCapacity(slotId));  // 손님: 예약 +1
+                () -> reserveCapacityWithLock(slotId));  // 손님: 예약 +1
 
         customer.get(5, TimeUnit.SECONDS); // 손님 예약은 성공해야 한다
 
@@ -91,7 +91,7 @@ class AttractionSlotLockConcurrencyTest {
 
         Future<?> customer = runSecondBeforeFirstCommits(
                 () -> attractionSlotService.deleteAttractionSlot(ADMIN_ID, slotId),
-                () -> attractionSlotService.tryReservationCapacity(slotId));
+                () -> reserveCapacityWithLock(slotId));
 
         assertFailsWith(customer, ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
 
@@ -128,9 +128,17 @@ class AttractionSlotLockConcurrencyTest {
                     AttractionSlot.create(attraction, TOMORROW.atTime(10, 0), capacity)).getId();
         });
         for (int i = 0; i < reserved; i++) {
-            attractionSlotService.tryReservationCapacity(slotId); // 실제 예약과 같은 방법으로 +1
+            reserveCapacityWithLock(slotId); // 실제 예약과 같은 방법으로 +1
         }
         return slotId;
+    }
+
+    // 실제 예약처럼 같은 트랜잭션에서 슬롯 쓰기 잠금을 얻은 뒤 정원을 확보한다.
+    private void reserveCapacityWithLock(Long slotId) {
+        transactionTemplate.executeWithoutResult(status -> {
+            attractionSlotRepository.findByIdForUpdate(slotId).orElseThrow();
+            attractionSlotService.tryReservationCapacity(slotId);
+        });
     }
 
     // ★ 핵심 도우미

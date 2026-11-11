@@ -14,7 +14,7 @@
 | `security-groups.tf` | SG 5개와 규칙. 규칙은 SG를 서로 참조하므로 inline이 아닌 별도 리소스로 둔다 |
 | `alb.tf` | ALB, 80·443 리스너, grafana 규칙(Cognito 인증), TG `attraction-app-ecs`·`attraction-grafana` |
 | `cognito.tf` | Grafana 앞단 인증용 user pool, client, domain |
-| `ecs.tf` | 클러스터, 서비스 api·worker, 사이드카 로그 그룹 |
+| `ecs.tf` | 클러스터, 서비스 api·worker, 사이드카 로그 그룹, api 오토스케일링(CPU 60% 기준 1~3개) |
 | `data-stores.tf` | RDS, ElastiCache, 서브넷 그룹 |
 | `monitoring.tf` | 모니터링 EC2, 인스턴스 프로파일 |
 | `iam.tf` | GitHub OIDC provider, ECS execution·task 역할, `github-actions-role`, `monitoring-ec2-role` |
@@ -26,7 +26,7 @@
 
 | 대상 | 이유 |
 |---|---|
-| ECS task definition | CD가 `deploy/ecs/*-task-definition.json`으로 등록하고 서비스를 갱신한다. 서비스의 `task_definition`은 `ignore_changes`로 둔다 |
+| ECS task definition | CD가 `deploy/ecs/*-task-definition.json`으로 등록하고 서비스를 갱신한다. 서비스의 `task_definition`은 `ignore_changes`로 둔다. api의 `desired_count`도 오토스케일링이 바꾸므로 `ignore_changes`로 둔다 |
 | SSM 파라미터 값 | 비밀값이 state에 평문으로 남고, `APP_VERSION` 등은 CD가 계속 바꾼다 |
 | RDS 비밀번호 | state에 남기지 않는다. 설정에 적지 않았다 |
 | 모니터링 EC2의 `ami`, `user_data` | 바뀌면 인스턴스를 다시 만들게 된다. `ignore_changes`로 두고, 기동 스크립트 원본은 `deploy/monitoring/user-data.sh`다 |
@@ -63,6 +63,8 @@ terraform apply           # plan을 확인한 뒤 적용
 - RDS는 자동 마이너 업그레이드가 켜져 있다. AWS가 버전을 올리면 `engine_version` diff가 생기므로 코드의 버전을 실제 값으로 고친다.
 - ALB 리스너·규칙의 forward 액션은 import 결과에 맞춰 적었다. 형식을 바꾸면 의미가 같아도 diff가 생길 수 있다.
 - ECR lifecycle 정책은 태그된 이미지만 센다. buildx로 올린 이미지는 태그된 index 아래 플랫폼 이미지가 태그 없이 들어 있어서, 태그 없는 이미지를 지우는 규칙을 두면 실행 중인 이미지가 깨질 수 있다.
+- api task 수는 오토스케일링 대상(`aws_appautoscaling_target.api`)의 min/max로 바꾼다. 서비스의 `desired_count`는 `ignore_changes`라서 고쳐도 반영되지 않는다. worker는 스케줄러가 겹치면 안 되므로 1개로 두고 오토스케일링을 붙이지 않는다.
+- api 프로필(`application-api.yml`)은 스케줄러를 모두 끈다. 스케줄러를 추가하면 여기에도 꺼야 task가 늘어날 때 중복 실행되지 않는다.
 - SG 이름과 설명은 EC2 시절 그대로다(`server-instance-sg` 등). 설명을 바꾸면 SG를 다시 만들어야 한다.
 
 ## 5. 가져오면서 발견한 것 (바꾸지 않고 현재 값을 그대로 옮김)

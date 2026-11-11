@@ -54,8 +54,38 @@ resource "aws_ecs_service" "api" {
     project = "attraction-reservation"
   }
 
+  # task 수는 아래 오토스케일링이 바꾼다.
   lifecycle {
-    ignore_changes = [task_definition]
+    ignore_changes = [task_definition, desired_count]
+  }
+}
+
+# api task 수를 CPU 사용률에 맞춰 1~3개로 조정한다. worker는 스케줄러가 겹치지 않도록 1개로 고정한다.
+resource "aws_appautoscaling_target" "api" {
+  service_namespace  = "ecs"
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  min_capacity       = 1
+  max_capacity       = 3
+}
+
+resource "aws_appautoscaling_policy" "api_cpu" {
+  name               = "api-cpu-target-tracking"
+  service_namespace  = aws_appautoscaling_target.api.service_namespace
+  resource_id        = aws_appautoscaling_target.api.resource_id
+  scalable_dimension = aws_appautoscaling_target.api.scalable_dimension
+  policy_type        = "TargetTrackingScaling"
+
+  target_tracking_scaling_policy_configuration {
+    target_value = 60
+
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+
+    # 부하가 잠깐 내려간 것으로 task를 내리지 않도록 줄이는 쪽을 더 오래 기다린다.
+    scale_out_cooldown = 60
+    scale_in_cooldown  = 300
   }
 }
 

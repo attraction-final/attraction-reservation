@@ -1,6 +1,8 @@
 package com.example.attractionreservation.domain.order.service;
 
 import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.facade.PaymentFacade;
 import com.example.attractionreservation.domain.payment.service.PaymentService;
 import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
 import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
@@ -21,6 +23,7 @@ import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
@@ -50,11 +53,16 @@ public class OrderService {
     private final TicketProductRepository ticketProductRepository;
     private final UserRepository userRepository;
     private final PaymentService paymentService;
+    private final PaymentFacade paymentFacade;
     private final OrderCancelProcessor orderCancelProcessor;
     private final Clock clock;
     private final TicketProductService ticketProductService;
 
     private static final int MAX_VISIT_DAYS = 30;
+
+    // 만료 취소 전 PG 결제 확인이 연속으로 이만큼 실패하면 PG 장애로 보고 이번 주기를 끝낸다.
+    // 한 건만 실패하면 그 결제만의 문제일 수 있으므로 다음 주문을 계속 처리한다.
+    private static final int MAX_CONSECUTIVE_PG_FAILURES = 3;
 
     @Transactional
     public CreateOrderResponse createOrder(
@@ -223,12 +231,22 @@ public class OrderService {
         BusinessException firstServerFailure = null;
         Long firstFailedOrderId = null;
         Long firstFailedUserId = null;
+        int consecutivePgFailures = 0;
 
         for (Order order : expiredOrders) {
             Long orderId = order.getId();
             Long userId = order.getUser().getId();
 
             try {
+                boolean unpaidAtPg = isUnpaidAtPg(orderId);
+                consecutivePgFailures = 0;
+
+                // PG에서 결제·실패가 확인되면 결제 처리 경로가 주문을 정리했으므로 만료 취소하지 않는다.
+                if (!unpaidAtPg) {
+                    skippedCount++;
+                    continue;
+                }
+
                 if (orderCancelProcessor.cancelExpiredOrder(
                         orderId,
                         userId,
@@ -238,8 +256,13 @@ public class OrderService {
                 } else {
                     skippedCount++;
                 }
+            } catch (PessimisticLockingFailureException exception) {
+                // 웹훅·승인 API 등 다른 처리가 같은 결제를 잠그고 있다. 그쪽에 맡기고 남았으면 다음 주기에 다시 확인한다.
+                skippedCount++;
+                log.info("event=ORDER_AUTO_CANCEL_SKIPPED targetUserId={} orderId={} reason=\"다른 처리가 결제를 잠그고 있음\"",
+                        userId, orderId);
             } catch (BusinessException exception) {
-                // 기존과 동일하게 이 주문의 실패가 다음 주문 처리를 막지 않는다.
+                // 이 주문의 실패가 다음 주문 처리를 막지 않는다. PG 확인이 연속으로 실패한 경우만 이번 주기를 끝낸다.
                 failedCount++;
                 ErrorCode errorCode = exception.getErrorCode();
                 failureCodes.add(errorCode.name());
@@ -251,6 +274,16 @@ public class OrderService {
                         orderId,
                         errorCode.name()
                 );
+
+                // 취소 전 PG 결제 확인이 실패했다. PortOneClient가 연동 실패를 WARN으로 남겼으므로 ERROR로 다시 남기지 않는다.
+                // 연속으로 실패하면 PG 장애로 보고, 남은 주문마다 응답 대기 시간만큼 배치가 늦어지지 않도록 이번 주기를 끝낸다.
+                if (errorCode == ErrorCode.PAYMENT_GATEWAY_ERROR) {
+                    consecutivePgFailures++;
+                    if (consecutivePgFailures >= MAX_CONSECUTIVE_PG_FAILURES) {
+                        break;
+                    }
+                    continue;
+                }
 
                 // 서버 오류는 첫 예외를 보관하고 반복문 밖에서 기록한다.
                 if (errorCode.getStatus().is5xxServerError()
@@ -322,6 +355,37 @@ public class OrderService {
                 ));
 
         return SearchOrderListResponse.from(orders, orderItemsByOrderId);
+    }
+
+    /**
+     * 만료 취소 전에 PG 결제 상태를 확인한다. 트랜잭션 밖에서 PG를 조회한다.
+     *
+     * <p>결제 완료면 승인(원장 반영·티켓 발급)되고, 결제 실패면 실패 처리(주문 취소)되므로 만료 취소할 필요가 없다.
+     * 결제창을 열지 않아 PG에 결제가 없으면 미결제로 본다.
+     * 확인한 뒤 PG에서 결제되면 승인 경로가 취소된 결제의 보상 요청을 만든다.
+     *
+     * @return PG에서 결제되지 않아 만료 취소해도 되면 true
+     * @throws BusinessException 결제 데이터가 없거나(주문과 함께 생성되므로 정상 흐름에서는 없음),
+     *                           PG 조회 실패 등 다음 주기에 다시 확인해야 하는 경우
+     */
+    private boolean isUnpaidAtPg(Long orderId) {
+        String pgId = orderRepository.findPaymentPgIdByOrderId(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+
+        try {
+            PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+            // 원장 상태와 충돌하면 승인되지 않은 채 PENDING으로 남아 매 주기 건너뛰므로 사람이 확인할 수 있게 남긴다.
+            if (result == PaymentSyncResult.STATE_CONFLICT) {
+                log.warn("event=ORDER_AUTO_CANCEL_SKIPPED orderId={} pgId={} reason=\"PG 결제와 원장 상태 충돌, 수동 확인 필요\"",
+                        orderId, pgId);
+            }
+            return result == PaymentSyncResult.NOT_PAID || result == PaymentSyncResult.NOT_OUR_PAYMENT;
+        } catch (BusinessException exception) {
+            if (exception.getErrorCode() == ErrorCode.PAYMENT_PG_PAYMENT_NOT_FOUND) {
+                return true;
+            }
+            throw exception;
+        }
     }
 
     private int calculateTotalAmount(int totalAmount, int price, int quantity) {

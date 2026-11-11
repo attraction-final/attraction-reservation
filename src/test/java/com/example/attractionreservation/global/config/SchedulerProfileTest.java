@@ -1,5 +1,7 @@
 package com.example.attractionreservation.global.config;
 
+import com.example.attractionreservation.domain.attractionSlot.scheduler.AttractionSlotGenerationScheduler;
+import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotGenerationService;
 import com.example.attractionreservation.domain.order.scheduler.OrderCancelScheduler;
 import com.example.attractionreservation.domain.order.service.OrderService;
 import com.example.attractionreservation.domain.payment.facade.PaymentCompensationProcessor;
@@ -35,7 +37,8 @@ class SchedulerProfileTest {
             WebhookEventScheduler.class,
             PaymentCompensationScheduler.class,
             RefundScheduler.class,
-            TicketExpirationScheduler.class
+            TicketExpirationScheduler.class,
+            AttractionSlotGenerationScheduler.class
     );
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -44,6 +47,7 @@ class SchedulerProfileTest {
             .withBean(PaymentCompensationProcessor.class, () -> mock(PaymentCompensationProcessor.class))
             .withBean(RefundProcessor.class, () -> mock(RefundProcessor.class))
             .withBean(TicketExpirationService.class, () -> mock(TicketExpirationService.class))
+            .withBean(AttractionSlotGenerationService.class, () -> mock(AttractionSlotGenerationService.class))
             .withPropertyValues("ticket.expiration.scheduler.batch-size=100")
             .withUserConfiguration(SCHEDULERS.toArray(Class<?>[]::new));
 

@@ -1,0 +1,185 @@
+{
+  "family": "attraction-reservation-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+  "taskRoleArn": "<TASK_ROLE_ARN>",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "<APP_IMAGE>",
+      "essential": true,
+      "memory": 1400,
+      "environment": [
+        {
+          "name": "SPRING_PROFILES_ACTIVE",
+          "value": "prod,api,oauth"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "JWT_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/JWT_SECRET"
+        },
+        {
+          "name": "PORTONE_API_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/PORTONE_API_SECRET"
+        },
+        {
+          "name": "PORTONE_CHANNEL_KEY",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/PORTONE_CHANNEL_KEY"
+        },
+        {
+          "name": "PORTONE_STORE_ID",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/PORTONE_STORE_ID"
+        },
+        {
+          "name": "PORTONE_WEBHOOK_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/PORTONE_WEBHOOK_SECRET"
+        },
+        {
+          "name": "REDIS_HOST",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/REDIS_HOST"
+        },
+        {
+          "name": "SPRING_DATASOURCE_URL",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/SPRING_DATASOURCE_URL"
+        },
+        {
+          "name": "SPRING_DATASOURCE_USERNAME",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/SPRING_DATASOURCE_USERNAME"
+        },
+        {
+          "name": "SPRING_DATASOURCE_PASSWORD",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/SPRING_DATASOURCE_PASSWORD"
+        },
+        {
+          "name": "SPRING_DATA_REDIS_SSL_ENABLED",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/SPRING_DATA_REDIS_SSL_ENABLED"
+        },
+        {
+          "name": "KAKAO_CLIENT_ID",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/KAKAO_CLIENT_ID"
+        },
+        {
+          "name": "KAKAO_CLIENT_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/KAKAO_CLIENT_SECRET"
+        },
+        {
+          "name": "GOOGLE_CLIENT_ID",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/GOOGLE_CLIENT_ID"
+        },
+        {
+          "name": "GOOGLE_CLIENT_SECRET",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/GOOGLE_CLIENT_SECRET"
+        },
+        {
+          "name": "OAUTH2_SUCCESS_REDIRECT_URI",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/OAUTH2_SUCCESS_REDIRECT_URI"
+        },
+        {
+          "name": "OAUTH2_FAILURE_REDIRECT_URI",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/OAUTH2_FAILURE_REDIRECT_URI"
+        }
+      ],
+      "stopTimeout": 30,
+      "dependsOn": [
+        {
+          "containerName": "log-router",
+          "condition": "START"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awsfirelens"
+      },
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        },
+        {
+          "containerPort": 8081,
+          "protocol": "tcp"
+        }
+      ]
+    },
+    {
+      "name": "log-router",
+      "image": "<FLUENT_BIT_IMAGE>",
+      "essential": true,
+      "memory": 128,
+      "firelensConfiguration": {
+        "type": "fluentbit",
+        "options": {
+          "config-file-type": "file",
+          "config-file-value": "/fluent-bit/etc/extra.conf",
+          "enable-ecs-log-metadata": "false"
+        }
+      },
+      "environment": [
+        {
+          "name": "LOKI_HOST",
+          "value": "<LOKI_HOST>"
+        },
+        {
+          "name": "LOKI_PORT",
+          "value": "<LOKI_PORT>"
+        },
+        {
+          "name": "APP_ENV",
+          "value": "prod"
+        },
+        {
+          "name": "SERVICE",
+          "value": "api"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/attraction-reservation",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "api-log-router"
+        }
+      }
+    },
+    {
+      "name": "alloy",
+      "image": "<ALLOY_IMAGE>",
+      "essential": false,
+      "memory": 256,
+      "environment": [
+        {
+          "name": "APP_ENV",
+          "value": "prod"
+        },
+        {
+          "name": "SERVICE",
+          "value": "api"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "PROMETHEUS_URL",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/PROMETHEUS_URL"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/attraction-reservation",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "api-alloy"
+        }
+      }
+    }
+  ]
+}

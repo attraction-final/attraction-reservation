@@ -317,7 +317,9 @@ class ReservationListIndexIntegrationTest {
                 + "VALUES (?,?,?,?,?,?,?,?,?,?)", tickets);
 
         // V11 마이그레이션이 넣은 배포용 어트랙션(id 1~10)을 지우고 측정용 어트랙션으로 다시 채운다.
-        // 컨테이너마다 새 DB라 이 시점에는 어트랙션을 참조하는 슬롯·좌표·구간이 없다.
+        // 컨테이너마다 새 DB라 슬롯은 없지만, V13이 넣은 좌표·구간이 어트랙션을 참조하므로 먼저 지운다.
+        jdbc.update("DELETE FROM attraction_paths");
+        jdbc.update("DELETE FROM attraction_locations");
         jdbc.update("DELETE FROM attractions");
 
         List<Object[]> attractions = new ArrayList<>();

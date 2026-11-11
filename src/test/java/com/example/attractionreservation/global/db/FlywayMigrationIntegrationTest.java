@@ -178,7 +178,9 @@ class FlywayMigrationIntegrationTest {
         insertAttractionPath(b, a, 641, 12);
 
         // then
-        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM attraction_paths", Integer.class);
+        // V13이 넣은 배포용 구간은 세지 않고 이 테스트가 넣은 두 어트랙션 사이의 구간만 센다.
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attraction_paths WHERE from_attraction_id IN (?, ?)", Integer.class, a, b);
         assertThat(count).isEqualTo(2);
     }
 
@@ -223,6 +225,29 @@ class FlywayMigrationIntegrationTest {
 
         // then
         assertThat(count).isEqualTo(10);
+    }
+
+    // V14: 파일명이 V로 시작하지 않으면 Flyway가 오류 없이 건너뛰므로, 적용 이력과 실제 값을 함께 검증한다.
+    @Test
+    @DisplayName("마이그레이션 후 배포용 어트랙션에 탑승 정보가 들어가 있다")
+    void migrate_UpdatesAttractionRideInfo() {
+        // when
+        var row = jdbcTemplate.queryForMap("""
+                SELECT min_height_cm, max_height_cm, guardian_height_cm, open_time, close_time
+                FROM attractions
+                WHERE name = '모니모 러쉬' AND deleted_at IS NULL
+                """);
+
+        // then
+        assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion))
+                .contains(MigrationVersion.fromVersion("14"));
+        assertSoftly(softly -> {
+            softly.assertThat(row.get("min_height_cm")).isEqualTo(130);
+            softly.assertThat(row.get("max_height_cm")).isEqualTo(195);
+            softly.assertThat(row.get("guardian_height_cm")).isNull();
+            softly.assertThat(row.get("open_time")).hasToString("12:45:00");
+            softly.assertThat(row.get("close_time")).hasToString("19:30:00");
+        });
     }
 
     // V10: KAN-142부터 쓰지 않는 추천 저장 테이블을 지웠다. (V8·V9가 바꾼 테이블도 여기서 함께 사라진다)

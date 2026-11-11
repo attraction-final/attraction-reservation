@@ -137,3 +137,40 @@ FROM attraction_reservation.tickets t
          JOIN attraction_reservation.order_items oi ON oi.id = t.order_item_id
          JOIN attraction_reservation.orders o ON o.id = oi.order_id
 WHERE o.user_id = @uid;
+
+
+-- [로컬 DB 전용] 슬롯 간격을 15분으로 바꾼 뒤, 이미 만들어진 30분 간격 슬롯을 지우는 SQL
+-- 스케줄러는 "그날 슬롯이 하나도 없는 날"만 채우기 때문에, 기존 슬롯을 지워야 15분 간격으로 다시 만들어진다.
+-- 실행 후 서버를 재시작하면(STARTUP 트리거) 빈 날짜가 15분 간격으로 채워진다.
+--
+-- 안전장치: 내일부터의 슬롯만 대상으로 하고,
+--          "예약이 한 건이라도 걸린 어트랙션의 그날"은 통째로 남긴다. (예약 FK 오류 + 섞인 시간표 방지)
+-- 주의: 운영(prod) DB에서는 실행하지 마세요.
+
+-- 1) 예약이 걸린 (어트랙션, 날짜) 목록을 따로 담아 둔다.
+--    (MySQL은 DELETE 대상 테이블을 같은 문장의 서브쿼리에서 읽을 수 없어서 임시 테이블을 쓴다)
+CREATE TEMPORARY TABLE tmp_reserved_days AS
+SELECT DISTINCT s.attraction_id, DATE(s.starts_at) AS slot_date
+FROM attraction_slots s
+         JOIN reservations r ON r.attraction_slot_id = s.id
+WHERE s.starts_at >= CURDATE() + INTERVAL 1 DAY;
+
+-- 2) 먼저 몇 개가 지워질지 확인
+SELECT COUNT(*) AS will_delete
+FROM attraction_slots s
+         LEFT JOIN tmp_reserved_days t
+                   ON t.attraction_id = s.attraction_id
+                       AND t.slot_date = DATE(s.starts_at)
+WHERE s.starts_at >= CURDATE() + INTERVAL 1 DAY
+  AND t.attraction_id IS NULL;
+
+-- 3) 삭제
+DELETE s
+FROM attraction_slots s
+         LEFT JOIN tmp_reserved_days t
+                   ON t.attraction_id = s.attraction_id
+                       AND t.slot_date = DATE(s.starts_at)
+WHERE s.starts_at >= CURDATE() + INTERVAL 1 DAY
+  AND t.attraction_id IS NULL;
+
+DROP TEMPORARY TABLE tmp_reserved_days;

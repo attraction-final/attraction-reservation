@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
 import com.example.attractionreservation.domain.attractionSlot.service.AttractionSlotService;
@@ -47,6 +49,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -65,6 +68,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 // 개선 전에는 실패할 수 있는 회귀 테스트다. 중복 조회와 정원 UPDATE는 실제 MySQL에서 실행한다.
 @DataJpaTest(properties = "spring.datasource.hikari.maximum-pool-size=20") // DB 연결 최대 20개까지 확보
@@ -74,7 +78,7 @@ import static org.mockito.Mockito.mockStatic;
 @Import({
         JpaConfig.class,
         QuerydslConfig.class,
-        ReservationService.class,
+        ReservationService.class, SimpleMeterRegistry.class,
         UserService.class,
         TicketService.class,
         AttractionSlotService.class,
@@ -99,12 +103,18 @@ class ReservationConcurrencyIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private SimpleMeterRegistry meterRegistry;
+
     // UserService의 생성에 필요하지만, 예약 생성 경로에서는 호출하지 않는 의존성이다.
     @MockitoBean
     private PasswordEncoder passwordEncoder;
 
     @MockitoBean
     private RefreshTokenRepository refreshTokenRepository;
+
+    @MockitoBean
+    private Clock clock;
 
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
@@ -124,6 +134,9 @@ class ReservationConcurrencyIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // 예약 생성의 업무 시각은 모든 작업 스레드에 주입되는 Clock으로 제어한다.
+        when(clock.getZone()).thenReturn(KstTime.ZONE);
+        when(clock.instant()).thenReturn(NOW.atZone(KstTime.ZONE).toInstant());
         transactionTemplate = new TransactionTemplate(transactionManager);
         // 별도 transaction으로 commit하여 작업 스레드에서도 테스트 데이터를 조회할 수 있게 한다.
         fixture = Objects.requireNonNull(transactionTemplate.execute(status -> {
@@ -542,6 +555,75 @@ class ReservationConcurrencyIntegrationTest {
                 softly.assertThat(reservationCount).as("실패한 요청의 예약이 남지 않음").isZero();
             });
         });
+    }
+
+    @Test
+    @DisplayName("실제 트랜잭션이 커밋된 뒤에만 후속 구간을 committed로 한 번 기록한다")
+    void recordPostLookupOnlyAfterCommit() {
+        // given
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        long committedBefore = postLookupCount("committed");
+        long rolledBackBefore = postLookupCount("rolledback");
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+
+            // when
+            transactionTemplate.executeWithoutResult(status -> {
+                reservationService.createReservation(fixture.userId(), request);
+                // 서비스 반환·DB flush 후에도 바깥 트랜잭션은 아직 완료되지 않았다.
+                entityManager.flush();
+                assertThat(postLookupCount("committed")).isEqualTo(committedBefore);
+                assertThat(postLookupCount("rolledback")).isEqualTo(rolledBackBefore);
+            });
+
+            // then
+            assertThat(postLookupCount("committed")).isEqualTo(committedBefore + 1);
+            assertThat(postLookupCount("rolledback")).isEqualTo(rolledBackBefore);
+            transactionTemplate.executeWithoutResult(status -> {
+                AttractionSlot slot = entityManager.find(AttractionSlot.class, fixture.slotId());
+                assertThat(slot.getReservedCount()).isEqualTo(1);
+                assertThat(entityManager.createQuery(
+                        "select count(r) from Reservation r where r.user.id = :userId", Long.class)
+                        .setParameter("userId", fixture.userId()).getSingleResult()).isEqualTo(1L);
+            });
+        }
+    }
+
+    @Test
+    @DisplayName("예약 생성 반환 후 바깥 트랜잭션이 롤백되면 rolledback으로만 기록한다")
+    void recordPostLookupAfterOuterTransactionRollback() {
+        // given
+        CreateReservationRequest request = new CreateReservationRequest(fixture.ticketId(), fixture.slotId());
+        long committedBefore = postLookupCount("committed");
+        long rolledBackBefore = postLookupCount("rolledback");
+        try (MockedStatic<KstTime> time = mockStatic(KstTime.class, CALLS_REAL_METHODS)) {
+            time.when(KstTime::now).thenReturn(NOW);
+
+            // when
+            transactionTemplate.executeWithoutResult(status -> {
+                reservationService.createReservation(fixture.userId(), request);
+                entityManager.flush();
+                assertThat(postLookupCount("committed")).isEqualTo(committedBefore);
+                assertThat(postLookupCount("rolledback")).isEqualTo(rolledBackBefore);
+                status.setRollbackOnly();
+            });
+
+            // then
+            assertThat(postLookupCount("committed")).isEqualTo(committedBefore);
+            assertThat(postLookupCount("rolledback")).isEqualTo(rolledBackBefore + 1);
+            transactionTemplate.executeWithoutResult(status -> {
+                AttractionSlot slot = entityManager.find(AttractionSlot.class, fixture.slotId());
+                assertThat(slot.getReservedCount()).isZero();
+                assertThat(entityManager.createQuery(
+                        "select count(r) from Reservation r where r.user.id = :userId", Long.class)
+                        .setParameter("userId", fixture.userId()).getSingleResult()).isZero();
+            });
+        }
+    }
+
+    private long postLookupCount(String result) {
+        var timer = meterRegistry.find("reservation.create.slot.postlookup").tag("result", result).timer();
+        return timer == null ? 0L : timer.count();
     }
 
     // 테스트 동시 실행 담당

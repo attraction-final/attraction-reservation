@@ -11,9 +11,11 @@ import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.AfterCommit;
 import com.example.attractionreservation.global.util.KstTime;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -249,21 +251,18 @@ public class AttractionSlotService {
     }
 
     // 예약 - 슬롯의 자리 한 개 확보
-    @Transactional
+    @Transactional(propagation = Propagation.MANDATORY)
     public void tryReservationCapacity(Long slotId) {
-        int updatedCount = attractionSlotRepository.tryReserveCapacity(slotId, SlotStatus.OPEN);
-
-        if (updatedCount == 0) {
-            throw new BusinessException(ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED);
-        }
 
         AttractionSlot slot = findAttractionSlotById(slotId);
 
-        // DB에서 증가한 예약 인원을 현재 객체에 반영
-        entityManager.refresh(slot);
+        LockModeType lockMode = entityManager.getLockMode(slot);
 
-        // 마지막 자리가 찼다면 CLOSED, autoClosed=true로 변경
-        slot.syncStatusWithRemainingCount();
+        if (lockMode != LockModeType.PESSIMISTIC_WRITE && lockMode != LockModeType.PESSIMISTIC_FORCE_INCREMENT) {
+            throw new IllegalStateException("슬롯 정원 확보에는 비관적 쓰기 잠금이 필요합니다.");
+        }
+
+        slot.acquireReservationCapacity();
     }
 
     // 예약 - 취소시 reservedCount -1

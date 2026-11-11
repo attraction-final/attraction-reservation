@@ -1,0 +1,7 @@
+# run.sh에서 PERF_FIXED_TIME을 검증한 경우에만 기본 compose에 추가한다.
+# 일반 실행과 기존 팀원/목록 부하 환경에는 적용하지 않는다.
+services:
+  app:
+    environment:
+      SPRING_PROFILES_INCLUDE: reservation-create-perf-time
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m -Dreservation.perf.fixed-time=${PERF_FIXED_TIME:?PERF_FIXED_TIME is required}"

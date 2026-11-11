@@ -1,6 +1,8 @@
 -- @run_id는 run.sh가 검증한 실행 식별자다. 해당 실행의 슬롯과 예약만 읽는다.
 CREATE TEMPORARY TABLE guard (ok TINYINT NOT NULL CHECK (ok = 1));
 INSERT INTO guard SELECT IF(DATABASE()='reservation_create_perf',1,0);
+SET @business_today = DATE(IF(@business_kst IS NULL, UTC_TIMESTAMP()+INTERVAL 9 HOUR, CAST(@business_kst AS DATETIME)));
+INSERT INTO guard SELECT IF(@business_today IS NOT NULL,1,0);
 INSERT INTO guard SELECT IF(@scenario IN ('sold-out','single','spread'),1,0);
 INSERT INTO guard SELECT IF(@users IN (50,100,200,500,1000,2000),1,0);
 SET @groups=IF(@scenario='spread',5,1);
@@ -29,7 +31,7 @@ INSERT INTO guard SELECT IF((SELECT COUNT(*) FROM reservations r
     JOIN tickets t ON t.id=r.ticket_id JOIN order_items oi ON oi.id=t.order_item_id
     JOIN orders o ON o.id=oi.order_id JOIN users u ON u.id=r.user_id
     WHERE o.user_id=r.user_id AND t.status='IN_USE'
-      AND t.valid_date=DATE(UTC_TIMESTAMP()+INTERVAL 9 HOUR)
+      AND t.valid_date=@business_today
       AND u.email LIKE CONCAT('kan150-',@run_id,'-%@example.test'))=@expected,1,0);
 -- 이번 실행 회원에게 다른 슬롯의 예약이나 실패 후 남은 추가 예약이 없어야 한다.
 INSERT INTO guard SELECT IF((SELECT COUNT(*) FROM reservations r JOIN users u ON u.id=r.user_id

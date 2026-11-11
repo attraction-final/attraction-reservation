@@ -7,11 +7,13 @@ import com.example.attractionreservation.domain.attractionSlot.repository.Attrac
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -44,7 +46,7 @@ class AttractionSlotReservationServiceTest {
             "8, 9, OPEN, false",
             "9, 10, CLOSED, true"
     })
-    @DisplayName("자리 확보 후 최신 예약 인원에 따라 자동 마감 상태를 반영한다")
+    @DisplayName("잠금을 보유한 슬롯에서 인원을 증가시키고 마지막 자리를 자동 마감한다")
     void tryReservationCapacity_success(
             int previousCount,
             int updatedCount,
@@ -68,23 +70,9 @@ class AttractionSlotReservationServiceTest {
                 previousCount
         );
 
-        when(attractionSlotRepository.tryReserveCapacity(
-                SLOT_ID,
-                SlotStatus.OPEN
-        )).thenReturn(1);
-
         when(attractionSlotRepository.findById(SLOT_ID))
                 .thenReturn(Optional.of(slot));
-
-        // 실제 refresh 대신 DB의 증가된 값이 반영되는 상황을 재현한다.
-        doAnswer(invocation -> {
-            ReflectionTestUtils.setField(
-                    slot,
-                    "reservedCount",
-                    updatedCount
-            );
-            return null;
-        }).when(entityManager).refresh(slot);
+        when(entityManager.getLockMode(slot)).thenReturn(LockModeType.PESSIMISTIC_WRITE);
 
         // when
         attractionSlotService.tryReservationCapacity(SLOT_ID);
@@ -101,21 +89,24 @@ class AttractionSlotReservationServiceTest {
                 slot
         );
 
-        inOrder.verify(attractionSlotRepository)
-                .tryReserveCapacity(SLOT_ID, SlotStatus.OPEN);
         inOrder.verify(attractionSlotRepository).findById(SLOT_ID);
-        inOrder.verify(entityManager).refresh(slot);
-        inOrder.verify(slot).syncStatusWithRemainingCount();
+        inOrder.verify(entityManager).getLockMode(slot);
+        inOrder.verify(slot).acquireReservationCapacity();
+        verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+        verify(entityManager, never()).refresh(any());
     }
 
     @Test
-    @DisplayName("자리 확보에 실패하면 예외를 반환하고 슬롯을 갱신하지 않는다")
+    @DisplayName("잠금을 보유해도 정원이 가득 차면 인원을 변경하지 않는다")
     void tryReservationCapacity_failed() {
         // given
-        when(attractionSlotRepository.tryReserveCapacity(
-                SLOT_ID,
-                SlotStatus.OPEN
-        )).thenReturn(0);
+        Attraction attraction = mock(Attraction.class);
+        when(attraction.getDurationMinutes()).thenReturn(10);
+        AttractionSlot slot = AttractionSlot.create(
+                attraction, LocalDateTime.of(2026, 10, 25, 16, 0), 10);
+        ReflectionTestUtils.setField(slot, "reservedCount", 10);
+        when(attractionSlotRepository.findById(SLOT_ID)).thenReturn(Optional.of(slot));
+        when(entityManager.getLockMode(slot)).thenReturn(LockModeType.PESSIMISTIC_WRITE);
 
         // when & then
         assertThatThrownBy(() ->
@@ -128,8 +119,53 @@ class AttractionSlotReservationServiceTest {
                         )
         );
 
-        verify(attractionSlotRepository, never()).findById(any());
-        verifyNoInteractions(entityManager);
+        assertThat(slot.getReservedCount()).isEqualTo(10);
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
+        assertThat(slot.isAutoClosed()).isFalse();
+        verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+        verify(entityManager, never()).refresh(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = LockModeType.class, names = {"PESSIMISTIC_WRITE", "PESSIMISTIC_FORCE_INCREMENT"})
+    @DisplayName("이미 보유한 두 비관적 쓰기 잠금 모드에서 정원을 확보할 수 있다")
+    void acquireCapacityWithExistingWriteLockMode(LockModeType lockMode) {
+        // given
+        Attraction attraction = mock(Attraction.class);
+        when(attraction.getDurationMinutes()).thenReturn(10);
+        AttractionSlot slot = AttractionSlot.create(
+                attraction, LocalDateTime.of(2026, 10, 25, 16, 0), 10);
+        when(attractionSlotRepository.findById(SLOT_ID)).thenReturn(Optional.of(slot));
+        // 이미 보유한 모드의 검사만 검증하며 새 잠금이나 버전 증가를 요청하지 않는다.
+        when(entityManager.getLockMode(slot)).thenReturn(lockMode);
+
+        // when
+        attractionSlotService.tryReservationCapacity(SLOT_ID);
+
+        // then
+        assertThat(slot.getReservedCount()).isEqualTo(1);
+        assertThat(slot.getRemainingCount()).isEqualTo(9);
+        assertThat(slot.getStatus()).isEqualTo(SlotStatus.OPEN);
+        verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+        verify(entityManager, never()).refresh(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = LockModeType.class,
+            names = {"PESSIMISTIC_WRITE", "PESSIMISTIC_FORCE_INCREMENT"}, mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("비관적 쓰기 잠금을 보유하지 않으면 인원 변경 전에 호출을 거부한다")
+    void rejectCapacityAcquisitionWithoutWriteLock(LockModeType lockMode) {
+        // given
+        AttractionSlot slot = mock(AttractionSlot.class);
+        when(attractionSlotRepository.findById(SLOT_ID)).thenReturn(Optional.of(slot));
+        when(entityManager.getLockMode(slot)).thenReturn(lockMode);
+
+        // when & then
+        assertThatThrownBy(() -> attractionSlotService.tryReservationCapacity(SLOT_ID))
+                .isInstanceOf(IllegalStateException.class);
+        verify(slot, never()).acquireReservationCapacity();
+        verify(attractionSlotRepository, never()).tryReserveCapacity(any(), any());
+        verify(entityManager, never()).refresh(any());
     }
 
     @Test

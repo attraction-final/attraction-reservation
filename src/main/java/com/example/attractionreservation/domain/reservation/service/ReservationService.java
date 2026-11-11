@@ -17,16 +17,17 @@ import com.example.attractionreservation.domain.user.service.UserService;
 import com.example.attractionreservation.global.exception.BusinessException;
 import com.example.attractionreservation.global.exception.ErrorCode;
 import com.example.attractionreservation.global.util.KstTime;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.*;
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +41,9 @@ public class ReservationService {
     private final UserService userService;
     private final TicketService ticketService;
     private final AttractionSlotService attractionSlotService;
+    // 예약 생성의 구간별 처리 시간을 기록할 Timer를 등록하고 관리한다.
+    private final MeterRegistry meterRegistry;
+    private final Clock clock;
 
     // 예약 생성
     @Transactional
@@ -64,14 +68,59 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.TICKET_RESERVATION_NOT_ALLOWED_STATUS);
         }
 
-        // 티켓 날짜와 슬롯 날짜 검증
-        AttractionSlot attractionSlot = attractionSlotService.findSlot(request.slotId());
-        Attraction attraction = attractionSlotService.findAttractionByIdForUpdate(
-                attractionSlot.getAttraction().getId()
-        );
+        // 슬롯 잠금 조회: 잠금 대기뿐 아니라 SQL 실행과 엔티티 조회 시간도 포함한다.
+        AttractionSlot attractionSlot;
+        Timer.Sample sample = Timer.start(meterRegistry);
+        boolean isFind = false;
+        try {
+            attractionSlot = attractionSlotService.findSlot(request.slotId());
+            isFind = true;
 
+        } finally {
+            // 조회가 예외로 끝나도 시간을 기록한다. 측정 종료가 DB 잠금 해제를 의미하지는 않는다.
+            // 이름에 해당하는 Timer를 가져와 이번 경과 시간과 호출 횟수를 누적한다.
+            sample.stop(meterRegistry.timer("reservation.create.slot.lookup", "result", isFind ? "success" : "failure"));
+        }
+        // 조회 시간 기록이 끝난 직후부터 트랜잭션 완료 callback까지의 후속 처리 시간을 측정한다.
+        // 실제 DB 잠금 획득·해제 시각과 일치하지 않으며, 앞선 Timer 기록 구간은 포함하지 않는다.
+        Timer.Sample postLookupSample = Timer.start(meterRegistry);
+        // 여기서는 callback만 등록한다. 메서드 반환 후 flush·commit 또는 rollback이 끝나면 실행된다.
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+
+                    @Override
+                    public void afterCompletion(int status) {
+                        // 슬롯 조회 성공 여부와 별개로, 최종 트랜잭션 결과별 시간을 구분한다.
+                        String result;
+                        if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                            result = "committed";
+                        } else if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                            result = "rolledback";
+                        } else {
+                            result = "unknown";
+                        }
+                        // 예약 저장 호출이 정상 반환해도 최종 rollback이면 rolledback으로 기록한다.
+                        postLookupSample.stop(meterRegistry.timer("reservation.create.slot.postlookup", "result", result));
+                    }
+                }
+        );
+        // 후속 구간 1: 슬롯 잠금을 보유한 채 어트랙션 잠금 조회를 수행한다.
+        Attraction attraction;
+        Timer.Sample attractionlookupSample = Timer.start(meterRegistry);
+        boolean isAttraction = false;
+        try {
+            attraction = attractionSlotService.findAttractionByIdForUpdate(
+                    attractionSlot.getAttraction().getId()
+            );
+            isAttraction = true;
+        } finally {
+            attractionlookupSample.stop(meterRegistry.timer("reservation.create.attraction.lookup", "result", isAttraction ? "success" : "failure"));
+        }
+
+
+        // 후속 구간 2: 필요한 잠금 조회가 끝난 뒤 기준 시각을 구하고 예약 가능 조건을 검증한다.
         /* 현재시간, 오늘날짜, 현재시각 */
-        LocalDateTime now = KstTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         LocalDate today = now.toLocalDate();
 
         // 티켓 입장 날짜
@@ -127,9 +176,11 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.RESERVATION_TIME_CONFLICT);
         }
 
+        // 후속 구간 3: 정원 확보 UPDATE와 슬롯 refresh·자동 마감 상태 동기화를 수행한다.
         // 잔여 정원을 원자적으로 확보
         attractionSlotService.tryReservationCapacity(request.slotId());
 
+        // 후속 구간 4: 예약을 저장하고 응답을 만든다. 메서드 반환이 트랜잭션 완료는 아니다.
         Reservation reservation = new Reservation(user, ticket, attractionSlot);
         Reservation savedReservation = reservationRepository.save(reservation);
 

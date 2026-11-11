@@ -1,5 +1,7 @@
 package com.example.attractionreservation.domain.reservation.service;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.example.attractionreservation.domain.attraction.entity.Attraction;
 import com.example.attractionreservation.domain.attraction.cache.AttractionDetailCacheEvictor;
 import com.example.attractionreservation.domain.attraction.dto.UpdateAttractionStatusRequest;
@@ -56,6 +58,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -73,6 +76,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 // 실제 MySQL에서 예약 생성과 관리자 시간 변경의 두 선행 순서를 검증한다.
 // 시간 변경·운영 상태 변경 검증에 실제 Service와 Repository를 사용하고 commit 시점만 제어한다.
@@ -83,7 +87,7 @@ import static org.mockito.Mockito.mockStatic;
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, UserService.class,
+@Import({JpaConfig.class, QuerydslConfig.class, ReservationService.class, SimpleMeterRegistry.class, UserService.class,
         TicketService.class, AttractionSlotService.class, AttractionService.class,
         ReservationUpcomingReservationReader.class, ReservationSlotConcurrencyIntegrationTest.MySqlConfig.class})
 class ReservationSlotConcurrencyIntegrationTest {
@@ -119,6 +123,9 @@ class ReservationSlotConcurrencyIntegrationTest {
     @MockitoBean
     private RefreshTokenRepository refreshTokenRepository;
 
+    @MockitoBean
+    private Clock clock;
+
     private TransactionTemplate transactionTemplate;
     private Fixture fixture;
     private final List<MemberFixture> extraMembers = new ArrayList<>();
@@ -134,6 +141,9 @@ class ReservationSlotConcurrencyIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // 예약 생성의 업무 시각은 모든 작업 스레드에 주입되는 Clock으로 제어한다.
+        when(clock.getZone()).thenReturn(KstTime.ZONE);
+        when(clock.instant()).thenReturn(NOW.atZone(KstTime.ZONE).toInstant());
         transactionTemplate = new TransactionTemplate(transactionManager);
         fixture = Objects.requireNonNull(transactionTemplate.execute(status -> {
             User user = User.builder()

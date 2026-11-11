@@ -52,8 +52,8 @@ SQL은 테스트 조건을 만들기 위해 결제 완료 주문과 입장된 �
 
 ## 시간 조건
 
-**실제 KST 10:00 이상~21:10 미만**에 실행한다. 오늘 21:50~22:00 슬롯을 사용하며 예약 마감은 21:20이다.
-실행기와 준비 SQL이 시각을 검사한다. 서버 시각·Docker 시간을 변경하거나 마감 검증을 우회하지 않는다.
+기본 실제 시각 모드는 **실제 KST 10:00 이상~21:10 미만**에 실행한다. 오늘 21:50~22:00 슬롯을 사용하며 예약 마감은 21:20이다.
+실행기와 준비 SQL이 시각을 검사한다. KAN-155 고정 모드는 아래의 명시적 PERF_FIXED_TIME 설정으로 별도 실행하며 서버·Docker의 시스템 시계는 변경하지 않는다.
 준비가 길어져 마감을 넘기면 유효한 정원 소진 테스트가 아니므로 새 실행으로 재검증한다.
 슬롯은 마감까지 여유가 있는 고정 조건이며 시간 경계 검증 시나리오는 아니다.
 
@@ -399,6 +399,66 @@ pool 증가는 DB 잠금 대기를 늘릴 수 있으므로 성능 개선으로 �
 pool2k-01은 실제 max/min 20/20에서 2,000건 성공·DB 정합성을 통과했다. 발송 범위 269ms·늦은 VU 0명, p95 약 23.66초였다.
 pool pending 최대는 190에서 180으로 줄었지만, 슬롯 대기 양수 표본의 트랜잭션은 8~9개에서 18~19개로 늘었다(lock2k-04와 비교).
 수집 오류·커넥션 timeout·k6 OOM은 없었다. 이번 실행에서 지연 개선은 확인되지 않았으며 단일 실행으로 항상 느리다고 단정하지 않는다. 기본 pool 10은 유지한다.
+
+## KAN-155 슬롯 잠금 구간 측정과 정원 확보 개선
+
+정원 확보·flush SQL을 일반 자리 2→1회, 마지막 자리 3→1회로 줄였다.
+고정 업무 시각의 2,000건 집중 부하에서 변경 전후 각각 두 번 비교했고, 변경 후 매진·분산 정합성도 확인했다.
+
+| 비교 항목 | 변경 전 2회 | 변경 후 2회 |
+| --- | --- | --- |
+| API p95 | 21.25~22.37초 | 19.11~19.43초 |
+| 조회 후 완료 평균 | 10.61~10.75ms | 9.51~9.64ms |
+| 집중 요청 성공 / 예상 외 | 매회 2,000 / 0 | 매회 2,000 / 0 |
+
+전체 흐름, 실행별 수치, 잠금 모드 회귀와 검증 한계는 [KAN-155 트러블슈팅](../../docs/troubleshooting/reservation-slot-lock-duration.md)에 정리했다.
+이 결과만으로 운영 성능·완전한 동시 실행·지연 목표 충족을 보장하지 않는다.
+
+### 구간 지표 수집
+
+Timer는 metrics-before.txt·metrics-samples.txt·metrics-after.txt에 수집한다.
+metadata의 수집 활성화 표시는 필터 설정이므로 실제 지표 존재와 count도 확인한다.
+
+| Prometheus 접두어 | result | 구간 |
+| --- | --- | --- |
+| reservation_create_slot_lookup_seconds | success / failure | 슬롯 조회 직전부터 반환 또는 예외까지 |
+| reservation_create_slot_postlookup_seconds | committed / rolledback / unknown | 조회 지표 기록 직후부터 afterCompletion callback까지 |
+| reservation_create_attraction_lookup_seconds | success / failure | 어트랙션 잠금 조회. postlookup에 포함 |
+
+평균은 동일 tag의 시작 전후 sum 차이 / count 차이이며 단위는 초다.
+슬롯·어트랙션 조회에는 SQL·엔티티 조회와 잠금 대기가 포함되고, postlookup은 실제 DB 잠금 보유 시간 자체가 아니다.
+어트랙션 조회와 postlookup을 합산하지 않는다. 구간 histogram/percentile 설정은 없으므로 구간 p95/p99를 제공한다고 가정하지 않는다.
+2,000건 모두 성공한 실행은 세 지표의 success 또는 committed count 증가가 각각 2,000인지 확인한다.
+매진은 조회 success와 예약 성공이 다르며 committed 20·rolledback 1,980을 확인한다. 누락 지표를 0으로 간주하지 않는다.
+
+### 고정 업무 시각 실행
+
+PERF_FIXED_TIME을 명시한 경우에만 compose.fixed-time.yaml을 추가해 reservation-create-perf-time profile과 reservation.perf.fixed-time을 전달한다.
+실행기는 YYYY-MM-DDT14:00:00+09:00만 허용하고 SQL 방문일·슬롯·티켓 날짜도 맞춘다.
+변수를 지정하지 않으면 기존 실제 시각 모드와 KST 10:00 이상~21:10 미만 제한을 유지한다.
+아래 RUN_ID는 예시다. 기존 결과 폴더가 있으면 새 이름(최대 12자)을 사용하며 덮어쓰지 않는다.
+
+```bash
+./gradlew bootJar
+PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 TEST_VUS=50 bash perf/reservation-create/run.sh smoke155-new single
+```
+
+50건에서 날짜·profile·지표 연결을 확인한 뒤 집중 부하를 실행한다.
+
+```bash
+PERF_FIXED_TIME=2026-11-10T14:00:00+09:00 PERF_DB_POOL_SIZE=10 PERF_DB_LOCKS=1 PERF_K6_CPUS=2 TEST_VUS=2000 bash perf/reservation-create/run.sh measure155-1 single
+```
+
+- 실제 ClockConfig는 기본으로 유지되며 전용 profile에서 고정 Clock이 우선 주입된다. Clock을 주입받는 다른 구성요소도 영향을 받으므로 이 profile은 전용 부하 환경에서만 사용한다.
+- 기존 스케줄러 비활성화를 유지한다. 팀원 도구와 공통 application-perf.yaml은 변경하지 않는다.
+- JWT·로그·Micrometer 경과 시간·SQL created_at/updated_at은 실제 시각을 유지한다. KstTime.now()를 직접 쓰는 취소 등 다른 경로까지 고정하지 않는다.
+- 고정 시각은 흐르지 않는다. 마감 경과·자정 경계는 별도 테스트로 확인한다.
+- metadata의 businessTimeMode/fixedBusinessTime·JAR/도구 해시·실제 자원과 발송 범위를 확인한다. KAN-150 실제 시각 결과와 동일 조건으로 취급하지 않는다.
+
+### 확인한 테스트와 남은 범위
+
+설정 격리·측정 기록·정원 확보 SQL·자동 마감·rollback·잠금 전제를 검증했고, 진단 제거 후 예약 생성/취소/마감/슬롯 변경 동시성 회귀 29개도 통과했다.
+프로젝트 전체 테스트·CI는 별도 확인 대상이다. 기존 예약 이력이 많은 회원, 장시간 지속 부하·회복, 실제 시각 모드 개선 후 비교 등의 [후속 과제](../../docs/troubleshooting/reservation-slot-lock-duration.md#8-완료-범위와-후속-과제)는 미완료로 남긴다.
 
 ## 마무리 및 후속 작업
 

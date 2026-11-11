@@ -302,6 +302,10 @@ class ReservationListIndexIntegrationTest {
         batch("INSERT INTO tickets (id,created_at,updated_at,code,entered_at,name,status,type,valid_date,order_item_id) "
                 + "VALUES (?,?,?,?,?,?,?,?,?,?)", tickets);
 
+        // V11 마이그레이션이 넣은 배포용 어트랙션(id 1~10)을 지우고 측정용 어트랙션으로 다시 채운다.
+        // 컨테이너마다 새 DB라 이 시점에는 어트랙션을 참조하는 슬롯·좌표·구간이 없다.
+        jdbc.update("DELETE FROM attractions");
+
         List<Object[]> attractions = new ArrayList<>();
         for (int index = 1; index <= 10; index++) {
             attractions.add(new Object[]{index, createdAt, createdAt, "실행 계획 측정용", 10, 5,

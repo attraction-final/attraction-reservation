@@ -332,13 +332,13 @@ jobs:
           done
 
       # ASG로 롤백할 때 인스턴스가 기동하며 받을 실행 구성. ASG를 지울 때 함께 지운다.
-      # 모니터링 구성은 deploy-monitoring이 따로 올린다.
+      # 모니터링 구성은 deploy-monitoring이 따로 올린다. Terraform 코드는 인스턴스가 쓰지 않으므로 올리지 않는다.
       # compose.yml을 마지막에 올려 Check artifact가 일부만 올라간 상태를 완료로 보지 않게 한다.
       - name: Upload deploy bundle to S3
         if: steps.artifact.outputs.bundle_exists == 'false'
         run: |
           aws s3 cp --recursive deploy "s3://${ARTIFACT_BUCKET}/${BUNDLE_PREFIX}/" \
-            --exclude compose.yml --exclude 'monitoring/*'
+            --exclude compose.yml --exclude 'monitoring/*' --exclude 'terraform/*'
           aws s3 cp deploy/compose.yml "s3://${ARTIFACT_BUCKET}/${BUNDLE_PREFIX}/compose.yml"
 
       # 2) 자리 표시자를 채워 등록한다. 채울 값이 비었거나 채우지 못한 자리 표시자가 남으면 등록하지 않는다.

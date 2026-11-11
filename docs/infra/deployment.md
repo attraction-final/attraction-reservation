@@ -2,6 +2,7 @@
 
 운영 환경이 어떻게 구성되어 있고, 코드가 어떤 경로로 배포되는지 정리한 문서다.
 EC2(ASG)에서 ECS Fargate로 옮긴 과정과 이유는 [ecs-migration-plan.md](ecs-migration-plan.md), [ecs-migration-rationale.md](ecs-migration-rationale.md)를 참고한다.
+AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [terraform.md](terraform.md)를 참고한다.
 
 - 기준: 2026-11-10 AWS·GitHub 조회 결과 (계정 `793168138824`, 리전 `ap-northeast-2`)
 - 현재 단계: ECS 전환 5단계(트래픽 전환)와 6단계(알림)를 확인했다. 사용자 트래픽과 스케줄러는 모두 ECS에서 처리하고, EC2 앱 인스턴스는 0대다. 새 CD의 첫 main 실행(4단계)과 정리(7단계)가 남았다. 남은 작업은 [8장](#8-남은-작업)에 정리했다.

@@ -1,5 +1,5 @@
 -- V14__update_attraction_ride_info.sql
--- KAN-XXX 어트랙션 탑승 정보 (키 제한, 운영 시간) 데이터
+-- KAN-162 어트랙션 탑승 정보 (키 제한, 운영 시간) 데이터
 -- 원본: docs/sql/kan-117 2번 (데이터 부분)
 -- 컬럼은 V3(add_attraction_ride_info_columns)에서 추가되므로 DDL은 넣지 않는다.
 --

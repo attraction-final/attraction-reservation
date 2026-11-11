@@ -124,7 +124,7 @@ attraction:
       days-ahead: 30             # 주문 가능한 방문일(오늘 ~ 30일)과 맞춘다
       first-start-time: "10:00"  # 따옴표 필수: 없으면 YAML 이 숫자(600)로 읽을 수 있다
       last-start-time: "21:30"
-      interval-minutes: 30       # 탑승 시간이 더 길면 탑승 시간만큼 띄운다
+      interval-minutes: 15       # 탑승 시간이 더 길면 탑승 시간만큼 띄운다
       capacity: 20
       scheduler:
         enabled: true

@@ -41,7 +41,7 @@ public class AttractionSlotGenerationScheduler {
             // LocalTime 으로 바로 받으면 지역(Locale)에 따라 "10:00" 변환이 실패할 수 있어 글자로 받고 직접 바꾼다.
             @Value("${attraction.slot.generation.first-start-time:10:00}") String firstStartTime,
             @Value("${attraction.slot.generation.last-start-time:21:30}") String lastStartTime,
-            @Value("${attraction.slot.generation.interval-minutes:30}") int intervalMinutes,
+            @Value("${attraction.slot.generation.interval-minutes:15}") int intervalMinutes,
             @Value("${attraction.slot.generation.capacity:20}") int capacity
     ) {
         this.attractionSlotGenerationService = attractionSlotGenerationService;

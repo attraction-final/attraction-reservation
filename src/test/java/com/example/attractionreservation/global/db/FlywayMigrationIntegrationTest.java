@@ -151,8 +151,8 @@ class FlywayMigrationIntegrationTest {
     @DisplayName("같은 출발·도착 어트랙션의 이동 구간을 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
     void insertAttractionPath_DuplicateDirection_ThrowsDuplicateKeyException() {
         // given
-        long from = insertAttractionAndGetId("범퍼카");
-        long to = insertAttractionAndGetId("썬더폴스");
+        long from = insertAttractionAndGetId("테스트 어트랙션 A");
+        long to = insertAttractionAndGetId("테스트 어트랙션 B");
         insertAttractionPath(from, to, 141, 3);
 
         // when & then
@@ -164,8 +164,8 @@ class FlywayMigrationIntegrationTest {
     @DisplayName("방향이 반대인 이동 구간은 별도 행으로 넣을 수 있다")
     void insertAttractionPath_ReverseDirection_Success() {
         // given
-        long a = insertAttractionAndGetId("범퍼카");
-        long b = insertAttractionAndGetId("아마존 익스프레스");
+        long a = insertAttractionAndGetId("테스트 어트랙션 A");
+        long b = insertAttractionAndGetId("테스트 어트랙션 C");
         insertAttractionPath(a, b, 641, 11);
 
         // when
@@ -182,7 +182,7 @@ class FlywayMigrationIntegrationTest {
     @DisplayName("출발과 도착이 같은 이동 구간은 CHECK 제약 위반이 발생한다")
     void insertAttractionPath_SameAttraction_ThrowsCheckConstraintViolation() {
         // given
-        long a = insertAttractionAndGetId("범퍼카");
+        long a = insertAttractionAndGetId("테스트 어트랙션 A");
 
         // when & then
         assertThatThrownBy(() -> insertAttractionPath(a, a, 10, 1))
@@ -194,12 +194,29 @@ class FlywayMigrationIntegrationTest {
     @DisplayName("한 어트랙션의 좌표를 두 번 넣으면 UNIQUE 제약 위반이 발생한다")
     void insertAttractionLocation_Duplicate_ThrowsDuplicateKeyException() {
         // given
-        long a = insertAttractionAndGetId("범퍼카");
+        long a = insertAttractionAndGetId("테스트 어트랙션 A");
         insertAttractionLocation(a, 37.2923658, 127.1995663);
 
         // when & then
         assertThatThrownBy(() -> insertAttractionLocation(a, 37.2923658, 127.1995663))
                 .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    // V11: 배포용 어트랙션 10개가 들어가고, 이미 같은 이름이 있는 DB에서는 건너뛴다.
+    // 위 테스트들은 V11과 이름이 겹치지 않도록 "테스트 어트랙션 A/B/C"를 쓴다.
+    @Test
+    @DisplayName("마이그레이션 후 배포용 어트랙션 10개가 삭제되지 않은 상태로 들어가 있다")
+    void migrate_InsertsInitialAttractions() {
+        // when
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM attractions
+                WHERE deleted_at IS NULL
+                  AND name IN ('범퍼카', '우주전투기', '아마존 익스프레스', '모니모 러쉬', '썬더폴스',
+                               '콜럼버스 대탐험', '더블 락스핀', '렛츠 트위스트', '롤링 엑스 트레인', '허리케인')
+                """, Integer.class);
+
+        // then
+        assertThat(count).isEqualTo(10);
     }
 
     // V10: KAN-142부터 쓰지 않는 추천 저장 테이블을 지웠다. (V8·V9가 바꾼 테이블도 여기서 함께 사라진다)

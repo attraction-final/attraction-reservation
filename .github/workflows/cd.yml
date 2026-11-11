@@ -11,7 +11,7 @@ name: CD
 #
 # 배포 대상 결정 (changes)
 #   운영에 마지막으로 반영한 버전(APP_VERSION, MONITORING_VERSION)과 이번 커밋을 비교한다.
-#   - 앱: deploy/monitoring/, docs/, .github/, *.md 밖의 파일이 바뀌었으면 배포한다.
+#   - 앱: deploy/monitoring/, deploy/terraform/, docs/, .github/, *.md 밖의 파일이 바뀌었으면 배포한다.
 #   - 모니터링: deploy/monitoring/ 이 바뀌었으면 배포한다.
 #   마지막 반영 버전을 모르거나 이번 커밋의 조상이 아니면 변경이 있다고 본다.
 #
@@ -170,7 +170,7 @@ jobs:
           else
             APP=false
             MONITORING=false
-            if has_changes "$APP_BASE" . ':(exclude)deploy/monitoring' ':(exclude)docs' ':(exclude).github' ':(glob,exclude)**/*.md'; then
+            if has_changes "$APP_BASE" . ':(exclude)deploy/monitoring' ':(exclude)deploy/terraform' ':(exclude)docs' ':(exclude).github' ':(glob,exclude)**/*.md'; then
               APP=true
             fi
             if has_changes "$MONITORING_BASE" deploy/monitoring; then

@@ -183,14 +183,17 @@ class RouteRecommendationControllerTest {
     @DisplayName("추천 가능한 어트랙션 목록을 200으로 반환한다")
     void findRecommendableAttractions_returnsOk() throws Exception {
         when(routeRecommendationService.findRecommendableAttractions()).thenReturn(List.of(
-                new RecommendableAttractionResponse(1L, "범퍼카"),
-                new RecommendableAttractionResponse(6L, "허리케인")));
+                new RecommendableAttractionResponse(1L, "범퍼카", 37.2923658, 127.1995663),
+                new RecommendableAttractionResponse(6L, "허리케인", 37.29397, 127.20161)));
 
         mockMvc.perform(get(URL + "/attractions").with(authenticatedMember()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].attractionId").value(1))
-                .andExpect(jsonPath("$.data[1].attractionName").value("허리케인"));
+                .andExpect(jsonPath("$.data[1].attractionName").value("허리케인"))
+                // 지도 마커용 좌표가 응답에 들어간다
+                .andExpect(jsonPath("$.data[0].latitude").value(37.2923658))
+                .andExpect(jsonPath("$.data[0].longitude").value(127.1995663));
     }
 
     @Test

@@ -59,9 +59,10 @@ class AttractionLocationRepositoryTest {
         List<RecommendableAttractionResponse> result = attractionLocationRepository.findRecommendableAttractions();
 
         // then
+        // 지도 마커용 좌표도 저장한 값 그대로 돌려준다
         assertThat(result).containsExactly(
-                new RecommendableAttractionResponse(hurricane.getId(), "허리케인"),
-                new RecommendableAttractionResponse(bumperCar.getId(), "범퍼카"));
+                new RecommendableAttractionResponse(hurricane.getId(), "허리케인", 37.29397, 127.20161),
+                new RecommendableAttractionResponse(bumperCar.getId(), "범퍼카", 37.2923658, 127.1995663));
         assertThat(result).extracting(RecommendableAttractionResponse::attractionId)
                 .doesNotContain(noLocation.getId(), deleted.getId(), maintenance.getId());
     }

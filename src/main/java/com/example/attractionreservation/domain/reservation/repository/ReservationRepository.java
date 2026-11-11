@@ -56,6 +56,10 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long>,
     Optional<Reservation> findByIdWithLock(
             @Param("reservationId") Long reservationId
     );
+    // 경로 추천 차단: 회원에게 아직 끝나지 않은(슬롯 종료 > 현재) 지정 상태 예약이 하나라도 있는지
+    boolean existsByUser_IdAndStatusAndAttractionSlot_EndsAtAfter(
+            Long userId, ReservationStatus status, LocalDateTime now);
+
 
     @Query("""
         SELECT r.id FROM Reservation r

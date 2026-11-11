@@ -558,6 +558,42 @@ class ReservationRepositoryTest {
         assertThat(missingCount).isZero();
     }
 
+    @ParameterizedTest
+    @CsvSource({"-70, true", "-1, true", "0, false", "1, false"})
+    @DisplayName("경로 추천 차단 기준은 슬롯 종료 시각이 기준 시각보다 이후인 회원 예약이다 (탑승 중 포함, 종료 정각 제외)")
+    void existsByUserAndStatusAndSlotEndsAfter_EndBoundary_ReturnsExpected(int minutesFromSlotEnd, boolean expected) {
+        // given
+        Reservation reservation = createReservation(owner, attraction, START, ReservationStatus.RESERVED);
+        LocalDateTime slotEndsAt = reservation.getAttractionSlot().getEndsAt();
+        flushAndClear();
+
+        // when
+        boolean result = reservationRepository.existsByUser_IdAndStatusAndAttractionSlot_EndsAtAfter(
+                owner.getId(), ReservationStatus.RESERVED, slotEndsAt.plusMinutes(minutesFromSlotEnd)
+        );
+
+        // then
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReservationStatus.class, names = "RESERVED", mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("다른 회원의 예약이나 RESERVED 가 아닌 예약은 경로 추천을 막지 않는다")
+    void existsByUserAndStatusAndSlotEndsAfter_OtherUserOrStatus_ReturnsFalse(ReservationStatus status) {
+        // given
+        createReservation(owner, attraction, START, status);
+        createReservation(otherUser, otherAttraction, START, ReservationStatus.RESERVED);
+       flushAndClear();
+
+        // when
+       boolean result = reservationRepository.existsByUser_IdAndStatusAndAttractionSlot_EndsAtAfter(
+                owner.getId(), ReservationStatus.RESERVED, START.minusHours(1)
+        );
+
+        // then
+        assertThat(result).isFalse();
+    }
+
     private PageRequest page(int number, int size) {
         return PageRequest.of(number, size, Sort.by(Sort.Direction.ASC, "id"));
     }

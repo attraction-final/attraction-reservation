@@ -14,8 +14,8 @@ public interface AttractionLocationRepository extends JpaRepository<AttractionLo
     List<AttractionLocation> findAllByAttractionIdIn(Collection<Long> attractionIds);
 
     // 경로 추천에 고를 수 있는 어트랙션: 운영 중이고 좌표가 등록된 어트랙션 (ID 순)
-    // 운영하지 않거나(ROUTE_ATTRACTION_NOT_OPERATING) 좌표가 없으면(ATTRACTION_LOCATION_NOT_FOUND) 추천 요청이 409로 실패하므로
-    // 화면이 미리 걸러낼 수 있게 한다. 구간(attraction_paths) 데이터는 고른 조합에 따라 달라 여기서 보지 않는다.
+    // 운영하지 않으면 NOT_OPERATING,좌표가 없으면 LOCATION_NOT_FOUND 사유로 추천에서 제외되므로 화면이 미리 걸러낼 수 있게 한다.
+    // 구간(attraction_paths) 데이터는 고른 조합에 따라 달라 여기서 보지 않는다. (구간이 없거나 비활성이면 그 방문 순서만 무효)
     // 좌표(l.latitude, l.longitude)도 같이 돌려줘서 화면이 지도에 마커를 찍을 수 있게 한다. (이미 join 한 테이블이라 쿼리는 그대로 1번)
     @Query("""
             select new com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse(

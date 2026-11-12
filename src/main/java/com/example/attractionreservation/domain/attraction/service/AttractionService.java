@@ -119,6 +119,7 @@ public class AttractionService {
                 condition.keyword(),
                 condition.operating(),
                 condition.reservable(),
+                condition.height(),     // 키 필터 (null 이면 필터 없음)
                 condition.sort(),
                 reservableFrom,
                 todayEnd,

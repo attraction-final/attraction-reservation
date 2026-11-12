@@ -75,7 +75,7 @@ class AttractionRepositoryTest {
     // 자주 쓰는 호출을 짧게 묶은 도우미
     private Page<Attraction> search(String keyword, boolean operatingOnly, boolean reservableOnly, String sort) {
         return attractionRepository.searchAttractions(
-                keyword, operatingOnly, reservableOnly, sort,
+                keyword, operatingOnly, reservableOnly, null, sort,
                 RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 10));
     }
 
@@ -147,9 +147,9 @@ class AttractionRepositoryTest {
     void searchAttractions_Paging_ReturnsPartialContentAndTotalCount() {
         // when
         Page<Attraction> firstPage = attractionRepository.searchAttractions(
-                null, false, false, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 2));
+                null, false, false, null, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 2));
         Page<Attraction> secondPage = attractionRepository.searchAttractions(
-                null, false, false, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(1, 2));
+                null, false, false, null, "NAME", RESERVABLE_FROM, TODAY_END, PageRequest.of(1, 2));
 
         // then
         assertThat(firstPage.getContent())
@@ -167,7 +167,7 @@ class AttractionRepositoryTest {
     void searchAttractions_Unpaged_ReturnsAllContent() {
         // when
         Page<Attraction> result = attractionRepository.searchAttractions(
-                null, false, false, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
+                null, false, false, null, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
 
         // then
         assertThat(result.getContent())
@@ -181,7 +181,7 @@ class AttractionRepositoryTest {
     void searchAttractions_UnpagedWithCondition_ReturnsMatchedOnly() {
         // when
         Page<Attraction> result = attractionRepository.searchAttractions(
-                null, true, false, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
+                null, true, false, null, "NAME", RESERVABLE_FROM, TODAY_END, Pageable.unpaged());
 
         // then
         assertThat(result.getContent())

@@ -10,10 +10,11 @@ import java.time.LocalDateTime;
 // 실제 내용은 AttractionRepositoryImpl 에 있다.
 public interface AttractionRepositoryCustom {
 
-    // 어트랙션 목록 조회 (검색어, 운영중만, 예약 가능만, 정렬, 페이징)
+    // 어트랙션 목록 조회 (검색어, 운영중만, 예약 가능만, 키, 정렬, 페이징)
     Page<Attraction> searchAttractions(String keyword,
                                        boolean operatingOnly,
                                        boolean reservableOnly,
+                                       Integer height,
                                        String sort,
                                        LocalDateTime reservableFrom,
                                        LocalDateTime todayEnd,

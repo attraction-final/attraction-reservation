@@ -69,8 +69,8 @@ class AttractionServiceTest {
     }
 
     private SearchAttractionCondition createCondition() {
-        // keyword, operating, reservable, sort, page, size 순서라고 가정
-        return new SearchAttractionCondition(0, 10, null, null, null, null);
+        // page, size, keyword, sort, reservable, operating, height 순서
+        return new SearchAttractionCondition(0, 10, null, null, null, null, null);
     }
 
     // 검색 결과(어트랙션 목록) Mock 설정
@@ -79,6 +79,7 @@ class AttractionServiceTest {
                 any(),          // keyword (String)
                 anyBoolean(),   // operating (boolean)
                 anyBoolean(),   // reservable (boolean)
+                any(),          // height (Integer)
                 any(),          // sort (String)
                 any(),          // reservableFrom (LocalDateTime)
                 any(),          // todayEnd (LocalDateTime)

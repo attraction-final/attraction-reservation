@@ -244,10 +244,8 @@ flowchart LR
 
 ## 👥 팀원
 
-<!-- (이름), (담당 영역) 자리를 채워 주세요. -->
-
 | <img src="https://github.com/chungmani.png" width="96" alt="chungmani" /> | <img src="https://github.com/na00111.png" width="96" alt="na00111" /> | <img src="https://github.com/yun-ji98.png" width="96" alt="yun-ji98" /> | <img src="https://github.com/xevbn.png" width="96" alt="xevbn" /> | <img src="https://github.com/kyungsik1995-afk.png" width="96" alt="kyungsik1995-afk" /> |
-|:---:|:---:|:---:|:---:|:---:|
-| (이름) | (이름) | **이윤지** | (이름) | (이름) |
-| [@chungmani](https://github.com/chungmani) | [@na00111](https://github.com/na00111) | [@yun-ji98](https://github.com/yun-ji98) | [@xevbn](https://github.com/xevbn) | [@kyungsik1995-afk](https://github.com/kyungsik1995-afk) |
-| (담당 영역) | 최적 경로 추천 · 어트랙션 Q&A(Jev) | 프론트엔드 | (담당 영역) | (담당 영역) |
+|:-------------------------------------------------------------------------:|:---------------------------------------------------------------------:|:-----------------------------------------------------------------------:|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------:|
+|                                  **강충만**                                  |                                  **송나영**                                  |                                 **이윤지**                                 |                              **이재서**                              |                                         **임경식**                                         |
+|                [@chungmani](https://github.com/chungmani)                 |                [@na00111](https://github.com/na00111)                 |                [@yun-ji98](https://github.com/yun-ji98)                 |                [@xevbn](https://github.com/xevbn)                 |                [@kyungsik1995-afk](https://github.com/kyungsik1995-afk)                 |
+|                                티켓 · 예약 도메인                                 |                       최적 경로 추천 · 어트랙션 Q&A(Jev)                        |                        어트랙션 · 어트랙션 예약 슬롯 및 프론트엔드                        |                         결제 · 환불 및 인프라 구축                          |                                      사용자 · 주문 도메인                                       |

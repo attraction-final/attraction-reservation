@@ -248,6 +248,6 @@ flowchart LR
 
 | <img src="https://github.com/chungmani.png" width="96" alt="chungmani" /> | <img src="https://github.com/na00111.png" width="96" alt="na00111" /> | <img src="https://github.com/yun-ji98.png" width="96" alt="yun-ji98" /> | <img src="https://github.com/xevbn.png" width="96" alt="xevbn" /> | <img src="https://github.com/kyungsik1995-afk.png" width="96" alt="kyungsik1995-afk" /> |
 |:---:|:---:|:---:|:---:|:---:|
-| (이름) | (이름) | **이윤지** | (이름) | (이름) |
+| **강충만** | **송나영** | **이윤지** | **이재서** | **임경식** |
 | [@chungmani](https://github.com/chungmani) | [@na00111](https://github.com/na00111) | [@yun-ji98](https://github.com/yun-ji98) | [@xevbn](https://github.com/xevbn) | [@kyungsik1995-afk](https://github.com/kyungsik1995-afk) |
-| (담당 영역) | 최적 경로 추천 · 어트랙션 Q&A(Jev) | 프론트엔드 | (담당 영역) | (담당 영역) |
+| 티켓, 티켓 상품, 예약, 부하테스트 | 최적 경로 추천 · 어트랙션 Q&A(Jev) | 어트랙션, 어트랙션 슬롯, 프론트엔드 | 결제, 환불, CI/CD, 배포  | 유저, 인증, 주문, 주문 상품, 부하테스트 |

@@ -1,0 +1,165 @@
+package com.example.attractionreservation.domain.ticket.entity;
+
+import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.ticket.entity.enums.TicketStatus;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketType;
+import com.example.attractionreservation.global.entity.BaseTimeEntity;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.KstTime;
+import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.time.*;
+import java.util.UUID;
+
+@Getter
+@Entity
+@Table(name = "tickets")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Ticket extends BaseTimeEntity {
+
+    private static final LocalTime PARK_CLOSE_TIME = LocalTime.of(22, 0);
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "valid_date", nullable = false)
+    private LocalDate validDate;
+
+    @Column(name = "status", nullable = false)
+    @Enumerated(EnumType.STRING)
+    private TicketStatus status;
+
+    @Column(name = "code", nullable = false, length = 50, unique = true)
+    private String code;
+
+    @Column(name = "name", nullable = false, length = 80)
+    private String name;
+
+    @Column(name = "type", nullable = false)
+    @Enumerated(EnumType.STRING)
+    private TicketType type;
+
+    @Column(name = "entered_at")
+    private Instant enteredAt;
+
+    @Column(name = "end_time")
+    private Instant endTime;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_item_id", nullable = false)
+    private OrderItem orderItem;
+
+    public Ticket(LocalDate validDate, OrderItem orderItem) {
+        if (validDate == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_VALID_DATE);
+        }
+
+        if (orderItem == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_ORDER_ITEM);
+        }
+
+        this.validDate = validDate;
+        this.code = "TKT-" + UUID.randomUUID().toString();
+        this.status = TicketStatus.UNUSED;
+        this.name = orderItem.getTicketProduct().getName();
+        this.type = orderItem.getTicketProduct().getType();
+        this.orderItem = orderItem;
+    }
+
+    // 티켓 입장 처리
+    public void entryTicket(Instant now) {
+        LocalDateTime kstNow = KstTime.toLocalDateTime(now);
+
+        if (kstNow == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_ENTRY_TIME);
+        }
+
+        validateEntryStatus();
+        validateEntryDate(kstNow.toLocalDate());
+        validateEntryTime(kstNow.toLocalTime());
+
+        this.status = TicketStatus.IN_USE;
+        this.enteredAt = now;
+    }
+
+    // 티켓 환불 처리. 미사용 티켓만 환불할 수 있다.
+    public void refund() {
+        if (this.status != TicketStatus.UNUSED) {
+            throw new BusinessException(ErrorCode.TICKET_NOT_REFUNDABLE);
+        }
+
+        statusTransition(TicketStatus.REFUNDED);
+    }
+
+    private void statusTransition(TicketStatus newStatus) {
+        if (!this.status.canTransitTo(newStatus)) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_STATUS_TRANSITION);
+        }
+
+        this.status = newStatus;
+    }
+
+    // 입장 상태 검증
+    private void validateEntryStatus() {
+        if (this.status != TicketStatus.UNUSED) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_NOT_ALLOWED_STATUS);
+        }
+    }
+
+    // 입장권 날짜 검증
+    private void validateEntryDate(LocalDate today) {
+        if (!this.validDate.equals(today)) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_DATE_MISMATCH);
+        }
+    }
+
+    // 입장권 시간 검증
+    private void validateEntryTime(LocalTime currentTime) {
+        LocalTime opensAt = this.type.getAvailableFrom();
+
+        if (currentTime.isBefore(opensAt) || !currentTime.isBefore(PARK_CLOSE_TIME)) {
+            throw new BusinessException(ErrorCode.TICKET_ENTRY_TIME_NOT_ALLOWED);
+        }
+    }
+
+    // 티켓 종료 처리
+    public boolean expireIfClosed(Instant now) {
+        if (now == null) {
+            throw new BusinessException(ErrorCode.INVALID_TICKET_EXPIRATION_TIME);
+        }
+
+        // 상태 확인
+        if (this.status == TicketStatus.USED || this.status == TicketStatus.EXPIRED
+                || this.status == TicketStatus.REFUNDED)
+        {
+            return false;
+        }
+
+        // 폐장 시각 계산
+        LocalDateTime closeDateTime = this.validDate.atTime(PARK_CLOSE_TIME);
+        Instant closeTime = closeDateTime.atZone(KstTime.ZONE).toInstant();
+
+        // 현재 시각 비교
+        if (now.isBefore(closeTime)) {
+            return false;
+        }
+
+        // 상태랑 종료시각 기록
+        this.endTime = closeTime;
+
+        if (this.status == TicketStatus.UNUSED) {
+            this.status = TicketStatus.EXPIRED;
+        }
+        if (this.status == TicketStatus.IN_USE) {
+            this.status = TicketStatus.USED;
+        }
+
+        return true;
+    }
+
+}

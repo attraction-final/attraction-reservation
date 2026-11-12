@@ -1,0 +1,289 @@
+package com.example.attractionreservation.domain.attractionSlot.service;
+
+import com.example.attractionreservation.domain.attraction.entity.Attraction;
+import com.example.attractionreservation.domain.attraction.repository.AttractionRepository;
+import com.example.attractionreservation.domain.attractionSlot.dto.*;
+import com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot;
+import com.example.attractionreservation.domain.attractionSlot.entity.enums.SlotStatus;
+import com.example.attractionreservation.domain.attractionSlot.repository.AttractionSlotRepository;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
+import com.example.attractionreservation.global.util.AfterCommit;
+import com.example.attractionreservation.global.util.KstTime;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+
+import static com.example.attractionreservation.domain.attractionSlot.entity.AttractionSlot.calculateEndsAt;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AttractionSlotService {
+
+    private final AttractionSlotRepository attractionSlotRepository;
+    private final AttractionRepository attractionRepository;
+
+    // UPDATE 쿼리 후 최신 DB 조회를 위해 EM 사용
+    private final EntityManager entityManager;
+
+    // 슬롯 등록
+    @Transactional
+    public CreateAttractionSlotResponse createAttractionSlot(Long adminId, Long attractionId, CreateAttractionSlotRequest request) {
+        // 1. 삭제되지 않은 어트랙션 조회
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
+
+        // 2. 종료 시각 계산 후 시간 규칙 검사
+        LocalDateTime startsAt = request.startsAt();
+        LocalDateTime endsAt = calculateEndsAt(startsAt, attraction.getDurationMinutes());
+        validateSlotTime(startsAt, endsAt, KstTime.now());
+
+        // 3. 같은 어트랙션의 다른 슬롯과 겹치는지 검사 (BR-SLT-02)
+        if (attractionSlotRepository.countOverlappingSlots(attractionId, startsAt, endsAt) > 0) {
+            throw new BusinessException(ErrorCode.SLOT_TIME_OVERLAP);
+        }
+
+        // 4. 저장 (상태 OPEN, 예약 인원 0으로 시작)
+        AttractionSlot savedSlot = attractionSlotRepository.save(
+                AttractionSlot.create(attraction, startsAt, request.capacity()));
+
+        // [로그 수정] 커밋 뒤에 남긴다. 로그에 쓸 값은 람다 밖에서 미리 꺼낸다.
+        Long slotId = savedSlot.getId();
+        LocalDateTime savedStartsAt = savedSlot.getStartsAt();
+        Integer capacity = savedSlot.getCapacity();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CREATED slotId={} attractionId={} userId={} startsAt={} capacity={}",
+                slotId, attractionId, adminId, savedStartsAt, capacity));
+
+        return CreateAttractionSlotResponse.from(savedSlot);
+    }
+
+    private Attraction findActiveAttraction(Long attractionId) {
+        return attractionRepository.findByIdAndDeletedAtIsNull(attractionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND));
+    }
+
+    // 등록·시간 수정 공통 시간 검사
+    private void validateSlotTime(LocalDateTime startsAt, LocalDateTime endsAt, LocalDateTime now) {
+        if (!startsAt.isAfter(now)) { // 현재보다 미래여야 함
+            throw new BusinessException(ErrorCode.SLOT_START_IN_PAST);
+        }
+        if (!AttractionSlot.isWithinOperatingHours(startsAt, endsAt)) { // BR-SLT-03
+            throw new BusinessException(ErrorCode.SLOT_OUT_OF_OPERATING_HOURS);
+        }
+    }
+
+    // 사용자 날짜별 조회
+    @Transactional(readOnly = true)
+    public SearchAttractionSlotResponse findAttractionSlotsByDate(Long attractionId, LocalDate date) {
+        Attraction attraction = findActiveAttraction(attractionId);
+        LocalDateTime now = KstTime.now();
+        LocalDate targetDate = (date != null) ? date : now.toLocalDate(); // 날짜가 없으면 오늘
+
+        List<AttractionSlot> slots = findSlotsOfDay(attractionId, targetDate, false); // 취소 슬롯은 숨김
+        return SearchAttractionSlotResponse.of(attraction, targetDate, slots, now);
+    }
+
+    // 하루 범위: [그날 00:00, 다음날 00:00)
+    private List<AttractionSlot> findSlotsOfDay(Long attractionId, LocalDate date, boolean includeCancelled) {
+        LocalDateTime dayStart = date.atStartOfDay();
+        LocalDateTime nextDayStart = date.plusDays(1).atStartOfDay();
+        return attractionSlotRepository.findSlotsByAttractionIdAndDate(
+                attractionId, dayStart, nextDayStart, includeCancelled);
+    }
+
+    // 관리자 날짜별 조회
+    @Transactional(readOnly = true)
+    public SearchAdminAttractionSlotResponse findAdminAttractionSlotsByDate(Long attractionId, LocalDate date,
+                                                                            boolean includeCancelled) {
+        Attraction attraction = findActiveAttraction(attractionId);
+        List<AttractionSlot> slots = findSlotsOfDay(attractionId, date, includeCancelled);
+        return SearchAdminAttractionSlotResponse.of(attraction, date, slots);
+    }
+
+    // 슬롯 시간 수정
+    @Transactional
+    public UpdateAttractionSlotTimeResponse updateAttractionSlotTime(Long adminId, Long slotId,
+                                                                     UpdateAttractionSlotTimeRequest request) {
+        AttractionSlot slot = findSlot(slotId);
+        LocalDateTime now = KstTime.now();
+        validateModifiable(slot, now);
+
+        if (slot.hasReservations()) {
+            throw new BusinessException(ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+
+        // 종료 시각 계산에 어트랙션 소요 시간이 필요
+        Long attractionId = slot.getAttraction().getId();
+        Attraction attraction = findActiveAttractionForUpdate(attractionId);
+
+        LocalDateTime newStartsAt = request.startsAt();
+        LocalDateTime newEndsAt = calculateEndsAt(newStartsAt, attraction.getDurationMinutes());
+        validateSlotTime(newStartsAt, newEndsAt, now);
+
+        // 자기 자신은 빼고 겹침 검사
+        if (attractionSlotRepository.countOverlappingSlotsExcludingSlotId(
+                attractionId, slotId, newStartsAt, newEndsAt) > 0) {
+            throw new BusinessException(ErrorCode.SLOT_TIME_OVERLAP);
+        }
+
+        LocalDateTime previousStartsAt = slot.getStartsAt(); // 추가: 바꾸기 전 시각 보관
+        slot.changeTime(newStartsAt); // 변경 감지(dirty checking)로 커밋 시 UPDATE
+
+        // [로그 수정] 커밋 뒤에 남긴다.
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_TIME_CHANGED slotId={} attractionId={} userId={} previousStartsAt={} currentStartsAt={}",
+                slotId, attractionId, adminId, previousStartsAt, newStartsAt));
+
+        return UpdateAttractionSlotTimeResponse.from(slot);
+    }
+
+    // ★ 추가
+    // 등록·시간 수정 전용: 같은 어트랙션의 시간표를 한 명씩 고치도록 어트랙션 행을 잠근다
+    private Attraction findActiveAttractionForUpdate(Long attractionId) {
+        return attractionRepository.findActiveByIdForUpdate(attractionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND));
+    }
+
+    public AttractionSlot findSlot(Long slotId) {
+        return attractionSlotRepository.findByIdForUpdate(slotId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
+    }
+
+    // 수정·상태 변경·삭제 공통 검사: 취소된 슬롯, 종료된 슬롯은 건드릴 수 없음
+    private void validateModifiable(AttractionSlot slot, LocalDateTime now) {
+        if (slot.isCancelled()) {
+            throw new BusinessException(ErrorCode.SLOT_ALREADY_CANCELLED);
+        }
+        if (slot.isEnded(now)) {
+            throw new BusinessException(ErrorCode.SLOT_ALREADY_ENDED);
+        }
+    }
+
+    // 슬롯 정원 수정
+    @Transactional
+    public UpdateAttractionSlotCapacityResponse updateAttractionSlotCapacity(Long adminId, Long slotId,
+                                                                             UpdateAttractionSlotCapacityRequest request) {
+        AttractionSlot slot = findSlot(slotId);
+        validateModifiable(slot, KstTime.now());
+
+        if (request.capacity() < slot.getReservedCount()) { // BR-SLT-05
+            throw new BusinessException(ErrorCode.SLOT_CAPACITY_BELOW_RESERVED);
+        }
+
+        Integer previousCapacity = slot.getCapacity(); // 추가: 바꾸기 전 정원 보관
+        slot.changeCapacity(request.capacity()); // 잔여 정원에 맞춰 OPEN/CLOSED 자동 조정
+
+        // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
+        // (정원이 바뀌면 OPEN/CLOSED가 자동으로 바뀔 수 있어서 상태도 남김)
+        // attractionId는 다른 슬롯 로그와 맞추기 위한 제안 (필수 아님)
+        Long attractionId = slot.getAttraction().getId();
+        Integer currentCapacity = slot.getCapacity();
+        Integer reservedCount = slot.getReservedCount();
+        String currentStatus = slot.getStatus().name();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CAPACITY_CHANGED slotId={} attractionId={} userId={} previousCapacity={} currentCapacity={} reservedCount={} currentStatus={}",
+                slotId, attractionId, adminId, previousCapacity, currentCapacity, reservedCount, currentStatus));
+
+        return UpdateAttractionSlotCapacityResponse.from(slot);
+    }
+
+    // 슬롯 상태 변경
+    @Transactional
+    public UpdateAttractionSlotStatusResponse updateAttractionSlotStatus(Long adminId, Long slotId,
+                                                                         UpdateAttractionSlotStatusRequest request) {
+        SlotStatus newStatus = SlotStatus.from(request.status()); // 허용되지 않은 값이면 400
+        AttractionSlot slot = findSlot(slotId);
+        validateModifiable(slot, KstTime.now());
+
+        SlotStatus previousStatus = slot.getStatus();
+        if (previousStatus == newStatus) {
+            throw new BusinessException(ErrorCode.SLOT_STATUS_SAME);
+        }
+        if (newStatus == SlotStatus.OPEN && slot.isFull()) {
+            throw new BusinessException(ErrorCode.SLOT_FULL, "잔여 정원이 없어 OPEN으로 바꿀 수 없습니다.");
+        }
+        if (newStatus == SlotStatus.SUSPENDED && slot.hasReservations()) {
+            throw new BusinessException(ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+
+        slot.changeStatus(newStatus);
+
+        // [로그 수정] 커밋 뒤에 남기고, enum은 name()으로 넘긴다.
+        // attractionId는 다른 슬롯 로그와 맞추기 위한 제안 (필수 아님)
+        Long attractionId = slot.getAttraction().getId();
+        String previousStatusName = previousStatus.name();
+        String currentStatusName = newStatus.name();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_STATUS_CHANGED slotId={} attractionId={} userId={} previousStatus={} currentStatus={}",
+                slotId, attractionId, adminId, previousStatusName, currentStatusName));
+
+        return UpdateAttractionSlotStatusResponse.of(slot, previousStatus);
+    }
+
+    // 슬롯 삭제
+    @Transactional
+    public void deleteAttractionSlot(Long adminId, Long slotId) {
+        AttractionSlot slot = findSlot(slotId);
+        validateModifiable(slot, KstTime.now());
+
+        if (slot.hasReservations()) {
+            throw new BusinessException(ErrorCode.SLOT_HAS_RESERVATIONS);
+        }
+        slot.cancel(); // 실제로 지우지 않고 상태만 CANCELLED (소프트 삭제)
+
+        // [로그 수정] 커밋 뒤에 남긴다. 지연 로딩 값(getAttraction)은 람다 밖에서 미리 꺼낸다.
+        Long attractionId = slot.getAttraction().getId();
+        LocalDateTime startsAt = slot.getStartsAt();
+        AfterCommit.run(() -> log.info("event=ATTRACTION_SLOT_CANCELLED slotId={} attractionId={} userId={} startsAt={}",
+                slotId, attractionId, adminId, startsAt));
+
+    }
+
+    // 예약 - 해당 슬롯 찾기
+    public AttractionSlot findAttractionSlotById(Long slotId) {
+        return attractionSlotRepository.findById(slotId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
+    }
+
+    // 예약 - 슬롯의 자리 한 개 확보
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void tryReservationCapacity(Long slotId) {
+
+        AttractionSlot slot = findAttractionSlotById(slotId);
+
+        LockModeType lockMode = entityManager.getLockMode(slot);
+
+        if (lockMode != LockModeType.PESSIMISTIC_WRITE && lockMode != LockModeType.PESSIMISTIC_FORCE_INCREMENT) {
+            throw new IllegalStateException("슬롯 정원 확보에는 비관적 쓰기 잠금이 필요합니다.");
+        }
+
+        slot.acquireReservationCapacity();
+    }
+
+    // 예약 - 취소시 reservedCount -1
+    @Transactional
+    public void releaseReservationCapacity(Long slotId) {
+        int updatedCount = attractionSlotRepository.tryReleaseCapacity(slotId);
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.RESERVATION_CAPACITY_RESTORE_FAILED);
+        }
+
+        AttractionSlot slot = findAttractionSlotById(slotId);
+        entityManager.refresh(slot);
+        slot.syncStatusWithRemainingCount();
+    }
+
+    // 예약 - 예약용 어트랙션 잠금 조회
+    @Transactional
+    public Attraction findAttractionByIdForUpdate(Long attractionId) {
+        return attractionRepository.findByIdForUpdate(attractionId).orElseThrow(
+                () -> new BusinessException(ErrorCode.ATTRACTION_NOT_FOUND)
+        );
+    }
+}

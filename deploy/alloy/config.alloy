@@ -1,0 +1,68 @@
+// 애플리케이션 컨테이너의 stdout을 Loki로, actuator 메트릭을 Prometheus로 보낸다.
+// 로그 형식은 docs/logging/logging.md 참고
+//
+// 로그 레이블은 값 종류가 적은 app, env, instance만 붙인다. 나머지 값은 조회할 때 | logfmt로 꺼낸다.
+// instance(EC2 인스턴스 ID)는 로그·메트릭 모두에 붙인다.
+//   로그: 인스턴스별로 Loki 스트림을 나눠, 한 인스턴스의 전송이 늦어져도 다른 인스턴스 로그 때문에 거부되지 않게 한다.
+//   메트릭: 같은 시계열이 인스턴스끼리 겹치지 않게 한다.
+
+// compose의 app 서비스 컨테이너만 수집한다. (Alloy 자신의 로그는 제외)
+// Docker API는 소켓을 직접 마운트하지 않고 읽기 전용 프록시(docker-proxy)로 접근한다. (deploy/compose.yml)
+discovery.docker "app" {
+  host = "tcp://docker-proxy:2375"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.service=app"]
+  }
+}
+
+loki.source.docker "app" {
+  host       = "tcp://docker-proxy:2375"
+  targets    = discovery.docker.app.targets
+  labels     = {
+    app      = "attraction-reservation",
+    env      = sys.env("APP_ENV"),
+    instance = sys.env("INSTANCE_ID"),
+  }
+  forward_to = [loki.process.multiline.receiver]
+}
+
+// 스택 트레이스가 한 로그로 묶이도록 ts=로 시작하는 줄을 새 로그의 시작으로 본다.
+loki.process "multiline" {
+  stage.multiline {
+    firstline     = "^ts="
+    max_wait_time = "3s"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_URL")
+  }
+}
+
+// 같은 compose 네트워크의 app 컨테이너에서 관리 포트(8081)의 메트릭을 수집한다.
+prometheus.scrape "app" {
+  targets = [{
+    "__address__" = "app:8081",
+    "instance"    = sys.env("INSTANCE_ID"),
+  }]
+  job_name        = "attraction-reservation"
+  metrics_path    = "/actuator/prometheus"
+  scrape_interval = "15s"
+  forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = sys.env("PROMETHEUS_URL")
+  }
+
+  external_labels = {
+    app = "attraction-reservation",
+    env = sys.env("APP_ENV"),
+  }
+}

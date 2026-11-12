@@ -1,0 +1,66 @@
+# 모니터링 인스턴스에서 Prometheus, Loki, Grafana를 실행한다.
+# user-data(monitoring/user-data.sh)가 이 디렉터리를 /opt/monitoring 에 받아 실행한다.
+#
+# 앱 인스턴스의 Alloy가 로그는 Loki(3100)로, 메트릭은 Prometheus remote_write(9090)로 보낸다.
+# 두 포트는 보안 그룹에서 앱 인스턴스에만 연다.
+# Grafana는 ALB(grafana.xevbn.click, Cognito 인증)에서만 접근하도록 보안 그룹으로 제한한다.
+# SSM 포트 포워딩은 비상 접속용으로 남긴다.
+#
+# 인스턴스가 준비할 값 (.env). user-data가 처음 만들고, CD(deploy-monitoring)가 배포마다 다시 만든다.
+#   GRAFANA_ADMIN_PASSWORD   Parameter Store monitoring/GRAFANA_ADMIN_PASSWORD
+#   ALERT_WEBHOOK_URL        Parameter Store monitoring/ALERT_WEBHOOK_URL (Slack 알림, provisioning/alerting)
+#
+#   docker compose up -d
+
+name: monitoring
+
+# 디스크가 차지 않게 컨테이너 로그를 순환한다.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    mem_limit: 1g
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-remote-write-receiver   # Alloy push 수신에 필수
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /data/prometheus:/prometheus
+    ports: ["9090:9090"]
+    logging: *logging
+
+  loki:
+    image: grafana/loki:3.7.9
+    restart: unless-stopped
+    mem_limit: 1g
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/config.yml:ro
+      - /data/loki:/loki
+    ports: ["3100:3100"]
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:?}
+      GF_SERVER_ROOT_URL: https://grafana.xevbn.click   # 알림 메시지의 Grafana 링크 주소 (ALB 호스트 규칙)
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - /data/grafana:/var/lib/grafana
+    ports: ["3000:3000"]
+    logging: *logging

@@ -1,0 +1,413 @@
+package com.example.attractionreservation.domain.order.service;
+
+import com.example.attractionreservation.domain.order.entity.OrderItem;
+import com.example.attractionreservation.domain.payment.dto.PaymentSyncResult;
+import com.example.attractionreservation.domain.payment.facade.PaymentFacade;
+import com.example.attractionreservation.domain.payment.service.PaymentService;
+import com.example.attractionreservation.domain.order.dto.SearchOrderCondition;
+import com.example.attractionreservation.domain.order.dto.SearchOrderListResponse;
+import com.example.attractionreservation.domain.order.dto.CreateOrderRequest;
+import com.example.attractionreservation.domain.order.dto.CreateOrderResponse;
+import com.example.attractionreservation.domain.order.dto.SearchOrderResponse;
+import com.example.attractionreservation.domain.order.dto.UpdateOrderResponse;
+import com.example.attractionreservation.domain.order.entity.Order;
+import com.example.attractionreservation.domain.order.entity.enums.OrderStatus;
+import com.example.attractionreservation.domain.order.repository.OrderRepository;
+import com.example.attractionreservation.domain.ticketProduct.entity.TicketProduct;
+import com.example.attractionreservation.domain.ticketProduct.entity.enums.TicketProductStatus;
+import com.example.attractionreservation.domain.ticketProduct.repository.TicketProductRepository;
+import com.example.attractionreservation.domain.ticketProduct.service.TicketProductService;
+import com.example.attractionreservation.domain.user.entity.User;
+import com.example.attractionreservation.domain.user.entity.UserStatus;
+import com.example.attractionreservation.domain.user.repository.UserRepository;
+import com.example.attractionreservation.global.exception.BusinessException;
+import com.example.attractionreservation.global.exception.ErrorCode;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Propagation;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private final OrderRepository orderRepository;
+    private final TicketProductRepository ticketProductRepository;
+    private final UserRepository userRepository;
+    private final PaymentService paymentService;
+    private final PaymentFacade paymentFacade;
+    private final OrderCancelProcessor orderCancelProcessor;
+    private final Clock clock;
+    private final TicketProductService ticketProductService;
+
+    private static final int MAX_VISIT_DAYS = 30;
+
+    // 만료 취소 전 PG 결제 확인이 연속으로 이만큼 실패하면 PG 장애로 보고 이번 주기를 끝낸다.
+    // 한 건만 실패하면 그 결제만의 문제일 수 있으므로 다음 주문을 계속 처리한다.
+    private static final int MAX_CONSECUTIVE_PG_FAILURES = 3;
+
+    @Transactional
+    public CreateOrderResponse createOrder(
+            Long userId,
+            CreateOrderRequest request
+    ) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        List<OrderLine> orderLines = new ArrayList<>();
+        int totalAmount = 0;
+
+        // 중복 상품 ID를 제거하고 필요한 상품을 일괄 조회한다.
+        Set<Long> productIds = request.items().stream()
+                .map(CreateOrderRequest.Item::ticketProductId)
+                .collect(Collectors.toSet());
+
+        Map<Long, TicketProduct> productsById = ticketProductRepository
+                .findAllWithUpdateByIdInOrderById(productIds).stream()
+                .collect(Collectors.toMap(
+                        TicketProduct::getId,
+                        Function.identity()
+                ));
+
+        // 방문일 검증
+        validateVisitDate(request.visitDate(), LocalDate.now(clock));
+
+        for (CreateOrderRequest.Item item : request.items()) {
+            TicketProduct ticketProduct =
+                    productsById.get(item.ticketProductId());
+
+            if (ticketProduct == null) {
+                throw new BusinessException(ErrorCode.TICKET_PRODUCT_NOT_FOUND);
+            }
+
+            // 품절 상품은 판매 중지와 구분해 재고 부족으로 응답한다.
+            if (ticketProduct.getStatus() == TicketProductStatus.OUT_OF_STOCK) {
+                throw new BusinessException(ErrorCode.TICKET_PRODUCT_STOCK_INSUFFICIENT);
+            }
+
+            if (ticketProduct.getStatus() != TicketProductStatus.ON_SALE) {
+                throw new BusinessException(ErrorCode.ORDER_PRODUCT_NOT_ON_SALE);
+            }
+
+            // 클라이언트의 금액을 받지 않고 서버가 조회한 상품 가격으로 계산한다.
+            totalAmount = calculateTotalAmount(
+                    totalAmount,
+                    ticketProduct.getPrice(),
+                    item.quantity()
+            );
+
+            // 재고 차감
+            ticketProduct.decreaseStock(item.quantity());
+
+            orderLines.add(new OrderLine(ticketProduct, item.quantity()));
+        }
+
+        Order order = Order.create(user, totalAmount, request.visitDate());
+
+        for (OrderLine orderLine : orderLines) {
+            order.addOrderItem(
+                    orderLine.ticketProduct(),
+                    orderLine.quantity()
+            );
+        }
+
+        // 주문 항목도 함께 저장한 뒤 DB에서 생성한 ID를 응답에 포함한다.
+        Order savedOrder = orderRepository.save(order);
+
+        // 결제창 연동에 쓸 결제를 주문과 같은 트랜잭션에서 만든다. 결제 생성이 실패하면 주문도 롤백된다.
+        String pgId = paymentService.createPayment(savedOrder);
+
+        return CreateOrderResponse.from(savedOrder, pgId);
+    }
+
+    @Transactional(readOnly = true)
+    public SearchOrderResponse findOrderById(Long userId, Long orderId) {
+        Order order = orderRepository.findOrderById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        // 주문 ID를 알고 있어도 다른 회원의 주문은 조회할 수 없다.
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_ACCESS_DENIED);
+        }
+
+        // 소유자 검사를 통과한 주문의 결제번호만 반환한다.
+        // 결제 데이터가 없는 기존 주문도 상세 조회는 가능하도록 한다.
+        String pgId = orderRepository.findPaymentPgIdByOrderId(orderId)
+                .orElse(null);
+
+        return SearchOrderResponse.from(order, pgId);
+    }
+
+    @Transactional
+    public UpdateOrderResponse updateOrderByCancel(
+            Long userId,
+            Long orderId
+    ) {
+        Order order = orderRepository.findOrderById(orderId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (!order.getUser().getId().equals(userId)) {
+            throw new BusinessException(ErrorCode.ORDER_CANCEL_ACCESS_DENIED);
+        }
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 결제 → 주문 순서로 잠금을 획득한다.
+        paymentService.lockPaymentByOrderIdIfExists(orderId);
+
+        // 조회 후 상태가 바뀔 수 있으므로 실제 수정 시에도 PENDING 조건을 확인한다.
+        int updatedCount = orderRepository.cancelPendingOrder(
+                orderId,
+                userId,
+                OrderStatus.PENDING,
+                OrderStatus.CANCELLED,
+                Instant.now()
+        );
+
+        if (updatedCount == 0) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_CANCELLABLE);
+        }
+
+        // 주문 티켓 상품 id 및 수량 map 생성
+        Map<Long, Integer> quantitiesByTicketProductId = order.getQuantityByTicketProductId();
+
+        // 재고 복구
+        ticketProductService.updateTicketProductsStockIncrease(quantitiesByTicketProductId);
+
+        // 결제 취소가 실패하면 같은 트랜잭션의 주문 취소도 롤백한다.
+        paymentService.cancelledByUser(userId, orderId);
+
+        // 수정 쿼리 실행 후 영속성 컨텍스트가 비워지므로 기존 엔티티를 재사용하지 않는다.
+        return UpdateOrderResponse.of(
+                orderId,
+                OrderStatus.CANCELLED
+        );
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public int updateExpiredOrdersByCancel() {
+        long startedAt = System.nanoTime();
+        Instant now = clock.instant();
+        Instant cutoff = now.minus(30, ChronoUnit.MINUTES);
+
+        List<Order> expiredOrders = orderRepository.findExpiredPendingOrders(
+                OrderStatus.PENDING,
+                cutoff,
+                PageRequest.of(0, 100)
+        );
+
+        int cancelledCount = 0;
+        int failedCount = 0;
+        int skippedCount = 0;
+        Set<String> failureCodes = new java.util.TreeSet<>();
+
+        BusinessException firstServerFailure = null;
+        Long firstFailedOrderId = null;
+        Long firstFailedUserId = null;
+        int consecutivePgFailures = 0;
+
+        for (Order order : expiredOrders) {
+            Long orderId = order.getId();
+            Long userId = order.getUser().getId();
+
+            try {
+                boolean unpaidAtPg = isUnpaidAtPg(orderId);
+                consecutivePgFailures = 0;
+
+                // PG에서 결제·실패가 확인되면 결제 처리 경로가 주문을 정리했으므로 만료 취소하지 않는다.
+                if (!unpaidAtPg) {
+                    skippedCount++;
+                    continue;
+                }
+
+                if (orderCancelProcessor.cancelExpiredOrder(
+                        orderId,
+                        userId,
+                        now
+                )) {
+                    cancelledCount++;
+                } else {
+                    skippedCount++;
+                }
+            } catch (PessimisticLockingFailureException exception) {
+                // 웹훅·승인 API 등 다른 처리가 같은 결제를 잠그고 있다. 그쪽에 맡기고 남았으면 다음 주기에 다시 확인한다.
+                skippedCount++;
+                log.info("event=ORDER_AUTO_CANCEL_SKIPPED targetUserId={} orderId={} reason=\"다른 처리가 결제를 잠그고 있음\"",
+                        userId, orderId);
+            } catch (BusinessException exception) {
+                // 이 주문의 실패가 다음 주문 처리를 막지 않는다. PG 확인이 연속으로 실패한 경우만 이번 주기를 끝낸다.
+                failedCount++;
+                ErrorCode errorCode = exception.getErrorCode();
+                failureCodes.add(errorCode.name());
+
+                log.debug(
+                        "event=ORDER_AUTO_CANCEL_REJECTED "
+                                + "targetUserId={} orderId={} errorCode={}",
+                        userId,
+                        orderId,
+                        errorCode.name()
+                );
+
+                // 취소 전 PG 결제 확인이 실패했다. PortOneClient가 연동 실패를 WARN으로 남겼으므로 ERROR로 다시 남기지 않는다.
+                // 연속으로 실패하면 PG 장애로 보고, 남은 주문마다 응답 대기 시간만큼 배치가 늦어지지 않도록 이번 주기를 끝낸다.
+                if (errorCode == ErrorCode.PAYMENT_GATEWAY_ERROR) {
+                    consecutivePgFailures++;
+                    if (consecutivePgFailures >= MAX_CONSECUTIVE_PG_FAILURES) {
+                        break;
+                    }
+                    continue;
+                }
+
+                // 서버 오류는 첫 예외를 보관하고 반복문 밖에서 기록한다.
+                if (errorCode.getStatus().is5xxServerError()
+                        && firstServerFailure == null) {
+                    firstServerFailure = exception;
+                    firstFailedOrderId = orderId;
+                    firstFailedUserId = userId;
+                }
+            }
+        }
+
+        long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        log.info(
+                "event=ORDER_AUTO_CANCEL_PROCESSED "
+                        + "count={} failedCount={} skippedCount={} "
+                        + "durationMs={} result={} failureCodes=\"{}\"",
+                cancelledCount,
+                failedCount,
+                skippedCount,
+                durationMs,
+                failedCount == 0 ? "SUCCESS" : "FAILURE",
+                String.join(",", failureCodes)
+        );
+
+        if (firstServerFailure != null) {
+            log.error(
+                    "event=ORDER_AUTO_CANCEL_FAILED "
+                            + "targetUserId={} orderId={} errorCode={}",
+                    firstFailedUserId,
+                    firstFailedOrderId,
+                    firstServerFailure.getErrorCode().name(),
+                    firstServerFailure
+            );
+        }
+
+        return cancelledCount;
+    }
+
+    @Transactional(readOnly = true)
+    public SearchOrderListResponse findOrdersByUserId(
+            Long userId,
+            SearchOrderCondition condition
+    ) {
+        // 생성 시각이 같아도 조회 순서가 일정하도록 ID를 보조 정렬로 사용한다.
+        Pageable pageable = PageRequest.of(
+                condition.page(),
+                condition.size(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id")
+                )
+        );
+
+        // 1번 쿼리: 주문 목록을 페이지 단위로 조회한다.
+        Page<Order> orders = orderRepository.findAllByUser_Id(userId, pageable);
+
+        List<Long> orderIds = orders.getContent().stream()
+                .map(Order::getId)
+                .toList();
+
+        // 2번 쿼리: 이번 페이지 주문들의 상품을 한 번에 조회한다.
+        // 주문이 없으면 빈 IN 조건 쿼리를 보내지 않는다.
+        Map<Long, List<OrderItem>> orderItemsByOrderId = orderIds.isEmpty()
+                ? Map.of()
+                : orderRepository.findOrderItemsWithProductByOrderIds(orderIds).stream()
+                .collect(Collectors.groupingBy(
+                        orderItem -> orderItem.getOrder().getId()
+                ));
+
+        return SearchOrderListResponse.from(orders, orderItemsByOrderId);
+    }
+
+    /**
+     * 만료 취소 전에 PG 결제 상태를 확인한다. 트랜잭션 밖에서 PG를 조회한다.
+     *
+     * <p>결제 완료면 승인(원장 반영·티켓 발급)되고, 결제 실패면 실패 처리(주문 취소)되므로 만료 취소할 필요가 없다.
+     * 결제창을 열지 않아 PG에 결제가 없으면 미결제로 본다.
+     * 확인한 뒤 PG에서 결제되면 승인 경로가 취소된 결제의 보상 요청을 만든다.
+     *
+     * @return PG에서 결제되지 않아 만료 취소해도 되면 true
+     * @throws BusinessException 결제 데이터가 없거나(주문과 함께 생성되므로 정상 흐름에서는 없음),
+     *                           PG 조회 실패 등 다음 주기에 다시 확인해야 하는 경우
+     */
+    private boolean isUnpaidAtPg(Long orderId) {
+        String pgId = orderRepository.findPaymentPgIdByOrderId(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+
+        try {
+            PaymentSyncResult result = paymentFacade.syncPayment(pgId);
+            // 원장 상태와 충돌하면 승인되지 않은 채 PENDING으로 남아 매 주기 건너뛰므로 사람이 확인할 수 있게 남긴다.
+            if (result == PaymentSyncResult.STATE_CONFLICT) {
+                log.warn("event=ORDER_AUTO_CANCEL_SKIPPED orderId={} pgId={} reason=\"PG 결제와 원장 상태 충돌, 수동 확인 필요\"",
+                        orderId, pgId);
+            }
+            return result == PaymentSyncResult.NOT_PAID || result == PaymentSyncResult.NOT_OUR_PAYMENT;
+        } catch (BusinessException exception) {
+            if (exception.getErrorCode() == ErrorCode.PAYMENT_PG_PAYMENT_NOT_FOUND) {
+                return true;
+            }
+            throw exception;
+        }
+    }
+
+    private int calculateTotalAmount(int totalAmount, int price, int quantity) {
+        try {
+            int itemAmount = Math.multiplyExact(price, quantity);
+            return Math.addExact(totalAmount, itemAmount);
+        } catch (ArithmeticException exception) {
+            throw new BusinessException(ErrorCode.ORDER_AMOUNT_OUT_OF_RANGE);
+        }
+    }
+
+    private void validateVisitDate(LocalDate visitDate, LocalDate today) {
+        LocalDate lastDate = today.plusDays(MAX_VISIT_DAYS - 1L);
+
+        if (visitDate.isBefore(today) || visitDate.isAfter(lastDate)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_VISIT_DATE);
+        }
+    }
+
+    private record OrderLine(
+            TicketProduct ticketProduct,
+            int quantity
+    ) {
+    }
+}

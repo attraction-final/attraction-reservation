@@ -1,0 +1,39 @@
+# 운영 전용 설정. deploy/compose.yml에서 SPRING_PROFILES_ACTIVE=prod로 켠다.
+# 공통 설정은 application.yaml에 두고, 여기에는 운영에서만 다른 값만 둔다.
+
+spring:
+  main:
+    # 배너는 logfmt가 아닌 여러 줄로 찍혀 Loki에 섞이므로 운영에서는 끈다.
+    banner-mode: "off"   # 따옴표가 없으면 YAML이 false로 읽는다
+
+  datasource:
+    # 운영에서는 기본값 없이 환경변수로만 주입한다. 값이 빠지면 localhost로 붙지 않고 기동에 실패한다.
+    url: ${DB_URL}
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+
+server:
+  # ALB에서 TLS가 끝나므로 X-Forwarded-Proto를 믿어야 OAuth redirect_uri가 https로 만들어진다.
+  # Tomcat은 기본으로 사설 IP(10.x 등)에서 온 X-Forwarded-* 만 신뢰한다.
+  forward-headers-strategy: native
+
+# 운영에서는 Alloy가 컨테이너 stdout을 수집하므로 파일로 쓰지 않는다. (deploy/alloy/config.alloy)
+# 출력 패턴은 모든 프로필에서 같아야 하므로 application.yaml에 둔다.
+
+management:
+  server:
+    # actuator는 서비스 포트(8080)가 아닌 이 포트에서만 응답한다.
+    # 보안 그룹에서 Prometheus 서버와 로드밸런서에만 연다.
+    port: ${MANAGEMENT_PORT:8081}
+  endpoint:
+    health:
+      # 쿠버네티스가 아니면 꺼져 있으므로 직접 켠다.
+      probes:
+        enabled: true
+        # readiness를 서비스 포트에도 /readyz로 노출한다. (/livez도 함께 생기지만 열지 않는다)
+        # 로드밸런서는 8080 /readyz를 봐서, 서비스 포트가 요청을 받지 못하면 인스턴스를 빼게 한다.
+        # 관리 포트의 readiness는 서비스 포트 상태를 확인하지 않는다.
+        add-additional-paths: true

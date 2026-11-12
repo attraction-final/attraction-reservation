@@ -34,6 +34,7 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
     public Page<Attraction> searchAttractions(String keyword,
                                               boolean operatingOnly,
                                               boolean reservableOnly,
+                                              Integer height,
                                               String sort,
                                               LocalDateTime reservableFrom,
                                               LocalDateTime todayEnd,
@@ -45,7 +46,8 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                         attraction.deletedAt.isNull(),
                         nameContains(keyword),
                         operatingOnly(operatingOnly),
-                        reservableOnly(reservableOnly, reservableFrom, todayEnd)
+                        reservableOnly(reservableOnly, reservableFrom, todayEnd),
+                        rideableAt(height)
                 )
                 .orderBy(createOrderSpecifiers(sort));
 
@@ -66,7 +68,8 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                         attraction.deletedAt.isNull(),
                         nameContains(keyword),
                         operatingOnly(operatingOnly),
-                        reservableOnly(reservableOnly, reservableFrom, todayEnd)
+                        reservableOnly(reservableOnly, reservableFrom, todayEnd),
+                        rideableAt(height)
                 )
                 .fetchOne();
 
@@ -102,6 +105,26 @@ public class AttractionRepositoryImpl implements AttractionRepositoryCustom {
                                 isReservableSlot(reservableFrom, todayEnd)
                         )
                         .exists());
+    }
+
+    // 키 필터: 이 키로 "혼자" 탈 수 있는 어트랙션만
+    // 1) 키 정보가 하나라도 등록돼 있어야 한다. (NULL = "제한 없음"이 아니라 "정보 없음"이라 뺀다)
+    // 2) 최소 키가 있으면: 최소 키 <= 내 키
+    // 3) 최대 키가 있으면: 내 키 <= 최대 키
+    // 결정: 보호자 동반 탑승(guardianHeightCm)은 별도 안내가 없어 필터 대상에서 뺀다.
+    //       보호자와 함께라면 탈 수 있는 경우도 목록에서 빠질 수 있다.
+    private BooleanExpression rideableAt(Integer height) {
+        if (height == null) {
+            return null;
+        }
+        BooleanExpression hasHeightInfo = attraction.minHeightCm.isNotNull()
+                .or(attraction.maxHeightCm.isNotNull())
+                .or(attraction.guardianHeightCm.isNotNull());
+        BooleanExpression aboveMin = attraction.minHeightCm.isNull()
+                .or(attraction.minHeightCm.loe(height));   // loe = less or equal (<=)
+        BooleanExpression belowMax = attraction.maxHeightCm.isNull()
+                .or(attraction.maxHeightCm.goe(height));   // goe = greater or equal (>=)
+        return hasHeightInfo.and(aboveMin).and(belowMax);
     }
 
     // 정렬: LATEST(최신순)이면 등록일 내림차순을 맨 앞에, 그다음 이름순 → id순

@@ -25,7 +25,13 @@ public record SearchAttractionCondition(
 
         Boolean reservable,
 
-        Boolean operating
+        Boolean operating,
+
+        // 탑승할 사람의 키(cm). null 이면 키 필터를 쓰지 않는다.
+        // 프론트 주석에 적힌 허용 범위(50~250)에 맞춘다.
+        @Min(50)
+        @Max(250)
+        Integer height
 ) {
 
     // record의 기본 생성자에서 검색 조건의 기본값을 설정
@@ -49,5 +55,6 @@ public record SearchAttractionCondition(
         if (operating == null) {
             operating = false;
         }
+        // height 는 null 그대로 둔다 (null = 키 필터 없음)
     }
 }

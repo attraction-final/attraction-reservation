@@ -14,7 +14,7 @@
 | `security-groups.tf` | SG 5개와 규칙. 규칙은 SG를 서로 참조하므로 inline이 아닌 별도 리소스로 둔다 |
 | `alb.tf` | ALB, 80·443 리스너, grafana 규칙(Cognito 인증), TG `attraction-app-ecs`·`attraction-grafana` |
 | `cognito.tf` | Grafana 앞단 인증용 user pool, client, domain |
-| `ecs.tf` | 클러스터, 서비스 api·worker, 사이드카 로그 그룹, api 오토스케일링(CPU 60% 기준 1~3개) |
+| `ecs.tf` | 클러스터, 서비스 api·worker, 사이드카 로그 그룹, api 오토스케일링(CPU 60% 기준 1~3개), api 배포 롤백 알람(`attraction-reservation-api-5xx`: 앱 5xx가 1분에 5건 이상이면서 5% 초과인 분이 최근 3분 중 2분. ECS가 배포 중에만 보고, 사람에게 가는 알림은 Grafana가 보낸다) |
 | `data-stores.tf` | RDS, ElastiCache, 서브넷 그룹 |
 | `monitoring.tf` | 모니터링 EC2, 인스턴스 프로파일 |
 | `iam.tf` | GitHub OIDC provider, ECS execution·task 역할, `github-actions-role`, `monitoring-ec2-role` |

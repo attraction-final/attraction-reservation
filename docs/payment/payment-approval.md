@@ -17,10 +17,10 @@ PortOne V2 기반 결제 승인 기능의 구조, 설계 결정, 검증 결과, 
 [클라이언트]
   1. 결제 생성 → createPayment가 pgId 반환 (PortOne paymentId로 사용)
   2. PortOne.requestPayment({ storeId, channelKey, paymentId: pgId, totalAmount, ... })
-  3. POST /api/payments/{pgId}/confirm?userId=...   body: { "orderId": ... }
+  3. POST /api/payments/{pgId}/confirm   body: { "orderId": ... }   (로그인 필요, 인증 없으면 401)
 
 [서버]
-PaymentController
+PaymentController                                          ← userId는 인증 정보(@AuthenticationPrincipal Long userId)
  └─ PaymentFacade.confirmPayment(userId, pgId, request)     ← 트랜잭션 없음
      ├─ PaymentService.getOwnedPayment(userId, pgId)        ← 읽기 전용, 남의 결제·없는 결제면 404
      ├─ orderId 불일치                → INVALID_INPUT_VALUE (400)
@@ -29,7 +29,7 @@ PaymentController
           ├─ 이미 FAILED              → PAYMENT_ALREADY_PROCESSED (409)
           ├─ PaymentGateway.getPayment(pgId)                ← PortOne 조회 (트랜잭션 밖)
           │    ├─ PG에 결제 없음       → PAYMENT_PG_PAYMENT_NOT_FOUND (404)
-          │    ├─ PG FAILED           → failPayment → PAYMENT_PG_FAILED (502)
+          │    ├─ PG FAILED           → failPayment → PAYMENT_PG_FAILED (409)
           │    └─ PG 미완료(READY 등)  → PAYMENT_NOT_PAID (409)
           ├─ 금액 불일치
           │    ├─ failPaymentWithCompensation이 true  → 결제 FAILED·주문 취소·재고 복구·보상 요청 함께 커밋
@@ -45,22 +45,26 @@ PaymentController
                │                        → PAYMENT_ALREADY_CANCELLED (409)
                ├─ 그 밖의 전이 불가    → PAYMENT_INVALID_STATUS_TRANSITION (409)
                └─ 정상                → 결제 PAID(paidAt = PG 결제 시각) + 주문 COMPLETED
+                                        + 티켓 발급(ticketService.issueTickets), 같은 트랜잭션
 
 [웹훅]  상세는 payment-webhook-plan.md
 POST /api/payments/webhooks/portone → 서명 검증 → webhook_events 저장 → 200
 WebhookEventScheduler → WebhookEventProcessor
  └─ PaymentFacade.syncPayment(pgId)                         ← 소유자 확인 없음
      ├─ 원장에 없는 pgId              → NOT_OUR_PAYMENT
-     ├─ 이미 PAID                     → ALREADY_DONE
+     ├─ PAID·PARTIALLY_REFUNDED·REFUNDED → REFUND_SYNC_REQUIRED
+     │    └─ (WebhookEventProcessor) RefundProcessor.syncWithPg(pgId)로 환불 동기화
+     │       (PG 취소 금액 = 완료 환불 합계면 ALREADY_DONE, 상세는 payment-webhook-plan.md 5장)
      └─ reconcile(payment)의 결과·예외를 PaymentSyncResult로 변환
-        (재시도가 필요한 오류만 예외로 전파)
+        (FAILED면 PAYMENT_ALREADY_PROCESSED → ALREADY_DONE, 재시도가 필요한 오류만 예외로 전파)
 ```
 
 ## 3. 패키지 구조와 파일
 
 ```text
 domain/payment
-├── controller/PaymentController          POST /api/payments/{pgId}/confirm
+├── controller/PaymentController          POST /api/payments/{pgId}/confirm,
+│                                         GET /api/payments (내 결제 목록), GET /api/payments/{paymentId}
 ├── dto/ConfirmPaymentRequest             orderId
 ├── dto/ConfirmPaymentResponse            id, orderId, pgId, amount, status, paidAt
 ├── dto/PaymentSyncResult                 syncPayment 결과
@@ -121,7 +125,8 @@ global/config/SchedulingConfig            @EnableScheduling
 ### 4.3 멱등성
 
 - `approvePayment`: 이미 `PAID`인 결제는 예외 없이 현재 결제 정보를 반환한다. 먼저 도착한 요청이 처리한 것으로 간주한다.
-  - 웹훅 처리에서는 `ALREADY_DONE`으로 끝나 재시도하지 않는다.
+  - 웹훅 처리에서는 원장이 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED`면 `reconcile`까지 가지 않고 `REFUND_SYNC_REQUIRED`를 반환해, `WebhookEventProcessor`가 `RefundProcessor.syncWithPg`로 PG 취소 금액과 환불 기록을 맞춘다. 차이가 0이면 `ALREADY_DONE`(웹훅 `PROCESSED`)이다([payment-webhook-plan.md 5장](payment-webhook-plan.md#syncpayment-결과)).
+  - `ALREADY_DONE`은 원장 `FAILED`(`PAYMENT_ALREADY_PROCESSED`)일 때와 환불 동기화 차이가 0일 때 나온다.
 - `failPayment`·`failPaymentWithCompensation`: `PENDING`일 때만 실패 처리하고 `true`를 반환한다. 이미 처리된 결제면 상태를 바꾸지 않고 `false`를 반환한다.
   - 금액 불일치 요청이 동시에 들어와도 `true`를 받은 한 요청만 보상 요청을 만든다.
   - 예외: `failPaymentWithCompensation`은 원장이 `CANCELLED`이고 보상 요청이 없으면 실패 처리 없이 보상 요청만 저장하고 `true`를 반환한다.
@@ -158,6 +163,7 @@ MySQL 9.6 + Hibernate 7.4.5 컨테이너에서 확인한 결과:
 
 ### 4.6 결제·주문 결합도
 
+- 승인 시 같은 트랜잭션에서 `ticketService.issueTickets(order)`로 티켓도 발급한다.
 - 승인·실패 시 주문은 상태만 바꾸므로 별도 서비스 계층 대신 `payment.getOrder().markAsPaid()` / `markAsCancelled()`로 같은 트랜잭션에서 변경한다.
 - 계층을 추가해도 `Payment → Order` 엔티티 연관관계가 남아 있는 한 결합도는 줄지 않는다.
 - 주문 쪽 로직이 늘어나면(좌석 확정, 알림 등) `OrderService` 호출이나 도메인 이벤트(동기 `@EventListener`, 같은 트랜잭션)로 옮긴다.
@@ -280,7 +286,7 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 | `PaymentCommandServiceTest` | Mockito | 승인 성공·멱등·FAILED 거절·결제 없음, CANCELLED면 같은 트랜잭션에서 보상 요청 저장 후 CANCELLED 반환·이미 요청됨·취소 아님·보상 저장 실패 시 예외 전파, 실패 처리 성공·PENDING 아니면 건너뜀·결제 없음, 금액 불일치 시 보상 요청 저장(원장 CANCELLED면 실패 처리 없이 저장) |
 | `PaymentServiceTest` | Mockito | 결제 생성, 사용자 취소, 소유자 결제 조회 |
 | `PaymentServiceConcurrencyTest` | Testcontainers MySQL | 승인 락 대기 후 skip, 동시 승인 10건, 취소 락 대기·타임아웃, 동시 취소 10건, 취소 커밋 후 승인은 CANCELLED 응답 + 보상 요청 1건 |
-| `PaymentControllerTest` | `@WebMvcTest` | 200(응답 데이터) / 404 / 502 / userId 누락 400 / orderId 누락 400, `ApiResponse` 형식 |
+| `PaymentControllerTest` | `@WebMvcTest` | 승인 200(응답 데이터) / 404 / 502 / PG 실패 409 / 인증 없음 401 / orderId 누락 400, 결제 목록·단건 조회, `ApiResponse` 형식 |
 | `PaymentRepositoryTest` | `@DataJpaTest` + H2 | `findByPgIdAndUserId` 쿼리 동작 (본인·다른 사용자·없는 pgId) |
 | `PortOneClientTest` | `MockRestServiceServer` | 응답 변환·필수값 검증·지원하지 않는 상태, 404 처리, 호출마다 새 멱등 키·호출 안 재시도는 같은 키, 앞선 요청 처리 중 응답의 대기 후 같은 키 재시도·처리 중 응답 뒤 결과 미확인(마지막이 처리 중·통신 실패)이면 UNKNOWN·인터럽트 시 UNKNOWN, 이미 취소됨 처리(전체 취소는 성공, 부분 취소는 예외), 취소 가능 금액 전송·불일치 예외, 통신 실패 재시도 |
 | `OrderTest`, `PaymentTest` | 단위 | 상태 전이, `paidAt` null 검증 |
@@ -297,13 +303,18 @@ Facade와 `approvePayment`가 의존하는 전제다. 구현체가 바뀌어도 
 
 ### 운영 배포 전 필수
 
-1. **인증 연동**: 지금은 `userId`를 `@RequestParam`으로 받아 소유자 확인을 우회할 수 있다. `@AuthenticationPrincipal` 등으로 교체 전까지 운영 노출 금지.
-2. **웹훅 배포 준비**: `webhook_events` 테이블 생성, PortOne 콘솔에 웹훅 URL 등록, 인증 적용 시 웹훅 경로 `permitAll`. 상세는 [payment-webhook-plan.md 7장](payment-webhook-plan.md#7-남은-작업).
-3. **보상 배포 준비**: `payment_compensations` 테이블 생성, `DEAD` 보상 요청 확인·수동 환불 절차. 상세는 [payment-compensation.md 8장](payment-compensation.md#8-남은-작업).
+- [x] **인증 연동**: `userId`를 `@RequestParam` 대신 인증 정보(`@AuthenticationPrincipal Long userId`)로 받는다. 인증 없으면 401 (`PaymentController`, `PaymentControllerTest.confirmPayment_unauthenticated_Unauthorized`)
+- **웹훅 배포 준비**: 상세는 [payment-webhook-plan.md 7장](payment-webhook-plan.md#7-남은-작업).
+  - [x] `webhook_events` 테이블: Flyway `db/migration/V1__init.sql`로 관리한다
+  - [x] 웹훅 경로 `permitAll` (`SecurityConfig`의 `POST /api/payments/webhooks/portone`)
+  - [ ] PortOne 콘솔에 웹훅 URL 등록
+- **보상 배포 준비**: 상세는 [payment-compensation.md 8장](payment-compensation.md#8-남은-작업).
+  - [x] `payment_compensations` 테이블: Flyway `db/migration/V1__init.sql`로 관리한다
+  - [ ] `DEAD` 보상 요청 조회 수단·수동 환불 절차 (알림은 Grafana `payment-final-failure` 규칙으로 적용됨)
 
 ### 개선 항목
 
-- `PortOneConfig`: `RestClient`를 타입으로만 주입하고 정적 `RestClient.builder()`로 생성 → Boot의 `RestClient.Builder` 주입으로 변경 권장.
+- [x] `PortOneConfig`: Boot의 `RestClient.Builder`를 주입받아 `RestClient`를 만든다(요청 메트릭·traceId 전파 적용).
 - `io.portone:server-sdk` 의존성은 웹훅 서명 검증(`WebhookVerifier`)에만 사용한다. 결제 조회·취소는 `RestClient`로 직접 호출한다.
 - PG 연동 컨트롤러(`PortOneConfigController`, `PortOneWebhookController`)는 infra에 둔다. `architecture.md`에 이 기준을 추가할지 팀과 정한다.
 - `PAYMENT_INVALID_STATUS_TRANSITION`과 `ORDER_INVALID_STATUS_TRANSITION` 메시지가 같아 구분 불가.

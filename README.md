@@ -121,6 +121,7 @@ flowchart LR
     API --> RD
     WK --> RDS
     API <--> PO
+    WK <--> PO
     API <--> OA
     API --> JEV
     API -.->|"로그: Fluent Bit"| LK

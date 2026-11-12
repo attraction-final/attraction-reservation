@@ -19,6 +19,9 @@ public record SearchAttractionResponse(
         Integer durationMinutes,
         Integer entranceMoveMinutes,
         OperationStatus operationStatus,
+        Integer minHeightCm,       // 혼자 탈 수 있는 최소 키 (null = 등록된 정보 없음)
+        Integer maxHeightCm,       // 탈 수 있는 최대 키 (null = 등록된 정보 없음)
+        Integer guardianHeightCm,  // 이 키 이하는 보호자 동반 (null = 등록된 정보 없음)
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime createdAt,
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
@@ -34,6 +37,9 @@ public record SearchAttractionResponse(
                 attraction.getDurationMinutes(),
                 attraction.getEntranceMoveMinutes(),
                 attraction.getOperationStatus(),
+                attraction.getMinHeightCm(),
+                attraction.getMaxHeightCm(),
+                attraction.getGuardianHeightCm(),
                 KstTime.toLocalDateTime(attraction.getCreatedAt()),
                 KstTime.toLocalDateTime(attraction.getUpdatedAt())
         );

@@ -20,16 +20,14 @@ public class RouteSearcher {
             Map<Long, StartLeg> startLegs,
             TravelTimeTable travelTimes
     ) {
+        // 탐색 내내 바뀌지 않는 입력을 하나로 묶는다
+        SearchContext context = new SearchContext(startAt, endAt, candidates, startLegs, travelTimes);
         // 아무것도 방문하지 않는 경로를 초기 비교 대상으로 둔다
         RouteSearchResult emptyResult = new RouteSearchResult(
                 startAt, List.of(), List.of()
         );
         RouteSearchResult bestResult = searchPaths(
-                startAt, //전체 소요 시간 계산의 기준
-                endAt,
-                candidates,
-                startLegs,
-                travelTimes,
+                context,
                 startAt, //첫 이동을 시작할 수 있는 시각
                 null, //직전 어트랙션 ID. null = 현재 위치에서 출발
                 new ArrayList<>(), //현재 만들어 가는 방문 경로
@@ -55,13 +53,19 @@ public class RouteSearcher {
         );
     }
 
-    //현재 경로에서 다음 방문지를 하나씩 선택하며 재귀적으로 탐색
-    private RouteSearchResult searchPaths(
-            LocalDateTime startAt,
-            LocalDateTime endAt,
+    // 한 번의 탐색 동안 바뀌지 않는 입력
+    private record SearchContext(
+            LocalDateTime startAt, //전체 소요 시간 계산의 기준
+            LocalDateTime endAt, //이용 종료 시각
             List<CandidateAttraction> candidates,
             Map<Long, StartLeg> startLegs,
-            TravelTimeTable travelTimes,
+            TravelTimeTable travelTimes
+    ) {
+    }
+
+    //현재 경로에서 다음 방문지를 하나씩 선택하며 재귀적으로 탐색
+    private RouteSearchResult searchPaths(
+            SearchContext context,
             LocalDateTime departureAt,
             Long previousAttractionId,
             List<PlannedVisit> path,
@@ -70,71 +74,70 @@ public class RouteSearcher {
     ) {
         //현재 경로도 하나의 완성 가능한 추천 결과로 평가
         RouteSearchResult currentResult = new RouteSearchResult(
-                startAt, List.copyOf(path), List.of()
+                context.startAt(), List.copyOf(path), List.of()
         );
         if (isBetter(currentResult, bestResult)) {
             bestResult = currentResult;
         }
         // 다음 방문지로 선택할 수 있는 모든 어트랙션을 시도
-        for (CandidateAttraction attraction : candidates) {
-            //현재 경로에서 이미 방문한 어트랙션은 다시 선택하지 않는다
-            if (visitedIds.contains(attraction.attractionId())) {
+        for (CandidateAttraction attraction : context.candidates()) {
+            //이미 방문했거나, 구간·슬롯이 없어 갈 수 없으면 empty
+            Optional<PlannedVisit> next = visitedIds.contains(attraction.attractionId())
+                    ? Optional.empty()
+                    : planVisit(context, attraction, previousAttractionId, departureAt, path.size() + 1);
+            if (next.isEmpty()) {
                 continue;
             }
-
-            //이번 어트랙션까지의 이동. 구간이 없으면 이 순서는 만들 수 없으므로 건너뛴다
-            Optional<Move> move = moveTo(attraction, previousAttractionId, startLegs, travelTimes);
-            if (move.isEmpty()) {
-                continue;
-            }
-            int moveMinutes = move.get().minutes();
-            LocalDateTime arrivalAt = departureAt.plusMinutes(moveMinutes);
-            //도착 후 이용할 수 있는 가장 이른 슬롯 하나를 찾는다
-            Optional<CandidateSlot> availableSLot = findEarliestAvailableSlot(attraction,arrivalAt,endAt);
-            if (availableSLot.isEmpty()) {
-                continue;
-            }
-            //도착 후 슬롯 시작까지 기다릴 시간을 계산한다
-            CandidateSlot slot = availableSLot.get();
-            int waitMinutes = Math.toIntExact(
-                    Duration.between(arrivalAt.atZone(KstTime.ZONE), slot.startsAt().atZone(KstTime.ZONE)).toMinutes()
-            );
-            //이번에 선택한 다음 방문의 시간표를 만든다
-            PlannedVisit visit = new PlannedVisit(
-                    path.size() +1,
-                    attraction.attractionId(),
-                    attraction.attractionName(),
-                    slot.slotId(),
-                    moveMinutes,
-                    move.get().estimated(),
-                    arrivalAt,
-                    waitMinutes,
-                    slot.startsAt(),
-                    slot.endsAt(),
-                    slot.rideMinutes()
-            );
+            PlannedVisit visit = next.get();
             //현재 경로에 방문을 추가하고 중복 방문 방지 집합에도 기록
             path.add(visit);
             visitedIds.add(attraction.attractionId());
             //방금 선택한 슬롯이 끝난 시각부터 다음 방문을 이어 붙인다
-            //재귀 호출에서 찾은 더 좋은 결과를 받아 이후 다른 방문 순서를 탐색할 때도 비교 기준으로 사용
             bestResult = searchPaths(
-                    startAt,
-                    endAt,
-                    candidates,
-                    startLegs,
-                    travelTimes,
-                    slot.endsAt(),
+                    context,
+                    visit.endsAt(),
                     attraction.attractionId(), //다음 이동의 출발지는 방금 방문한 어트랙션
                     path,
                     visitedIds,
                     bestResult
             );
-            //백트래킨 -> 이번 방문 선택을 되돌려 다음 후보를 같은 출발 상태에서 시도
+            //백트래킹 -> 이번 방문 선택을 되돌려 다음 후보를 같은 출발 상태에서 시도
             visitedIds.remove(attraction.attractionId());
             path.remove(path.size() - 1);
         }
         return bestResult;
+    }
+
+    //이번 어트랙션의 방문 일정을 만든다. 구간이 없거나 탈 수 있는 슬롯이 없으면 empty
+    private Optional<PlannedVisit> planVisit(
+            SearchContext context,
+            CandidateAttraction attraction,
+            Long previousAttractionId,
+            LocalDateTime departureAt,
+            int sequence
+    ) {
+        Optional<Move> move = moveTo(attraction, previousAttractionId, context.startLegs(), context.travelTimes());
+        if (move.isEmpty()) {
+            return Optional.empty();
+        }
+        Move leg = move.get();
+        LocalDateTime arrivalAt = departureAt.plusMinutes(leg.minutes());
+        //도착 후 이용할 수 있는 가장 이른 슬롯으로 시간표를 만든다
+        return findEarliestAvailableSlot(attraction, arrivalAt, context.endAt())
+                .map(slot -> new PlannedVisit(
+                        sequence,
+                        attraction.attractionId(),
+                        attraction.attractionName(),
+                        slot.slotId(),
+                        leg.minutes(),
+                        leg.estimated(),
+                        arrivalAt,
+                        Math.toIntExact(Duration.between(
+                                arrivalAt.atZone(KstTime.ZONE), slot.startsAt().atZone(KstTime.ZONE)).toMinutes()),
+                        slot.startsAt(),
+                        slot.endsAt(),
+                        slot.rideMinutes()
+                ));
     }
 
     //이번 어트랙션까지의 이동

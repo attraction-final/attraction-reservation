@@ -136,70 +136,13 @@ class RouteRecommendationControllerTest {
                         .value("OUT_OF_TIME_RANGE"));
     }
 
-    @Test
-    @DisplayName("어트랙션을 하나도 고르지 않으면 HTTP 400")
-    void createRouteRecommendation_NoAttractions_Returns400() throws Exception {
-        // given
-        String body = """
-                {"ticketId": 10, "attractionIds": [], "latitude": 37.2930, "longitude": 127.2010, "accuracy": 30}
-                """;
-
-        // when
-        ResultActions result = postWithMember(body);
-
-        // then
-        expectFieldError(result, "attractionIds");
-    }
-
-    @Test
-    @DisplayName("어트랙션을 6개 고르면 HTTP 400")
-    void createRouteRecommendation_SixAttractions_Returns400() throws Exception {
-        // given
-        String body = """
-                {"ticketId": 10, "attractionIds": [1, 2, 3, 4, 5, 6],
-                 "latitude": 37.2930, "longitude": 127.2010, "accuracy": 30}
-                """;
-
-        // when
-        ResultActions result = postWithMember(body);
-
-        // then
-        expectFieldError(result, "attractionIds");
-    }
-
-    @Test
-    @DisplayName("입장권 ID가 없으면 HTTP 400")
-    void createRouteRecommendation_MissingTicketId_Returns400() throws Exception {
-        // given
-        String body = """
-                {"attractionIds": [1, 2], "latitude": 37.2930, "longitude": 127.2010, "accuracy": 30}
-                """;
-
-        // when
-        ResultActions result = postWithMember(body);
-
-        // then
-        expectFieldError(result, "ticketId");
-    }
-
-    @Test
-    @DisplayName("위치 정확도가 없으면 HTTP 400 (빼고 보내는 것으로 정확도 검사를 우회할 수 없다)")
-    void createRouteRecommendation_MissingAccuracy_Returns400() throws Exception {
-        // given
-        String body = """
-                {"ticketId": 10, "attractionIds": [1, 2], "latitude": 37.2930, "longitude": 127.2010}
-                """;
-
-        // when
-        ResultActions result = postWithMember(body);
-
-        // then
-        expectFieldError(result, "accuracy");
-    }
-
     // 요청 본문의 각 필드를 하나씩 잘못 넣고, 어느 필드에서 400 이 나는지 확인한다.
     @ParameterizedTest(name = "[{index}] {0}")
     @CsvSource(delimiter = '|', value = {
+            "어트랙션 0개          | attractionIds    | \"ticketId\": 10, \"attractionIds\": [], \"latitude\": 37.2930, \"longitude\": 127.2010, \"accuracy\": 30",
+            "어트랙션 6개          | attractionIds    | \"ticketId\": 10, \"attractionIds\": [1, 2, 3, 4, 5, 6], \"latitude\": 37.2930, \"longitude\": 127.2010, \"accuracy\": 30",
+            "입장권 ID 누락        | ticketId         | \"attractionIds\": [1, 2], \"latitude\": 37.2930, \"longitude\": 127.2010, \"accuracy\": 30",
+            "정확도 누락(우회 불가) | accuracy         | \"ticketId\": 10, \"attractionIds\": [1, 2], \"latitude\": 37.2930, \"longitude\": 127.2010",
             "입장권 ID 0          | ticketId         | \"ticketId\": 0, \"attractionIds\": [1], \"latitude\": 37.2930, \"longitude\": 127.2010, \"accuracy\": 30",
             "위도 누락            | latitude         | \"ticketId\": 10, \"attractionIds\": [1], \"longitude\": 127.2010, \"accuracy\": 30",
             "경도 누락            | longitude        | \"ticketId\": 10, \"attractionIds\": [1], \"latitude\": 37.2930, \"accuracy\": 30",

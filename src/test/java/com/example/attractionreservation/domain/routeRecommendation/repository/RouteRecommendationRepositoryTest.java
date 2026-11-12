@@ -1,5 +1,6 @@
 package com.example.attractionreservation.domain.routeRecommendation.repository;
 
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.PlannedVisit;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationExclusion;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
@@ -40,9 +41,9 @@ class RouteRecommendationRepositoryTest {
         RouteRecommendation recommendation = RouteRecommendation.create(
                 1L, 5001L, at("13:00"), at("18:00"),
                 List.of(
-                        RouteRecommendationStop.of(3, 103L, 9301L, "아마존 익스프레스", 12, false, at("14:52"), at("15:30"), at("15:40")),
-                        RouteRecommendationStop.of(1, 102L, 9201L, "사파리", 10, true, at("13:10"), at("13:30"), at("13:50")),
-                        RouteRecommendationStop.of(2, 101L, 9001L, "T익스프레스", 15, false, at("14:05"), at("14:30"), at("14:40"))),
+                        RouteRecommendationStop.from(new PlannedVisit(3, 103L, "아마존 익스프레스", 9301L, 12, false, at("14:52"), 38, at("15:30"), at("15:40"), 10)),
+                        RouteRecommendationStop.from(new PlannedVisit(1, 102L, "사파리", 9201L, 10, true, at("13:10"), 20, at("13:30"), at("13:50"), 20)),
+                        RouteRecommendationStop.from(new PlannedVisit(2, 101L, "T익스프레스", 9001L, 15, false, at("14:05"), 25, at("14:30"), at("14:40"), 10))),
                 List.of(RouteRecommendationExclusion.of(104L, "어트랙션 D", ExclusionReason.LOCATION_NOT_FOUND)));
         Long id = routeRecommendationRepository.save(recommendation).getId();
 

@@ -306,12 +306,14 @@ class AttractionRepositoryTest {
         Page<Attraction> overRange = searchByHeight(196);
 
         // then
+        // 195cm: 최소최대(130~195) 경계값이라 포함 / 최대만(120 이하) 제외
         assertThat(inRange.getContent())
                 .extracting(Attraction::getName)
-                .contains("최소최대");
+                .containsExactlyInAnyOrder("최소최대", "보호자동반", "보호자만");
+        // 196cm: 최소최대 제외
         assertThat(overRange.getContent())
                 .extracting(Attraction::getName)
-                .doesNotContain("최소최대");
+                .containsExactlyInAnyOrder("보호자동반", "보호자만");
     }
 
     @Test
@@ -324,9 +326,10 @@ class AttractionRepositoryTest {
         Page<Attraction> result = searchByHeight(105);
 
         // then
+        // 보호자동반(110 이상)·최소최대(130 이상) 제외 / 최대만(120 이하)·보호자만 포함
         assertThat(result.getContent())
                 .extracting(Attraction::getName)
-                .doesNotContain("보호자동반");
+                .containsExactlyInAnyOrder("최대만", "보호자만");
     }
 
     @Test

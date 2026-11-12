@@ -85,7 +85,4 @@ CREATE DATABASE attraction_reservation;
 - `V1__init.sql`은 Flyway 도입 시점(2026-11-05)의 운영 스키마이고, `V2`는 `docs/sql/kan-103-…`과 같다.
 - 앞으로의 스키마 변경은 `docs/sql/`이 아니라 `db/migration/`에 추가한다.
 - KAN-136 `attraction_locations`, `attraction_paths`는 엔티티와 함께 `V6`, `V7`로 추가했다. 데이터(구간·좌표)는 마이그레이션에 넣지 않고 `docs/sql/kan-136-route-travel-data.sql`로 배포 후 적용한다.
-- KAN-139 `V8`은 `route_recommendations.travel_time_basis` enum에 `MEASURED_PATH`를 추가한다. 이 컬럼은 MySQL enum이라 Java enum에 값을 추가할 때마다 마이그레이션이 필요하다. (`ddl-auto=validate`는 enum 값 목록을 비교하지 않는다)
-- KAN-140 `V9`는 `route_recommendations.start_location` enum에 `CURRENT_LOCATION`을 추가한다. V8과 같은 이유로 Java enum과 함께 추가했다.
-- KAN-142부터 추천 경로는 계산 결과를 저장하지 않는다. `route_recommendations`, `route_recommendation_stops`, `route_recommendation_exclusions`는 엔티티를 지웠지만 테이블은 남겨 두었다. 배포 중에는 이전 버전 앱이 이 테이블을 쓰므로, 삭제는 3장의 "컬럼 삭제"와 같이 다음 배포에서 별도 마이그레이션으로 한다.
-- KAN-147 `V10`은 위 세 테이블을 삭제한다. KAN-142가 운영에 배포되어 이전 버전 앱이 모두 내려간 뒤에 머지한다. 이 테이블을 쓰던 V8·V9 검증 테스트도 함께 지웠다.
+- KAN-158 `V15`는 V10이 삭제한 `route_recommendations`, `route_recommendation_stops`, `route_recommendation_exclusions`를 새 모양으로 다시 만든다. 새 모양은 좌표를 저장하지 않고, `deleted_at`·`start_location`·`travel_time_basis` 컬럼이 없으며, `move_estimated`를 추가하고, `result_type`·`reason_code`를 varchar로 바꾼다. 일괄 예약이 참조하는 현재 위치 기반 추천 결과를 저장하기 위한 변경이다.

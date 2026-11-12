@@ -34,6 +34,7 @@ import java.sql.Connection;
 import java.nio.charset.StandardCharsets;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -250,19 +251,38 @@ class FlywayMigrationIntegrationTest {
         });
     }
 
-    // V10: KAN-142부터 쓰지 않는 추천 저장 테이블을 지웠다. (V8·V9가 바꾼 테이블도 여기서 함께 사라진다)
+    // V10(KAN-147)이 예전 구조(출발 위치·이동 시간 기준·삭제 시각·좌표)의 추천 저장 테이블을 지우고, V15(KAN-158)가 새 구조로 다시 만든다.
     @Test
-    @DisplayName("추천 경로 저장 테이블은 마이그레이션 후 남아 있지 않다")
-    void migrate_DropsRouteRecommendationTables() {
+    @DisplayName("추천 경로 저장 테이블은 마이그레이션 후 예전 출발 위치·좌표 컬럼 없이 새 구조로 다시 만들어진다")
+    void migrate_RecreatesRouteRecommendationTablesWithoutCoordinates() {
+       // given
+        List<String> tables = List.of(
+        "route_recommendations", "route_recommendation_stops", "route_recommendation_exclusions");
+
         // when
-        Integer remaining = jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM information_schema.tables
+        Integer existingTables = jdbcTemplate.queryForObject("""
+                 SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                   AND table_name IN ('route_recommendations', 'route_recommendation_stops', 'route_recommendation_exclusions')
+                 """, Integer.class);
+        List<String> removedColumns = jdbcTemplate.queryForList("""
+                SELECT column_name FROM information_schema.columns
                 WHERE table_schema = DATABASE()
-                  AND table_name IN ('route_recommendations', 'route_recommendation_stops', 'route_recommendation_exclusions')
+                  AND table_name = 'route_recommendations'
+                  AND column_name IN ('start_location', 'travel_time_basis', 'deleted_at',
+                                      'latitude', 'longitude', 'altitude')
+                """, String.class);
+                Integer moveEstimatedColumns = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'route_recommendation_stops'
+                  AND column_name = 'move_estimated'
                 """, Integer.class);
 
         // then
-        assertThat(remaining).isZero();
+        assertThat(existingTables).as("다시 만들어진 추천 저장 테이블 수 %s", tables).isEqualTo(tables.size());
+        assertThat(removedColumns).as("route_recommendations 에 남으면 안 되는 예전 컬럼").isEmpty();
+        assertThat(moveEstimatedColumns).as("route_recommendation_stops.move_estimated").isEqualTo(1);
     }
 
     @Test

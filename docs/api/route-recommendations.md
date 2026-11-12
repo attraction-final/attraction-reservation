@@ -1,5 +1,9 @@
 # 경로 추천 API (현재 위치 기반) 및 일괄 예약
 
+[전체 API 목록](README.md) · [공통 규칙](common.md)
+
+기준: 2026-11-12 로컬 코드 `a737e62f`. 기존 상세 설명을 현재 Controller·DTO와 대조해 보완했다.
+
 ## 공통 사항
 
 세 API 모두 로그인이 필요하다.
@@ -153,11 +157,11 @@ POST /api/route-recommendations/{recommendationId}/reservations
 ```json
 {
   "success": true,
-  "message": "추천 경로의 어트랙션 2개를 예약했습니다.",
+  "message": "추천 경로의 어트랙션 1개를 예약했습니다.",
   "data": {
     "recommendationId": 100,
     "ticketId": 10,
-    "reservedCount": 2,
+    "reservedCount": 1,
     "reservations": [
       {
         "sequence": 1,
@@ -224,3 +228,12 @@ GET /api/route-recommendations/attractions
 - 추천 응답이 `recommendation`으로 감싸졌고, 위치 정보가 `location`으로 함께 온다. 추천 결과는 `data.recommendation.*`에서 읽는다.
 - 추천 가능한 경로가 없으면(`NONE`) 201이 아니라 200으로 응답하며 저장하지 않는다.
 - 추천 결과를 예약할 때 `POST /api/reservations`를 방문마다 반복 호출하지 말고, `recommendationId`로 일괄 예약 API(`POST /api/route-recommendations/{recommendationId}/reservations`)를 한 번 호출한다.
+
+
+## 경계 시각과 기본값
+
+현재 시각을 분 단위로 올린 값이 폐장 시각 22:00 이상이면 INVALID_TIME_RANGE로 거부한다. 위치 정확도100m, 시작 거리2000m, 오래된 위치5분은 기본 설정이며 환경의 route-recommendation 설정으로 변경될 수 있다. 기존 입력 시간 범위·부분 성공 정책과의 차이는 [공통 규칙의 확인할 정책](common.md#문서와-코드의-차이확인할-정책)을 참고한다.
+
+## 구현 근거와 검증 범위
+
+[RouteRecommendationController](../../src/main/java/com/example/attractionreservation/domain/routeRecommendation/controller/RouteRecommendationController.java), RouteRecommendationService·RouteReservationService와 요청·응답 DTO를 정적으로 대조했다. 작성 과정에서 API 호출이나 테스트는 실행하지 않았다.

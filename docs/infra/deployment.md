@@ -4,8 +4,8 @@
 EC2(ASG)에서 ECS Fargate로 옮긴 과정과 이유는 [ecs-migration-plan.md](ecs-migration-plan.md), [ecs-migration-rationale.md](ecs-migration-rationale.md)를 참고한다.
 AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [terraform.md](terraform.md)를 참고한다.
 
-- 기준: 2026-11-10 AWS·GitHub 조회 결과 (계정 `793168138824`, 리전 `ap-northeast-2`)
-- 현재 단계: ECS 전환 5단계(트래픽 전환)와 6단계(알림)를 확인했다. 사용자 트래픽과 스케줄러는 모두 ECS에서 처리하고, EC2 앱 인스턴스는 0대다. 새 CD의 첫 main 실행(4단계)과 정리(7단계)가 남았다. 남은 작업은 [8장](#8-남은-작업)에 정리했다.
+- 기준: 2026-11-10 AWS·GitHub 조회 결과 (계정 `793168138824`, 리전 `ap-northeast-2`). 2026-11-12 새 CD 첫 main 배포, api 오토스케일링, 5xx 알람 롤백을 반영했다
+- 현재 단계: ECS 전환 4단계(새 CD 첫 main 배포, 2026-11-12), 5단계(트래픽 전환), 6단계(알림)를 확인했다. 사용자 트래픽과 스케줄러는 모두 ECS에서 처리하고, EC2 앱 인스턴스는 0대다. 정리(7단계)와 `workflow_dispatch` 재배포 확인이 남았다. 남은 작업은 [8장](#8-남은-작업)에 정리했다.
 
 ## 1. 전체 구성
 
@@ -20,8 +20,8 @@ AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [te
                                                                             │
   ┌─────────────── private 서브넷 2개 (subnet-0be2496d3931e4dc6, subnet-008fc962259300add) ───────────────┐
   │  ECS 클러스터 attraction-reservation (Fargate, ARM64)                                                  │
-  │    서비스 api     task 1개  [app | log-router(Fluent Bit) | alloy]  ← ALB                              │
-  │    서비스 worker  task 1개  [app | log-router(Fluent Bit) | alloy]  ALB 연결 없음, 스케줄러 실행       │
+  │    서비스 api     task 1~3개 [app | log-router(Fluent Bit) | alloy]  ← ALB, CPU 기준 오토스케일링     │
+  │    서비스 worker  task 1개   [app | log-router(Fluent Bit) | alloy]  ALB 연결 없음, 스케줄러 실행      │
   │                                                                                                       │
   │  RDS MySQL 8.4 attraction-final-db (db.t4g.micro, 단일 AZ)                                             │
   │  ElastiCache Redis attraction-final-cache (cache.t4g.micro, TLS)                                      │
@@ -57,12 +57,12 @@ AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [te
 | 구분 | api | worker |
 |---|---|---|
 | task definition | `attraction-reservation-api` | `attraction-reservation-worker` |
-| Spring 프로필 | `prod,api` (`application-api.yml`이 스케줄러를 모두 끈다) | `prod` (스케줄러 켬) |
-| task 수 | 1 | 1 |
+| Spring 프로필 | `prod,api,oauth` (`application-api.yml`이 스케줄러를 모두 끈다. `application-oauth.yml`이 카카오·구글 로그인을 켠다) | `prod` (스케줄러 켬) |
+| task 수 | 1~3. CPU 평균 60% 목표 추적 오토스케일링 (확장 쿨다운 60초, 축소 쿨다운 300초) | 1 고정 (스케줄러가 겹치지 않게) |
 | ALB | TG `attraction-app-ecs` ← `app`:8080 | 연결하지 않음 |
 | 헬스체크 | ALB가 8080 `/readyz` | 컨테이너 헬스체크 8081 `/actuator/health/liveness` (시작 대기 120초) |
 | 배포 | 최소 100% / 최대 200%: 새 task가 healthy가 된 뒤 이전 task를 내린다 | 최소 0% / 최대 100%: 이전 task를 내린 뒤 새 task를 띄운다 (스케줄러가 겹치지 않게) |
-| 서킷 브레이커 | 켬, 실패하면 이전 task definition으로 자동 롤백 | 같음 |
+| 자동 롤백 | 서킷 브레이커 + CloudWatch 알람 `attraction-reservation-api-5xx`. 실패하면 이전 task definition으로 되돌린다 ([4장 롤백](#롤백)) | 서킷 브레이커만 |
 | 기타 | `healthCheckGracePeriodSeconds` 120 (Flyway 포함 기동 시간), ECS Exec 켬 | ECS Exec 켬 |
 
 공통
@@ -97,6 +97,8 @@ AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [te
 |---|---|---|
 | `env/JWT_SECRET`, `env/PORTONE_API_SECRET`, `env/PORTONE_WEBHOOK_SECRET`, `env/SPRING_DATASOURCE_PASSWORD` | SecureString (`alias/aws/ssm`) | task definition `secrets` → app 환경변수 |
 | `env/PORTONE_CHANNEL_KEY`, `env/PORTONE_STORE_ID`, `env/REDIS_HOST`, `env/SPRING_DATASOURCE_URL`, `env/SPRING_DATASOURCE_USERNAME`, `env/SPRING_DATA_REDIS_SSL_ENABLED` | String | 같음 |
+| `env/KAKAO_CLIENT_SECRET`, `env/GOOGLE_CLIENT_SECRET`, `env/SPRING_AI_TYPESAFE_APIKEY` | SecureString | api task definition `secrets`에만 있다 (oauth 프로필, Jev 연동) |
+| `env/KAKAO_CLIENT_ID`, `env/GOOGLE_CLIENT_ID`, `env/OAUTH2_SUCCESS_REDIRECT_URI`, `env/OAUTH2_FAILURE_REDIRECT_URI` | String | api task definition `secrets`에만 있다 (oauth 프로필) |
 | `PROMETHEUS_URL` | String | alloy 사이드카 (`http://10.0.130.10:9090/api/v1/write`) |
 | `APP_VERSION` | String | CD가 마지막으로 앱 배포에 성공한 커밋 SHA. 다음 배포의 변경 감지 기준 |
 | `MONITORING_VERSION` | String | CD가 마지막으로 반영한 모니터링 구성의 커밋 SHA |
@@ -104,10 +106,10 @@ AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [te
 | `LOKI_URL` | String | EC2 Alloy가 쓰던 값. ECS는 쓰지 않는다 (7단계에서 삭제) |
 
 - 앱 환경변수를 추가하면 SSM `env/`에 파라미터를 만들고, **두 task definition 파일의 `secrets`에도 추가**해야 한다. EC2 때처럼 `env/` 아래를 전부 읽지 않는다.
-  - 예외: `env/SPRING_AI_TYPESAFE_APIKEY`(Jev 연동)는 HTTP 요청을 받는 api에서만 쓰므로 api task definition에만 둔다. worker는 키가 없어도 뜨며 Q&A 요청을 받지 않는다.
+  - 예외: HTTP 요청을 받는 api에서만 쓰는 값은 api task definition에만 둔다. oauth 프로필 값(`KAKAO_*`, `GOOGLE_*`, `OAUTH2_*_REDIRECT_URI`)과 Jev 키 `SPRING_AI_TYPESAFE_APIKEY`가 여기에 해당한다. worker는 oauth 프로필을 켜지 않고 Q&A 요청을 받지 않으므로 이 값이 없어도 뜬다.
 - task definition `secrets`에 넣은 파라미터는 배포 전에 SSM에 먼저 만들어 둔다. 없으면 task가 시작되지 않는다.
 - 비밀값은 이미지, 저장소, GitHub에 두지 않는다.
-- 2026-11-10 현재 `APP_VERSION`·`MONITORING_VERSION`은 `cd` 브랜치 시험 배포 커밋 `e401f4f8`이다(main에 없음). ECS로 바뀐 CD의 첫 main 배포가 기준 버전이 main의 조상이 아니라고 보고 앱·모니터링을 모두 다시 배포해 main SHA로 맞춘다.
+- `APP_VERSION`·`MONITORING_VERSION`은 2026-11-12 새 CD의 첫 main 배포부터 main SHA를 기준으로 한다. 그 전에는 `cd` 브랜치 시험 배포 커밋 `e401f4f8`(main에 없음)이었다.
 
 ### IAM 역할
 
@@ -167,7 +169,7 @@ dev ──릴리스 PR──▶ main push ──▶ CI 성공 ──workflow_run
 
 1) changes: 배포 대상 판단
 - SSM `APP_VERSION`, `MONITORING_VERSION`부터 이번 커밋까지의 변경 파일을 본다.
-- 앱: `deploy/monitoring/`, `docs/`, `.github/`, `*.md` 밖의 파일이 바뀌면 배포한다.
+- 앱: `deploy/monitoring/`, `deploy/terraform/`, `docs/`, `.github/`, `*.md` 밖의 파일이 바뀌면 배포한다.
 - 모니터링: `deploy/monitoring/`이 바뀌면 배포한다.
 - 기준 버전이 없거나 이번 커밋의 조상이 아니면 변경이 있다고 본다.
 
@@ -175,7 +177,7 @@ dev ──릴리스 PR──▶ main push ──▶ CI 성공 ──workflow_run
 1. 같은 SHA의 앱 이미지가 ECR에 없으면 `bootJar` → arm64 이미지 빌드 → push. 테스트는 CI에서 통과했으므로 다시 돌리지 않는다.
 2. 사이드카 이미지가 없으면 빌드·push. ECR 저장소가 모두 태그 변경 불가(IMMUTABLE)라 이미 있는 태그는 다시 올리지 않는다.
 3. [`deploy/ecs/*-task-definition.json`](../../deploy/ecs)의 자리 표시자(`<APP_IMAGE>` 등)를 채워 task definition 2개를 등록한다. 채울 값이 비었거나 채우지 못한 자리 표시자가 남으면 등록하지 않는다.
-4. api 서비스를 갱신하고 새 배포의 `rolloutState`가 `COMPLETED`가 되면 worker를 갱신한다. `FAILED`이거나 배포가 목록에서 사라지면 실패로 끝난다(서킷 브레이커가 이전 버전으로 되돌린다). 서비스당 최대 20분 기다린다.
+4. api 서비스를 갱신하고 새 배포의 `rolloutState`가 `COMPLETED`가 되면 worker를 갱신한다. `FAILED`이거나 배포가 목록에서 사라지면 실패로 끝난다(서킷 브레이커가, api는 5xx 알람도 이전 버전으로 되돌린다). 서비스당 최대 20분 기다린다.
 5. 두 서비스가 모두 성공한 뒤에만 `APP_VERSION`을 이번 SHA로 바꾼다. 실패하면 그대로 두어 다음 배포가 같은 변경을 다시 배포한다. worker만 실패하면 api만 새 버전으로 남고 다음 배포가 둘을 맞춘다.
 
 7단계 전까지는 ASG 롤백에 대비해 실행 구성(`deploy/compose.yml` 등)도 S3 `attraction-reservation/<SHA>/`에 올린다.
@@ -194,8 +196,11 @@ dev ──릴리스 PR──▶ main push ──▶ CI 성공 ──workflow_run
 | 상황 | 방법 |
 |---|---|
 | 새 task가 뜨지 않거나 헬스체크 실패 | 서킷 브레이커가 자동으로 이전 task definition으로 되돌린다. CD job은 실패로 끝나고 `APP_VERSION`은 바뀌지 않는다 |
+| 헬스체크는 통과했지만 배포 중 5xx 급증 (api) | 알람 `attraction-reservation-api-5xx`가 ALARM이 되면 ECS가 배포를 실패로 보고 이전 task definition으로 되돌린다. CD job은 실패로 끝나고 `APP_VERSION`은 바뀌지 않는다. 사람에게 가는 알림은 Grafana `api 5xx`가 맡는다 |
 | 배포는 성공했지만 동작이 잘못됨 | Actions → CD → Run workflow (main)에서 `version`에 되돌릴 커밋 SHA(40자)를 넣는다. main 이력에 있고 `deploy/ecs/`가 들어 있는 커밋만 배포할 수 있다. 앱만 배포한다 |
 
+- 알람 `attraction-reservation-api-5xx`([`deploy/terraform/ecs.tf`](../../deploy/terraform/ecs.tf)): 앱이 낸 5xx(Target 5xx)가 1분에 5건 이상이면서 요청의 5%를 넘는 분이 최근 3분 중 2분이면 ALARM이 된다. ECS는 배포 중(완료 뒤 bake time 포함)에만 이 알람을 본다. 배포 시작 시점에 이미 ALARM이면 ECS가 그 배포 동안 알람을 보지 않으므로 서킷 브레이커만 동작한다.
+- 알람 롤백은 2026-11-12에 확인했다. 새 task가 트래픽을 받은 지 약 35초 만에 배포가 실패로 판정되고(`alarm detected`) 이전 배포로 롤백했다(`ROLLBACK_SUCCESSFUL`). 자세한 내용은 [ecs-migration-rationale.md 9장](ecs-migration-rationale.md#9-결과-측정)을 참고한다.
 - 수동 롤백은 긴급 조치다. 다음 main 배포는 롤백한 버전부터 비교하므로 문제 커밋도 다시 배포된다. 다음 push 전에 main에서 문제 커밋을 revert한다.
 - ECR `attraction-reservation`의 amd64 이미지 `31733ed`로는 롤백하지 않는다. Fargate ARM64에서 실행되지 않는다.
 
@@ -225,7 +230,8 @@ dev ──릴리스 PR──▶ main push ──▶ CI 성공 ──workflow_run
 - 대시보드: `deploy/monitoring/grafana/dashboards/`의 파일로 프로비저닝한다. Grafana 화면에서 고친 내용은 파일로 옮겨야 남는다.
 - 알림: `deploy/monitoring/grafana/provisioning/alerting/alerts.yml`. 규칙은 6개다(api 정상 대상 0, api 메트릭 끊김, worker 스케줄러 멈춤, api 5xx, 결제·환불 최종 실패, ERROR 로그). 알림은 Slack으로 보낸다. ERROR 로그 규칙은 운영에서 아직 일시정지 상태이고, 일시정지를 푼 파일이 다음 모니터링 배포 때 반영된다. 자세한 기준은 [ecs-migration-plan.md 6단계](ecs-migration-plan.md#6단계-알림-grafana-alerting)를 참고한다.
 - 로그 형식과 조회 방법은 [logging.md](../logging/logging.md)를 따른다.
-- Grafana는 인스턴스에서 3000 포트로 열려 있고, 보안 그룹이 ALB에서 오는 요청만 받는다. 저장소의 `compose.yml`에는 KAN-154(PR #273)로 반영된다.
+- 모니터링 스택을 고른 이유는 [observability-stack-rationale.md](observability-stack-rationale.md)를 참고한다.
+- Grafana는 인스턴스에서 3000 포트로 열려 있고, 보안 그룹이 ALB에서 오는 요청만 받는다.
 - Cognito나 ALB에 문제가 있으면 SSM 포트 포워딩으로 접속한다. 세션은 20분 동안 쓰지 않으면 끊긴다(Session Manager 기본값).
 
 ```bash
@@ -245,7 +251,7 @@ aws ssm start-session --target i-0b91df092531d5b72 \
 |---|---|
 | 앱 배포 | dev → main 릴리스 PR을 머지한다. CI 성공 후 CD가 자동으로 배포한다 |
 | 롤백 | [4장 롤백](#롤백) |
-| 앱 환경변수 추가·변경 | SSM `env/<이름>`을 만들거나 고친다. 새 변수면 `deploy/ecs/api-task-definition.json`, `worker-task-definition.json`의 `secrets`에도 추가하고 배포한다. 값만 바꿨으면 서비스를 강제로 새로 배포해 다시 읽게 한다 (`aws ecs update-service --cluster attraction-reservation --service <api\|worker> --force-new-deployment`) |
+| 앱 환경변수 추가·변경 | SSM `env/<이름>`을 만들거나 고친다. 새 변수면 `deploy/ecs/api-task-definition.json`, `worker-task-definition.json`의 `secrets`에도 추가하고 배포한다(api에서만 쓰는 값은 api에만, [3장](#parameter-store-attraction-reservationprod) 참고). 값만 바꿨으면 서비스를 강제로 새로 배포해 다시 읽게 한다 (`aws ecs update-service --cluster attraction-reservation --service <api\|worker> --force-new-deployment`) |
 | 컨테이너 접속 | `aws ecs execute-command --cluster attraction-reservation --task <task ID> --container app --interactive --command sh` |
 | 사이드카 오류 확인 | CloudWatch Logs `/ecs/attraction-reservation` (스트림 접두사 `api-log-router`, `api-alloy`, `worker-…`) |
 | Grafana 대시보드·알림 변경 | `deploy/monitoring/` 아래 파일을 고쳐 main에 반영한다. CD `deploy-monitoring`이 적용한다 |
@@ -254,12 +260,13 @@ aws ssm start-session --target i-0b91df092531d5b72 \
 ## 8. 남은 작업
 
 ECS 전환 (자세한 내용은 [ecs-migration-plan.md](ecs-migration-plan.md))
-- [ ] 4단계: ECS로 바뀐 CD를 첫 main 릴리스로 실행해 api → worker 배포를 확인하고 배포 시간을 잰다. 같은 SHA로 `workflow_dispatch` 재배포도 확인한다. **이 PR이 dev에 머지되기 전에는 main에 push하지 않는다.** 이전 CD가 인스턴스 0대인 ASG에 Instance Refresh를 시도하기 때문이다.
+- [x] 4단계: ECS로 바뀐 CD를 첫 main 릴리스로 실행해 api → worker 배포를 확인하고 배포 시간을 잰다 (2026-11-12, CD 실행 43145962562, `a737e62f`: `api:5` → `worker:4`)
+- [ ] 4단계: 같은 SHA로 `workflow_dispatch` 재배포를 확인한다
 - [x] 6단계: Slack 테스트 알림, worker 멈춤·해제 알림 확인 (2026-11-10 `cd` 시험 배포). ERROR 로그 알림 일시정지 해제는 다음 모니터링 배포 때 운영에 반영된다
-- [ ] KAN-154(PR #273)를 먼저 dev에 머지하고, 이 브랜치에 dev를 합친다. `deploy/monitoring/compose.yml`이 충돌하므로 양쪽을 합친다(`ALERT_WEBHOOK_URL` + 포트 `3000:3000`). 이 순서를 지키지 않으면 main 배포 때 Grafana가 `127.0.0.1:3000`으로 돌아가 ALB 접속이 끊긴다
+- [x] KAN-154(PR #273)를 먼저 dev에 머지하고, 이 브랜치에 dev를 합친다. `deploy/monitoring/compose.yml`이 충돌하므로 양쪽을 합친다(`ALERT_WEBHOOK_URL` + 포트 `3000:3000`). 이 순서를 지키지 않으면 main 배포 때 Grafana가 `127.0.0.1:3000`으로 돌아가 ALB 접속이 끊긴다 (PR #273 머지, `compose.yml`에 둘 다 반영됨)
 - [ ] 7단계: EC2 롤백 경로 정리
   - 삭제할 AWS 리소스: ASG `attraction-reservation-app`(desired 0), Launch Template `lt-068d563012732fb65`, TG `attraction-final`, `ec2-role`, 인라인 정책 `cd-deploy-asg`, S3 앱 실행 구성, SSM `LOKI_URL`, Actions 변수 `ASG_NAME`
-  - ECR lifecycle 정책 추가: 3개 저장소 모두 아직 정책이 없다. 앱 이미지 16개가 쌓여 있다
+  - [x] ECR lifecycle 정책 추가: 3개 저장소에 태그된 이미지 최근 30개만 남기는 정책을 Terraform([`deploy/terraform/ecr.tf`](../../deploy/terraform/ecr.tf))으로 적용했다 (2026-11-10, KAN-151)
   - 저장소에서 삭제: `deploy/compose.yml`, `deploy/user-data.sh`, `deploy/alloy/`
   - 이 문서와 로깅 규칙 10장을 ECS 기준으로 고친다
 
@@ -268,7 +275,7 @@ ECS 전환 (자세한 내용은 [ecs-migration-plan.md](ecs-migration-plan.md))
 - [ ] ECR 저장소 `alloy`의 출처를 확인한다. 저장소 이름 규칙(`attraction-reservation-alloy`)과 맞지 않고 CD가 쓰지 않는다. 쓰지 않으면 지운다
 
 전환과 별개 (범위 밖으로 둔 것)
-- api task 2개 이상(여러 AZ): 지금은 api·worker·NAT·RDS가 모두 단일 장애점이다
+- api task 2개 이상(여러 AZ): api 오토스케일링 최소값이 1이라 평소에는 task 1개다. 지금은 api·worker·NAT·RDS가 모두 단일 장애점이다
 - RDS Multi-AZ, ElastiCache 복제본
 - Prometheus 주소도 프라이빗 DNS 이름으로 통일 (`PROMETHEUS_URL`이 IP)
 - worker를 여러 개로 늘릴 때 ShedLock 도입 검토

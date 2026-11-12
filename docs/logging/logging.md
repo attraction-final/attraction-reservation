@@ -216,16 +216,17 @@ implementation 'io.micrometer:micrometer-tracing-bridge-brave'
 | 구분 | 키 | 이유 |
 | --- | --- | --- |
 | 레이블로 사용 | `app`, `env`, `service` (+ 필요 시 `level`) | 값 종류가 적어 스트림 수가 작게 유지됨. `service`는 ECS 실행 단위(`api`, `worker`)로, ECS에서 수집한 로그에만 붙는다 |
-| 레이블로 사용 | `instance` (EC2 인스턴스 ID, ECS task ID) | 인스턴스·task별로 스트림을 나눠, 하나의 전송이 늦어져도 다른 인스턴스·task 로그 때문에 거부(`too far behind`)되지 않게 한다. 값은 배포마다 바뀌지만 동시에 떠 있는 인스턴스·task 수만큼만 생긴다. 메트릭의 `instance`와 같은 값이다 |
+| 레이블로 사용 | `instance` (ECS task ID) | task별로 스트림을 나눠, 한 task의 전송이 늦어져도 다른 task 로그 때문에 거부(`too far behind`)되지 않게 한다. 값은 배포마다 바뀌지만 동시에 떠 있는 task 수만큼만 생긴다. 메트릭의 `instance`와 같은 값이다 |
 | 레이블 금지 | `userId`, `orderId`, `traceId`, `uri`, `event` 등 | 값이 많아 스트림이 폭증하고 Loki 성능이 저하됨 |
 
 **수집기 설정**
 
-- 수집기는 Grafana Alloy를 사용한다. (Promtail은 지원 종료 수순) 설정은 `deploy/alloy/config.alloy`에 둔다.
-- 애플리케이션은 로그를 stdout으로만 출력하고 파일로 쓰지 않는다. Alloy는 Docker API(`loki.source.docker`)로 compose의 `app` 서비스 컨테이너 stdout만 수집한다.
-- Alloy는 Docker 소켓을 직접 마운트하지 않고, 읽기 전용 프록시(`docker-proxy`)로 Docker API에 접근한다. 소켓은 `:ro`로 마운트해도 API 쓰기를 막지 못한다.
+- 앱은 ECS task로 실행하고, 같은 task의 사이드카가 로그와 메트릭을 보낸다. 이 스택을 고른 이유는 [observability-stack-rationale.md](../infra/observability-stack-rationale.md)를 참고한다.
+- 로그: FireLens(Fluent Bit) 사이드카 `log-router`가 `app` 컨테이너 stdout만 Loki(`loki.attraction.internal:3100`)로 보낸다. 설정은 `deploy/ecs/fluent-bit/`에 둔다.
+- 메트릭: Alloy 사이드카가 `localhost:8081/actuator/prometheus`를 수집해 Prometheus로 `remote_write` 한다. 설정은 `deploy/ecs/alloy/config.alloy`에 둔다. Alloy는 로그를 수집하지 않는다.
+- 애플리케이션은 로그를 stdout으로만 출력하고 파일로 쓰지 않는다.
 - stdout에는 logfmt 로그만 나가게 한다. JVM이 직접 찍는 줄(`JAVA_TOOL_OPTIONS`의 `Picked up ...` 등)이 섞이지 않도록 JVM 옵션은 실행 명령에 직접 넘긴다.
-- 컨테이너 로그는 Docker `json-file` 드라이버의 `max-size`, `max-file`로 순환해 디스크가 차지 않게 한다.
+- 앱 로그는 디스크에 쓰지 않는다(로그 드라이버 `awsfirelens`). 사이드카 자체 로그는 CloudWatch Logs `/ecs/attraction-reservation`(보존 7일)에 남는다. 모니터링 EC2의 컨테이너(Prometheus, Loki, Grafana) 로그는 Docker `json-file` 드라이버의 `max-size`, `max-file`로 순환해 디스크가 차지 않게 한다.
 - 스택 트레이스가 한 로그로 묶이도록 multiline 설정에서 "`ts=`로 시작하는 줄이 새 로그의 시작"으로 지정한다. (첫 줄 정규식 예: `^ts=`)
 
 **조회 예시 (LogQL)**

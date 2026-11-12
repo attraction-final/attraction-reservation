@@ -202,4 +202,152 @@ class AttractionRepositoryTest {
                 .containsExactly("롤러코스터", "회전목마", "바이킹");
         //점검중인 회전목마는 상태 질문에 답해야 하므로 포함
     }
+
+    // ===== 키 필터(rideableAt) 테스트 =====
+    // setUp 의 롤러코스터·회전목마·바이킹은 키 정보가 없다(NULL) → 키 필터를 쓰면 항상 빠져야 한다.
+
+    // 키 정보를 넣은 어트랙션을 저장하는 도우미
+    // 엔티티에 키를 바꾸는 메서드가 없어서 ReflectionTestUtils 로 필드에 직접 값을 넣는다.
+    private Attraction saveWithHeight(String name, Integer minHeightCm, Integer maxHeightCm, Integer guardianHeightCm) {
+        Attraction attraction = Attraction.create(name, "키 제한 테스트", "E구역", 10, 5);
+        ReflectionTestUtils.setField(attraction, "minHeightCm", minHeightCm);
+        ReflectionTestUtils.setField(attraction, "maxHeightCm", maxHeightCm);
+        ReflectionTestUtils.setField(attraction, "guardianHeightCm", guardianHeightCm);
+        return attractionRepository.save(attraction);
+    }
+
+    // 키 필터 테스트용 데이터 4개
+    private void saveHeightAttractions() {
+        saveWithHeight("최소최대", 130, 195, null);   // 130~195cm
+        saveWithHeight("보호자동반", 110, null, 110); // 110cm 이상, 110cm 이하는 보호자 동반
+        saveWithHeight("최대만", null, 120, null);    // 120cm 이하
+        saveWithHeight("보호자만", null, null, 100);  // 최소/최대 없이 보호자 기준만 있음
+        attractionRepository.flush();
+    }
+
+    // 키만 바꿔 가며 조회하는 도우미
+    private Page<Attraction> searchByHeight(Integer height) {
+        return attractionRepository.searchAttractions(
+                null, false, false, height, "NAME",
+                RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 10));
+    }
+
+    @Test
+    @DisplayName("키를 입력하지 않으면 키 필터 없이 전체를 조회한다")
+    void searchAttractions_HeightNull_ReturnsAllWithoutHeightFilter() {
+        // given
+        saveHeightAttractions();
+
+        // when
+        Page<Attraction> result = searchByHeight(null);
+
+        // then: 키 정보가 없는 3개 + 키 정보가 있는 4개 = 7개 (삭제된 어트랙션 제외)
+        assertThat(result.getTotalElements()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("키를 입력하면 키 정보가 없는 어트랙션은 제외한다")
+    void searchAttractions_Height_ExcludesNoHeightInfo() {
+        // when: 키 정보가 있는 어트랙션이 하나도 없는 상태
+        Page<Attraction> result = searchByHeight(150);
+
+        // then
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("최소 키보다 작으면 제외하고, 최소 키와 같으면 포함한다")
+    void searchAttractions_Height_AppliesMinHeightBoundary() {
+        // given
+        saveHeightAttractions();
+
+        // when
+        Page<Attraction> result = searchByHeight(110);
+
+        // then
+        // 최소최대(130 이상) 제외 / 보호자동반(110 이상) 경계값이라 포함
+        // 최대만(120 이하) 포함 / 보호자만(최소·최대 없음) 포함
+        assertThat(result.getContent())
+                .extracting(Attraction::getName)
+                .containsExactlyInAnyOrder("보호자동반", "최대만", "보호자만");
+        assertThat(result.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("최대 키보다 크면 제외하고, 최대 키와 같으면 포함한다")
+    void searchAttractions_Height_AppliesMaxHeightBoundary() {
+        // given
+        saveHeightAttractions();
+
+        // when
+        Page<Attraction> atMax = searchByHeight(120);
+        Page<Attraction> overMax = searchByHeight(121);
+
+        // then
+        // 120cm: 최대만(120 이하) 경계값이라 포함
+        assertThat(atMax.getContent())
+                .extracting(Attraction::getName)
+                .containsExactlyInAnyOrder("보호자동반", "최대만", "보호자만");
+        // 121cm: 최대만 제외
+        assertThat(overMax.getContent())
+                .extracting(Attraction::getName)
+                .containsExactlyInAnyOrder("보호자동반", "보호자만");
+    }
+
+    @Test
+    @DisplayName("최소 키와 최대 키가 모두 있으면 그 사이 키만 포함한다")
+    void searchAttractions_Height_AppliesMinAndMaxRange() {
+        // given
+        saveHeightAttractions();
+
+        // when
+        Page<Attraction> inRange = searchByHeight(195);
+        Page<Attraction> overRange = searchByHeight(196);
+
+        // then
+        assertThat(inRange.getContent())
+                .extracting(Attraction::getName)
+                .contains("최소최대");
+        assertThat(overRange.getContent())
+                .extracting(Attraction::getName)
+                .doesNotContain("최소최대");
+    }
+
+    @Test
+    @DisplayName("보호자 동반 기준보다 작아도 최소 키보다 작으면 제외한다")
+    void searchAttractions_Height_ExcludesGuardianOnlyRide() {
+        // given
+        saveHeightAttractions();
+
+        // when: 보호자와 함께라면 탈 수 있는 키지만, 혼자 탈 수 있는 키(110)보다 작다
+        Page<Attraction> result = searchByHeight(105);
+
+        // then
+        assertThat(result.getContent())
+                .extracting(Attraction::getName)
+                .doesNotContain("보호자동반");
+    }
+
+    @Test
+    @DisplayName("키 필터는 다른 조건과 함께 적용되고 전체 개수에도 반영된다")
+    void searchAttractions_HeightWithOperatingOnly_AppliesBothConditions() {
+        // given
+        saveHeightAttractions();
+        Attraction maintenance = saveWithHeight("점검중키", 100, null, null);
+        maintenance.changeOperationStatus(OperationStatus.MAINTENANCE);
+        attractionRepository.flush();
+
+        // when
+        Page<Attraction> result = attractionRepository.searchAttractions(
+                null, true, false, 110, "NAME",
+                RESERVABLE_FROM, TODAY_END, PageRequest.of(0, 2));
+
+        // then: 운영중 + 110cm로 탈 수 있음 = 보호자동반, 최대만, 보호자만 (점검중키 제외)
+        assertThat(result.getContent()).hasSize(2);           // 페이지 크기 2
+        assertThat(result.getTotalElements()).isEqualTo(3);   // 전체 개수에도 키 필터 반영
+        assertThat(result.getContent())
+                .extracting(Attraction::getName)
+                .doesNotContain("점검중키", "최소최대");
+    }
 }

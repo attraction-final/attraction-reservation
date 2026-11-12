@@ -88,6 +88,10 @@
         {
           "name": "OAUTH2_FAILURE_REDIRECT_URI",
           "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/OAUTH2_FAILURE_REDIRECT_URI"
+        },
+        {
+          "name": "SPRING_AI_TYPESAFE_APIKEY",
+          "valueFrom": "<SSM_PARAMETER_ARN_PREFIX>/env/SPRING_AI_TYPESAFE_APIKEY"
         }
       ],
       "stopTimeout": 30,

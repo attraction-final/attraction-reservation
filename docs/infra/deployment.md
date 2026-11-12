@@ -104,6 +104,8 @@ AWS 리소스는 Terraform으로 관리한다. 관리 범위와 사용법은 [te
 | `LOKI_URL` | String | EC2 Alloy가 쓰던 값. ECS는 쓰지 않는다 (7단계에서 삭제) |
 
 - 앱 환경변수를 추가하면 SSM `env/`에 파라미터를 만들고, **두 task definition 파일의 `secrets`에도 추가**해야 한다. EC2 때처럼 `env/` 아래를 전부 읽지 않는다.
+  - 예외: `env/SPRING_AI_TYPESAFE_APIKEY`(Jev 연동)는 HTTP 요청을 받는 api에서만 쓰므로 api task definition에만 둔다. worker는 키가 없어도 뜨며 Q&A 요청을 받지 않는다.
+- task definition `secrets`에 넣은 파라미터는 배포 전에 SSM에 먼저 만들어 둔다. 없으면 task가 시작되지 않는다.
 - 비밀값은 이미지, 저장소, GitHub에 두지 않는다.
 - 2026-11-10 현재 `APP_VERSION`·`MONITORING_VERSION`은 `cd` 브랜치 시험 배포 커밋 `e401f4f8`이다(main에 없음). ECS로 바뀐 CD의 첫 main 배포가 기준 버전이 main의 조상이 아니라고 보고 앱·모니터링을 모두 다시 배포해 main SHA로 맞춘다.
 

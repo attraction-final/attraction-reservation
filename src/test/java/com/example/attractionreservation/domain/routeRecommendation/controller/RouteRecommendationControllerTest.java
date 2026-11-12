@@ -3,16 +3,14 @@ package com.example.attractionreservation.domain.routeRecommendation.controller;
 import com.example.attractionreservation.domain.auth.jwt.JwtProvider;
 import com.example.attractionreservation.domain.auth.security.JwtAccessDeniedHandler;
 import com.example.attractionreservation.domain.auth.security.JwtAuthenticationEntryPoint;
-import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationRequest;
-import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse;
+import com.example.attractionreservation.domain.routeRecommendation.dto.*;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteRecommendationResponse.Location;
-import com.example.attractionreservation.domain.routeRecommendation.dto.RecommendableAttractionResponse;
-import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse.ExcludedAttraction;
 import com.example.attractionreservation.domain.routeRecommendation.dto.SearchRouteRecommendationResponse.Visit;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.ExclusionReason;
 import com.example.attractionreservation.domain.routeRecommendation.entity.enums.RouteResultType;
 import com.example.attractionreservation.domain.routeRecommendation.service.RouteRecommendationService;
+import com.example.attractionreservation.domain.routeRecommendation.service.RouteReservationService;
 import com.example.attractionreservation.domain.user.repository.UserRepository;
 import com.example.attractionreservation.global.config.SecurityConfig;
 import com.example.attractionreservation.global.exception.BusinessException;
@@ -66,6 +64,10 @@ class RouteRecommendationControllerTest {
 
     @MockitoBean
     private RouteRecommendationService routeRecommendationService;
+
+    @MockitoBean
+    private RouteReservationService routeReservationService;
+
 
     @MockitoBean
     private JwtProvider jwtProvider;
@@ -226,6 +228,53 @@ class RouteRecommendationControllerTest {
         // then
         result.andExpect(status().isUnauthorized());
         verifyNoInteractions(routeRecommendationService);
+    }
+
+    // ===== 추천 경로 일괄 예약 =====
+
+    @Test
+    @DisplayName("추천 경로의 모든 방문을 예약하면 HTTP 201 과 예약한 어트랙션 수가 담긴 메시지를 반환한다")
+    void createRouteReservations_Returns201() throws Exception {
+        // given
+        CreateRouteReservationResponse response = CreateRouteReservationResponse.of(100L, 10L, List.of(
+                new CreateRouteReservationResponse.ReservedStop(1, 3L, "아마존 익스프레스", 3001L, 9001L, "R-9001",
+                        VISIT_DATE.atTime(13, 0), VISIT_DATE.atTime(13, 10)),
+                new CreateRouteReservationResponse.ReservedStop(2, 1L, "범퍼카", 1001L, 9002L, "R-9002",
+                        VISIT_DATE.atTime(14, 0), VISIT_DATE.atTime(14, 5))));
+        when(routeReservationService.createRouteReservations(USER_ID, 100L)).thenReturn(response);
+
+        // when
+        ResultActions result = mockMvc.perform(post(URL + "/100/reservations").with(authenticatedMember()));
+
+        // then
+        result.andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("추천 경로의 어트랙션 2개를 예약했습니다."))
+                .andExpect(jsonPath("$.data.recommendationId").value(100))
+                .andExpect(jsonPath("$.data.reservedCount").value(2))
+                .andExpect(jsonPath("$.data.reservations[0].sequence").value(1))
+                .andExpect(jsonPath("$.data.reservations[0].attractionName").value("아마존 익스프레스"))
+                .andExpect(jsonPath("$.data.reservations[0].reservationId").value(9001))
+                .andExpect(jsonPath("$.data.reservations[0].reservationNumber").value("R-9001"))
+                .andExpect(jsonPath("$.data.reservations[1].slotId").value(1001));
+        verify(routeReservationService).createRouteReservations(USER_ID, 100L);
+    }
+
+    @Test
+    @DisplayName("일괄 예약 중 하나라도 실패하면 HTTP 409 와 실패한 방문·사유가 담긴 메시지를 반환한다")
+    void createRouteReservations_Failed_Returns409() throws Exception {
+        // given
+          String message = "2번째 방문 '범퍼카' 예약에 실패해 일괄 예약을 모두 취소했습니다. 사유: " + ErrorCode.SLOT_CAPACITY_ACQUISITION_FAILED.getMessage();
+        when(routeReservationService.createRouteReservations(USER_ID, 100L))
+                .thenThrow(new BusinessException(ErrorCode.ROUTE_RESERVATION_FAILED, message));
+
+        // when
+        ResultActions result = mockMvc.perform(post(URL + "/100/reservations").with(authenticatedMember()));
+
+        // then
+        result.andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(message));
     }
 
     // ===== 테스트 도우미 =====

@@ -106,6 +106,10 @@ public enum ErrorCode {
     LOCATION_OUT_OF_SERVICE_AREA(HttpStatus.BAD_REQUEST, "현재 위치가 서비스 지역에서 너무 멀어 경로를 추천할 수 없습니다."),
     INVALID_TIME_RANGE(HttpStatus.BAD_REQUEST, "추천에 사용할 수 있는 이용 시간이 남아 있지 않습니다."),
     ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "이용 예정인 어트랙션 예약이 있어 경로를 추천할 수 없습니다."),
+    ROUTE_RECOMMENDATION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 추천 경로입니다."),
+    NOT_ROUTE_OWNER(HttpStatus.FORBIDDEN, "해당 추천 경로에 접근할 권한이 없습니다."),
+    ROUTE_RESERVATION_FAILED(HttpStatus.CONFLICT, "추천 경로의 일부 어트랙션을 예약할 수 없어 일괄 예약을 모두 취소했습니다."),
+
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),

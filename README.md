@@ -11,7 +11,7 @@
 <a href="https://attraction-reservation-frontend.vercel.app/"><img src="https://img.shields.io/badge/서비스_바로가기-FF6F61?style=for-the-badge&logo=vercel&logoColor=white" alt="서비스 바로가기" /></a>
 <a href="https://github.com/attraction-final/attraction-reservation-frontend"><img src="https://img.shields.io/badge/Frontend-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="프론트엔드 저장소" /></a>
 <a href="https://github.com/attraction-final/attraction-reservation"><img src="https://img.shields.io/badge/Backend-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="백엔드 저장소" /></a>
-<a href="https://app.notion.com/p/teamsparta/3f82dc3ef51480478333f70f5f2dbd57"><img src="https://img.shields.io/badge/위키-000000?style=for-the-badge" alt="위키" /></a>
+<a href="https://github.com/attraction-final/attraction-reservation/wiki"><img src="https://img.shields.io/badge/Wiki-181717?style=for-the-badge&logo=github&logoColor=white" alt="프로젝트 Wiki" /></a>
 
 [프로젝트 소개](#-프로젝트-소개) · [주요 기능](#-주요-기능) · [저장소](#-저장소) · [기술 스택](#-기술-스택) · [아키텍처](#-아키텍처) · [트러블슈팅](#-기술적-도전--트러블슈팅) · [문서](#-문서-모음) · [팀원](#-팀원)
 
@@ -56,7 +56,7 @@
 | 저장소 | 내용 | 바로가기 |
 |---|---|---|
 | 🖥 **[attraction-reservation-frontend](https://github.com/attraction-final/attraction-reservation-frontend)** | React + Vite 모바일 웹 · Vercel 배포 | [README](https://github.com/attraction-final/attraction-reservation-frontend#readme) · [개발 가이드](https://github.com/attraction-final/attraction-reservation-frontend/blob/main/DEVELOPMENT.md) · [API 목록](https://github.com/attraction-final/attraction-reservation-frontend/blob/main/docs/api.md) |
-| ⚙️ **[attraction-reservation](https://github.com/attraction-final/attraction-reservation)** | Spring Boot API 서버 · AWS ECS Fargate 배포 | [docs 폴더](docs) · [비즈니스 규칙](https://github.com/attraction-final/attraction-reservation/blob/main/docs/business-rules.md) · [ERD](docs/images/erd.png) |
+| ⚙️ **[attraction-reservation](https://github.com/attraction-final/attraction-reservation)** | Spring Boot API 서버 · AWS ECS Fargate 배포 | [docs 폴더](docs) · [비즈니스 규칙](https://github.com/attraction-final/attraction-reservation/wiki/비즈니스-규칙) · [ERD](docs/images/erd.png) |
 
 ---
 
@@ -231,14 +231,19 @@ flowchart LR
 
 | 분류 | 문서 |
 |---|---|
-| 기획 | [위키](https://app.notion.com/p/teamsparta/3f82dc3ef51480478333f70f5f2dbd57) · [비즈니스 규칙](https://github.com/attraction-final/attraction-reservation/blob/main/docs/business-rules.md) · [환불 요구사항](docs/requirements/refund-requirements.md) |
+| 기획 · 정책 | [프로젝트 기획안](https://github.com/attraction-final/attraction-reservation/wiki/놀이동선-프로젝트-기획안) · [비즈니스 규칙](https://github.com/attraction-final/attraction-reservation/wiki/비즈니스-규칙) · [사용자 시나리오](https://github.com/attraction-final/attraction-reservation/wiki/사용자-시나리오) · [환불 요구사항](docs/requirements/refund-requirements.md) |
+| 협업 규칙 | [GitHub 협업 규칙](https://github.com/attraction-final/attraction-reservation/wiki/GitHub-협업-규칙) · [코드 컨벤션](https://github.com/attraction-final/attraction-reservation/wiki/코드-컨벤션) · [Jira 이슈 작성 가이드](https://github.com/attraction-final/attraction-reservation/wiki/Jira-이슈-작성-가이드) |
 | 설계 | [ERD](docs/images/erd.png) · [DB 마이그레이션(Flyway)](docs/database/migration.md) |
+| 플로우차트 | [도메인별 처리 흐름 · 검증 조건](https://github.com/attraction-final/attraction-reservation/wiki/도메인별-플로우차트) · [이미지 원본](docs/flowcharts) |
+| 와이어프레임 | [기본 화면 구성](docs/wireframes/basic) · [디자인 적용 화면](docs/wireframes/styled) · [관리자 화면](docs/wireframes/admin) |
 | API | [API 명세 전체 목록](docs/api/README.md) · [프론트 사용 API 목록](https://github.com/attraction-final/attraction-reservation-frontend/blob/main/docs/api.md) · [루트 추천 · 일괄 예약 API](docs/api/route-recommendations.md) · [주문 API](docs/api/orders.md) |
 | 기능 | [어트랙션 Q&A 시나리오](docs/requirements/attraction-qna-scenarios.md) |
 | 기술 결정 | [경로 추천](docs/technical-decisions/route-recommendation.md) · [어트랙션 Q&A (Jev)](docs/technical-decisions/attraction-qna-jev.md) |
 | 인프라 | [운영 배포 구성](docs/infra/deployment.md) · [Terraform](docs/infra/terraform.md) · [ECS 전환 계획](docs/infra/ecs-migration-plan.md) |
 | 운영 | [로깅 컨벤션](docs/logging/logging.md) · [부하 테스트 스크립트(k6)](perf) |
 | 프론트 | [프론트엔드 README](https://github.com/attraction-final/attraction-reservation-frontend#readme) · [프론트엔드 개발 가이드](https://github.com/attraction-final/attraction-reservation-frontend/blob/main/DEVELOPMENT.md) |
+
+> 플로우차트는 주요 기능의 처리 흐름과 검증 조건을, 와이어프레임은 화면 구성과 사용자 흐름을 설명합니다. 와이어프레임에는 예시 데이터와 상태별 표현이 포함되어 있어 실제 서비스 화면과 일부 차이가 있을 수 있습니다.
 
 ---
 

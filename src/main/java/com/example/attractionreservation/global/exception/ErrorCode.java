@@ -104,9 +104,8 @@ public enum ErrorCode {
     DUPLICATE_ROUTE_ATTRACTION(HttpStatus.BAD_REQUEST, "같은 어트랙션을 중복해서 선택할 수 없습니다."),
     LOCATION_ACCURACY_TOO_LOW(HttpStatus.BAD_REQUEST, "현재 위치의 정확도가 낮아 경로를 추천할 수 없습니다. 위치를 다시 측정해주세요."),
     LOCATION_OUT_OF_SERVICE_AREA(HttpStatus.BAD_REQUEST, "현재 위치가 서비스 지역에서 너무 멀어 경로를 추천할 수 없습니다."),
-    ATTRACTION_LOCATION_NOT_FOUND(HttpStatus.CONFLICT, "좌표 정보가 등록되지 않은 어트랙션이 있습니다."),
-    ROUTE_NO_VALID_ORDER(HttpStatus.CONFLICT, "이용 가능한 이동 경로로 선택한 어트랙션을 모두 방문하는 순서가 없습니다."),
-    ROUTE_ATTRACTION_NOT_OPERATING(HttpStatus.CONFLICT, "운영하지 않는 어트랙션이 있어 경로를 추천할 수 없습니다."),
+    INVALID_TIME_RANGE(HttpStatus.BAD_REQUEST, "추천에 사용할 수 있는 이용 시간이 남아 있지 않습니다."),
+    ROUTE_RECOMMENDATION_BLOCKED(HttpStatus.CONFLICT, "이용 예정인 어트랙션 예약이 있어 경로를 추천할 수 없습니다."),
 
     // reservation
     INVALID_RESERVATION_USER(HttpStatus.BAD_REQUEST, "예약 회원 정보가 필요합니다."),

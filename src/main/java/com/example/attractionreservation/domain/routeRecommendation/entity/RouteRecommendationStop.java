@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.PlannedVisit;
 import com.example.attractionreservation.global.util.KstTime;
 //추천 경로에 포한됨 방문 일정 한 건을 저장 ->어트랙션 이름과 슬롯 시각은 추천 당시 값으로 저장(스냅샷)
 @Getter
@@ -68,42 +69,32 @@ public class RouteRecommendationStop {
     @Column(name = "slot_end_at", nullable = false)
     private LocalDateTime slotEndAt;
 
-    //방문 일정 한 건을 만드는 정적 팩토리 메서드
-    public static RouteRecommendationStop of(
-            int sequenceNumber,
-            Long attractionId,
-            Long attractionSlotId,
-            String attractionName,
-            int moveMinutes,
-            boolean moveEstimated,
-            LocalDateTime arrivalAt,
-            LocalDateTime slotStartAt,
-            LocalDateTime slotEndAt
-    ) {
-        if (sequenceNumber < 1) {
+    //탐색 결과의 방문 일정 한 건으로 저장할 방문 일정을 만든다
+    public static RouteRecommendationStop from(PlannedVisit visit) {
+        if (visit.sequence() < 1) {
             throw new IllegalStateException("방문 순서는 1부터 시작합니다.");
         } //전체 경로에서 순번이 중복되거나 빠졌는지는 검사하지 않음
         //도착 시간과 슬롯 시작 시각이 같으면 허용 ->대기 시간 0분
-        if (arrivalAt.isAfter(slotStartAt)) {
+        if (visit.arrivalAt().isAfter(visit.startsAt())) {
             throw new IllegalStateException("슬롯 시작 후에 도착하는 방문은 만들 수 없습니다.");
         }
-        if (!slotStartAt.isBefore(slotEndAt)) {
+        if (!visit.startsAt().isBefore(visit.endsAt())) {
             throw new IllegalStateException("슬롯 종료는 시작보다 뒤어야 합니다");
         }
         //식별 정보랑 추천 정보를 저장하기
         RouteRecommendationStop stop = new RouteRecommendationStop();
-        stop.sequenceNumber = sequenceNumber;
-        stop.attractionId = attractionId;
-        stop.attractionSlotId = attractionSlotId;
-        stop.attractionNameSnapshot = attractionName;
-        stop.moveEstimated = moveEstimated;
-        stop.estimatedMoveMin = moveMinutes; //이동 시간이랑 도착 시간은 탐색 로직이 계산한 값 사용
-        stop.estimatedArrivalAt = arrivalAt;
-        stop.slotStartAt = slotStartAt;
-        stop.slotEndAt = slotEndAt;
+        stop.sequenceNumber = visit.sequence();
+        stop.attractionId = visit.attractionId();
+        stop.attractionSlotId = visit.slotId();
+        stop.attractionNameSnapshot = visit.attractionName();
+        stop.moveEstimated = visit.moveEstimated();
+        stop.estimatedMoveMin = visit.moveMinutes(); //이동 시간이랑 도착 시간은 탐색 로직이 계산한 값 사용
+        stop.estimatedArrivalAt = visit.arrivalAt();
+        stop.slotStartAt = visit.startsAt();
+        stop.slotEndAt = visit.endsAt();
         //toMinutes() ->초 단위 나머지를 버리고 정수 분 반환
-        stop.estimatedWaitMin = (int) Duration.between(arrivalAt.atZone(KstTime.ZONE), slotStartAt.atZone(KstTime.ZONE)).toMinutes();
-        stop.estimatedRideMin = (int) Duration.between(slotStartAt.atZone(KstTime.ZONE), slotEndAt.atZone(KstTime.ZONE)).toMinutes();
+        stop.estimatedWaitMin = (int) Duration.between(visit.arrivalAt().atZone(KstTime.ZONE), visit.startsAt().atZone(KstTime.ZONE)).toMinutes();
+        stop.estimatedRideMin = (int) Duration.between(visit.startsAt().atZone(KstTime.ZONE), visit.endsAt().atZone(KstTime.ZONE)).toMinutes();
         return stop;
     }
     //이 방문 일정의 부모 추천 경로를 연결

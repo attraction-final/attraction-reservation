@@ -7,6 +7,10 @@
 - 문서 검증: Controller·DTO·Service·Repository·enum·SecurityConfig·예외 처리와 정적 대조. API 호출·빌드·테스트·운영 배포 확인은 수행하지 않음.
 - sources 참고 자료는 읽기 전용으로 확인했다. 현재 코드와 원본 정책의 차이는 [공통 규칙](common.md#문서와-코드의-차이확인할-정책)에 표시했다. ERD 이미지의 모든 필드를 검토한 문서가 아니다.
 
+## ERD
+
+![프로젝트 ERD](../images/erd.png)
+
 ## 도메인별 문서
 
 | 문서 | 범위 |

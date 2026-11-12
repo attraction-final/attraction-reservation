@@ -443,7 +443,8 @@ class RouteReservationIntegrationTest {
                 stops.add(RouteRecommendationStop.from(new PlannedVisit(i + 1, spec.attractionId(),
                         slot.getAttraction().getName(), spec.slotId(), 5, false,
                         slot.getStartsAt().minusMinutes(5), 5, slot.getStartsAt(), slot.getEndsAt(),
-                        (int) Duration.between(slot.getStartsAt(), slot.getEndsAt()).toMinutes())));
+                        (int) Duration.between(slot.getStartsAt().atZone(KstTime.ZONE),
+                                slot.getEndsAt().atZone(KstTime.ZONE)).toMinutes())));
             }
             RouteRecommendation recommendation = RouteRecommendation.create(member.userId(), member.ticketId(),
                     NOW, NOW.toLocalDate().atTime(22, 0), stops, List.of());

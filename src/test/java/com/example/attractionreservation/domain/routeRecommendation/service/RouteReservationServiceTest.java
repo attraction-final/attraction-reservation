@@ -4,6 +4,7 @@ import com.example.attractionreservation.domain.reservation.dto.CreateReservatio
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationResponse;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.PlannedVisit;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteReservationResponse;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteReservationResponse.ReservedStop;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
@@ -284,8 +285,9 @@ class RouteReservationServiceTest {
     }
 
     private RouteRecommendationStop stop(int sequence, Long attractionId, LocalDateTime slotStartAt) {
-        return RouteRecommendationStop.of(sequence, attractionId, slotIdOf(attractionId), "어트랙션" + attractionId,
-                5, false, slotStartAt.minusMinutes(10), slotStartAt, slotStartAt.plusMinutes(10));
+        return RouteRecommendationStop.from(new PlannedVisit(sequence, attractionId, "어트랙션" + attractionId,
+                slotIdOf(attractionId), 5, false, slotStartAt.minusMinutes(10), 10,
+                slotStartAt, slotStartAt.plusMinutes(10), 10));
     }
 
     private static Long slotIdOf(Long attractionId) {

@@ -355,16 +355,7 @@ public class RouteRecommendationService {
 
     private List<RouteRecommendationStop> toStops(RouteSearchResult route) {
         return route.visits().stream()
-                .map(visit -> RouteRecommendationStop.of(
-                        visit.sequence(),
-                        visit.attractionId(),
-                        visit.slotId(),
-                        visit.attractionName(),
-                        visit.moveMinutes(),
-                        visit.moveEstimated(),
-                        visit.arrivalAt(),
-                        visit.startsAt(),
-                        visit.endsAt()))
+                .map(RouteRecommendationStop::from)
                 .toList();
     }
 

@@ -9,6 +9,7 @@ import com.example.attractionreservation.domain.order.entity.OrderItem;
 import com.example.attractionreservation.domain.reservation.dto.CreateReservationRequest;
 import com.example.attractionreservation.domain.reservation.entity.enums.ReservationStatus;
 import com.example.attractionreservation.domain.reservation.service.ReservationService;
+import com.example.attractionreservation.domain.routeRecommendation.algorithm.PlannedVisit;
 import com.example.attractionreservation.domain.routeRecommendation.dto.CreateRouteReservationResponse;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendation;
 import com.example.attractionreservation.domain.routeRecommendation.entity.RouteRecommendationStop;
@@ -439,9 +440,10 @@ class RouteReservationIntegrationTest {
             for (int i = 0; i < stopSpecs.size(); i++) {
                 StopSpec spec = stopSpecs.get(i);
                 AttractionSlot slot = entityManager.find(AttractionSlot.class, spec.slotId());
-                stops.add(RouteRecommendationStop.of(i + 1, spec.attractionId(), spec.slotId(),
-                        slot.getAttraction().getName(), 5, false,
-                        slot.getStartsAt().minusMinutes(5), slot.getStartsAt(), slot.getEndsAt()));
+                stops.add(RouteRecommendationStop.from(new PlannedVisit(i + 1, spec.attractionId(),
+                        slot.getAttraction().getName(), spec.slotId(), 5, false,
+                        slot.getStartsAt().minusMinutes(5), 5, slot.getStartsAt(), slot.getEndsAt(),
+                        (int) Duration.between(slot.getStartsAt(), slot.getEndsAt()).toMinutes())));
             }
             RouteRecommendation recommendation = RouteRecommendation.create(member.userId(), member.ticketId(),
                     NOW, NOW.toLocalDate().atTime(22, 0), stops, List.of());

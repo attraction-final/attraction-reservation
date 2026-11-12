@@ -499,8 +499,8 @@ class RouteRecommendationServiceTest {
         verify(attractionSlotRepository, times(5))
                 .findSlotsByAttractionIdAndDate(anyLong(), any(), any(), anyBoolean());
         verifyNoMoreInteractions(attractionSlotRepository);
-        assertThat(slotsByAttractionId.values()).allSatisfy(slots ->
-                assertThat(slots).allSatisfy(slot -> assertThat(slot.getReservedCount()).isZero()));
+        assertThat(slotsByAttractionId.values()).isNotEmpty().allSatisfy(slots ->
+                assertThat(slots).isNotEmpty().allSatisfy(slot -> assertThat(slot.getReservedCount()).isZero()));
     }
 
     @Test

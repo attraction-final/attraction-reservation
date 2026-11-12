@@ -73,7 +73,7 @@ domain/payment
 | `created_at`, `updated_at` | `BaseTimeEntity`. 요청 시각, 처리 중 멈춘 행 판단 기준 |
 
 - 인덱스: `(status, next_retry_at)`
-- `ddl-auto: validate`이므로 **테이블은 직접 만들어야 한다**(8장).
+- 테이블은 Flyway 마이그레이션(`db/migration/V1__init.sql`)으로 만든다. `pg_cancellation_id`, `pg_pending_since`, `status`의 `PG_PENDING`, `pg_id` UNIQUE, `(status, next_retry_at)` 인덱스가 모두 포함돼 있다. 애플리케이션은 `ddl-auto: validate`로 검증만 한다.
 - `pg_id`를 PK로 쓰지 않는다. 직접 정한 ID는 Spring Data `save()`가 merge(SELECT 후 INSERT)로 처리하고, 결제당 1건 규칙은 UNIQUE로 충분하다.
 
 ### 상태 전이 (`CompensationStatus.canTransitTo`)
@@ -97,7 +97,7 @@ PG_PENDING ──→ DONE        (조회: 취소 완료)
   - `REQUESTED` (시각과 무관. DB가 시각을 반올림해 저장하면 생성 직후 값이 `now`보다 미래가 되어 즉시 시도가 건너뛰어질 수 있기 때문)
   - `FAILED`이고 `next_retry_at <= now`
   - `PROCESSING`이고 `updated_at`이 5분 이상 지남 (처리 중 서버 종료)
-- 재시도 백오프: 1분, 2분, 4분, 8분. 5번째 실패에서 `DEAD` + error 로그("수동 환불 필요").
+- 재시도 백오프: 1분, 2분, 4분, 8분. 5번째 실패에서 `DEAD` + error 로그(`event=PAYMENT_COMPENSATION_RETRY_EXHAUSTED`, 수동 환불 필요).
 - `PG_PENDING`은 처리 가능 대상이 아니다(취소를 다시 보내지 않는다). 확인 대상(`isPgCheckable`)은 `PG_PENDING`이고 `next_retry_at <= now`인 요청이다.
 - 생성 시 금액이 null이거나 0 이하면 `PAYMENT_INVALID_AMOUNT`.
 
@@ -175,7 +175,7 @@ PortOne은 HTTP 200이어도 취소 응답의 `cancellation.status`가 `REQUESTE
   - 취소 내역 ID가 있으면 같은 ID의 내역 상태로 판단: `SUCCEEDED` → `DONE`, `FAILED` → `FAILED`(취소 재시도), 그 밖·목록에 없음 → 다음 확인 예약
   - 취소 내역 ID가 없으면(취소 내역이 없거나 본문을 읽지 못함) PG 결제가 `CANCELLED`일 때 `DONE`. 보상은 항상 전체 취소라 이 기준이 맞다
   - PG 조회 실패·PG에 결제 없음 → 실패로 기록하지 않고 다음 확인 예약
-- 확인 간격은 `PG_PENDING`이 된 뒤 지난 시간(1분~30분)이라 대략 두 배씩 늘어난다. 24시간 안에 확정되지 않으면 `DEAD` + error 로그("PG 취소 확인 기한 초과, 수동 확인 필요").
+- 확인 간격은 `PG_PENDING`이 된 뒤 지난 시간(1분~30분)이라 대략 두 배씩 늘어난다. 24시간 안에 확정되지 않으면 `DEAD` + error 로그(`event=PAYMENT_COMPENSATION_CHECK_EXPIRED`, 수동 확인 필요). `last_error`는 "PG 취소 확인 기한 초과"다.
 - 확인은 읽기만 하므로 점유하지 않는다. 확인 결과 기록(`recordPgCancelled`·`recordPgCancelFailed`·`reschedulePgCheck`)은 확인 대상으로 꺼낼 때의 `pg_pending_since`를 함께 받아, 행을 잠근 뒤 같은 `PG_PENDING` 주기일 때만 기록한다. 그래서 확정(`DONE`·`FAILED`·`DEAD`)은 한 번만 반영되고, 확인 사이에 취소 실패 → 재취소로 새 주기가 됐으면 이전 주기의 늦은 결과는 거부된다. 다음 확인 예약은 겹쳐도 같은 주기 안에서 시각만 다시 정한다.
 - 확정은 스케줄러의 조회가 책임진다. 취소 웹훅이 오지 않거나 처리에 실패해도 확정된다.
 
@@ -197,6 +197,8 @@ payment:
       pg-check-batch-size: 5   # 한 번에 확인할 최대 PG_PENDING 수 (확인마다 PG 조회)
 ```
 
+- 스케줄러는 ECS worker 서비스(task 1개)에서만 실행된다. api 프로필(`application-api.yml`)은 `payment.compensation.scheduler.enabled: false`로 끈다.
+
 - `processPending`은 취소 대상을 `batch-size`, PG 확인 대상을 `pg-check-batch-size`로 각각 조회하므로, 한 번 실행에 PG 호출은 최대 `batch-size` + `pg-check-batch-size`(기본 25회)다. 재시도는 취소 전 조회가 더해져 요청 하나가 PG 호출 2회일 수 있다.
 - 확인 건수를 따로 작게 두는 이유: PG 장애가 복구될 때까지 `PG_PENDING`이 한꺼번에 쌓일 수 있는데, 확인마다 PG를 조회하므로(최대 약 15초) 같은 스레드의 취소 처리가 밀린다. 기본값 5건이면 한 주기의 확인 지연은 최대 약 75초이고, 복구 후에는 30초마다 5건(시간당 약 600건)씩 확정한다. 확인 기한(24시간) 안에 약 1만 4천 건까지 확정할 수 있다.
 - 처리 중 멈춘 행을 다시 점유하는 기준(5분)은 PG 취소 최대 소요 시간(통신 실패 3회 × (연결 5초 + 읽기 10초) + 처리 중 응답 대기 1초·2초 = 48초)보다 길어야 한다.
@@ -215,11 +217,11 @@ payment:
 | 즉시 시도와 스케줄러 동시 점유 | 행 잠금 후 재확인으로 한쪽만 처리 |
 | 승인 API·웹훅 동시 금액 불일치 | 결제 락으로 순차 실행, 두 번째는 `false`로 보상 요청 생략 |
 | 취소된 결제 승인 중 종료 | 원장 확인과 보상 요청이 같은 트랜잭션이라 커밋 전 종료면 둘 다 롤백(다음 요청에서 다시 판단), 커밋 후 종료면 보상 요청이 `REQUESTED`로 남아 스케줄러가 처리 |
-| 최대 시도 횟수 초과 | `DEAD` + error 로그 → 수동 환불 |
+| 최대 시도 횟수 초과 | `DEAD` + error 로그(`PAYMENT_COMPENSATION_RETRY_EXHAUSTED`) → 수동 환불 |
 | PG가 취소를 접수만 함(`REQUESTED`) | `PG_PENDING`, 취소 재요청 없이 조회로 확정 |
 | 취소 성공 응답에 취소 내역이 없거나 본문을 읽지 못함 | `PG_PENDING`(ID 없음), PG 결제 `CANCELLED`면 `DONE` |
 | `PG_PENDING` 확인 중 PG 조회 실패 | 실패로 기록하지 않고 다음 확인 예약 |
-| `PG_PENDING` 24시간 내 미확정 | `DEAD` + error 로그 → 수동 확인 |
+| `PG_PENDING` 24시간 내 미확정 | `DEAD` + error 로그(`PAYMENT_COMPENSATION_CHECK_EXPIRED`) → 수동 확인 |
 | 멈춘 행 재점유 후 이전 처리의 늦은 결과 | 시도 횟수가 달라 기록 거부(펜싱), 새 점유의 결과만 반영 |
 | 이전 `PG_PENDING` 주기의 늦은 확인 결과 | `pg_pending_since`가 달라 기록 거부(펜싱) |
 
@@ -244,19 +246,20 @@ payment:
 
 ### 배포 전 필수
 
-- [ ] **`payment_compensations` 테이블 생성** (`ddl-auto: validate`). 시각 컬럼(`next_retry_at`, `processed_at`, `pg_pending_since`, `created_at`, `updated_at`)은 `DATETIME(6)`으로 만든다. 소수 초가 없으면 최대 0.5초 반올림되어 재시도 시각 비교가 어긋난다.
-- [ ] **이미 테이블을 만들었다면 PG 확인 대기 컬럼 추가** (KAN-66). 애플리케이션 배포 전에 적용한다.
+- [x] **`payment_compensations` 테이블 생성**: Flyway `db/migration/V1__init.sql`로 관리한다. 시각 컬럼(`next_retry_at`, `processed_at`, `pg_pending_since`, `created_at`, `updated_at`)은 `DATETIME(6)`이다. 소수 초가 없으면 최대 0.5초 반올림되어 재시도 시각 비교가 어긋난다.
+- [x] **PG 확인 대기 컬럼 추가** (KAN-66): V1에 `pg_cancellation_id`, `pg_pending_since`, `status`의 `PG_PENDING`이 포함돼 있다.
+  - 아래는 **Flyway 도입 전 DB용 이력**이다. Flyway 도입 전에 테이블을 직접 만든 DB에 적용했던 절차로, 새 DB에는 필요 없다.
   ```sql
   ALTER TABLE payment_compensations
       ADD COLUMN pg_cancellation_id VARCHAR(100) NULL,
       ADD COLUMN pg_pending_since DATETIME(6) NULL;
   ```
-  - **`status` 컬럼 타입을 먼저 확인한다**(`SHOW CREATE TABLE payment_compensations`). Hibernate 7은 MySQL에서 `@Enumerated(STRING)` 컬럼을 `ENUM`으로 만든다(MySQL 9.6 컨테이너에서 확인: `enum('DEAD','DONE','FAILED','PROCESSING','REQUESTED')` → KAN-66 이후 `PG_PENDING` 포함). Hibernate DDL로 만든 테이블이면 `PG_PENDING`을 넣기 전에 값을 추가해야 한다. 추가하지 않으면 `PG_PENDING` 기록이 실패해 `FAILED` 재시도로 빠진다.
+  - (이력) **`status` 컬럼 타입을 먼저 확인한다**(`SHOW CREATE TABLE payment_compensations`). Hibernate 7은 MySQL에서 `@Enumerated(STRING)` 컬럼을 `ENUM`으로 만든다(MySQL 9.6 컨테이너에서 확인: `enum('DEAD','DONE','FAILED','PROCESSING','REQUESTED')` → KAN-66 이후 `PG_PENDING` 포함). Hibernate DDL로 만든 테이블이면 `PG_PENDING`을 넣기 전에 값을 추가해야 한다. 추가하지 않으면 `PG_PENDING` 기록이 실패해 `FAILED` 재시도로 빠진다.
     ```sql
     ALTER TABLE payment_compensations
         MODIFY COLUMN status ENUM('DEAD','DONE','FAILED','PG_PENDING','PROCESSING','REQUESTED') NOT NULL;
     ```
-  - `VARCHAR(20)`으로 만들었다면 `PG_PENDING`(10자)이 그대로 들어가므로 변경하지 않는다.
+  - (이력) `VARCHAR(20)`으로 만들었다면 `PG_PENDING`(10자)이 그대로 들어가므로 변경하지 않는다.
 
 ### 검증
 
@@ -267,9 +270,11 @@ payment:
 
 ### 운영
 
-- [ ] `DEAD` 보상 요청 확인 수단(알림, 조회 쿼리 또는 API)과 수동 환불 절차. 확인 기한 초과(`last_error` = "PG 취소 확인 기한 초과")는 PG 취소 내역을 먼저 확인한다
+- [x] `DEAD` 보상 요청 알림: Grafana 알림 규칙 `payment-final-failure`("결제·환불 최종 실패", `deploy/monitoring/grafana/provisioning/alerting/alerts.yml`)가 `PAYMENT_COMPENSATION|REFUND|WEBHOOK`으로 시작하는 ERROR 이벤트를 event·pgId별로 알린다(`PAYMENT_COMPENSATION_RETRY_EXHAUSTED`, `PAYMENT_COMPENSATION_CHECK_EXPIRED` 포함)
+- [ ] `DEAD` 보상 요청 조회 수단(조회 쿼리 또는 API)과 수동 환불 절차. 확인 기한 초과(`last_error` = "PG 취소 확인 기한 초과")는 PG 취소 내역을 먼저 확인한다
 - [ ] 결제 수단 확정 후 PortOne 테스트 채널에서 실제 취소로 확인: 취소 응답 상태, `REQUESTED`일 때 결제 조회의 `cancellations`·`amount.cancelled`, 웹훅 수신 없이 스케줄러만으로 확정
-- [ ] PortOne 호출 제한을 확인하고, 필요하면 PG 확인 대상의 배치 크기를 취소 대상과 분리한다
+- [x] PG 확인 대상의 배치 크기를 취소 대상과 분리했다(`pg-check-batch-size`, 5장 "스케줄러 설정")
+- [ ] PortOne 호출 제한 확인
 - [ ] (선택) 취소 웹훅 수신 시 해당 pgId의 `PG_PENDING` 요청 `next_retry_at`을 즉시로 당겨 확정 앞당기기
 - [ ] 즉시 시도가 요청 스레드에서 PG 취소를 기다린다(최악 약 48초). 필요하면 커밋 후 `@Async`로 전환한다. 보상 요청이 이미 저장돼 있어 안전성은 같다.
 - [ ] 금액 불일치 응답 메시지에 "환불은 자동으로 진행됩니다" 포함 검토

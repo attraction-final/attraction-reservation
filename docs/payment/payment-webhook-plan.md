@@ -43,12 +43,18 @@ domain/payment
 ├── facade/WebhookEventProcessor        점유 → syncPayment → 결과 기록 (트랜잭션 없음)
 ├── facade/PaymentFacade.syncPayment    사용자 확인 없이 PG 상태를 원장에 반영, PaymentSyncResult 반환
 ├── dto/PaymentSyncResult               APPROVED, ALREADY_DONE, NOT_PAID, PG_FAILED, COMPENSATED, NOT_OUR_PAYMENT,
-│                                       STATE_CONFLICT
+│                                       STATE_CONFLICT, REFUND_SYNC_REQUIRED, REFUND_SYNCED, REFUND_MISMATCH,
+│                                       REFUND_PENDING
 └── scheduler/WebhookEventScheduler     @Scheduled, payment.webhook.scheduler.enabled로 켜고 끔
 
 global/config/SchedulingConfig          @EnableScheduling
 ```
 
+- 환불 관련 결과의 의미
+  - `REFUND_SYNC_REQUIRED`: 원장이 결제 완료·환불 상태라 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리해야 한다. 기록되는 결과가 아니다
+  - `REFUND_SYNCED`: PG에 반영된 취소로 미완료 환불을 완료 처리했다
+  - `REFUND_MISMATCH`: PG 취소 금액과 환불 기록을 자동으로 맞출 수 없다. 수동 확인 대상
+  - `REFUND_PENDING`: PG가 접수한 환불 취소(`PG_PENDING`)가 아직 확정되지 않았다. 환불 스케줄러가 조회로 확정한다
 - 컨트롤러는 infra에 둔다. PG 연동은 들어오는 쪽(웹훅)·나가는 쪽(`PortOneClient`) 모두 infra에 두는 기준이며, `PortOneConfigController`와 같다.
 - infra는 서명 검증과 저장 요청까지만 하고, 처리(상태 관리·결제 반영)는 domain이 맡는다.
 
@@ -103,7 +109,7 @@ global/config/SchedulingConfig          @EnableScheduling
 | `created_at`, `updated_at` | `BaseTimeEntity`. 수신 시각, 처리 중 멈춘 행 판단 기준 |
 
 - 인덱스: `pg_id`, `(status, next_retry_at)`
-- `ddl-auto: validate`이므로 **테이블은 직접 만들어야 한다**(7장).
+- 테이블은 Flyway 마이그레이션(`db/migration/V1__init.sql`)으로 만든다. 애플리케이션은 `ddl-auto: validate`로 검증만 한다.
 
 ### 상태 전이 (`WebhookStatus.canTransitTo`)
 
@@ -130,6 +136,7 @@ global/config/SchedulingConfig          @EnableScheduling
 
 - 후보 조회(`findProcessableIds`)는 잠그지 않는다. 점유(`claim`)에서 행을 `PESSIMISTIC_WRITE`로 잠그고 `isProcessable`을 다시 확인한다.
 - 여러 인스턴스가 같은 웹훅을 고르면 두 번째는 락을 기다린 뒤 `PROCESSING`을 보고 건너뛴다.
+  - 지금은 웹훅 처리가 ECS worker 서비스의 task 1개에서만 실행되므로 동시 점유는 생기지 않는다. 이 보장은 배포 중 task가 겹치거나 worker를 늘릴 때를 위한 방어다.
 - 락 대기 타임아웃(3초, payment-approval.md 4.5)에 걸리면 `PessimisticLockingFailureException`을 받아 건너뛴다.
 - `SKIP LOCKED`는 쓰지 않는다. MySQL에서 Hibernate 힌트가 SQL에 반영되는지 확인되지 않았기 때문이다(락 타임아웃 힌트가 무시된 전례).
 
@@ -141,11 +148,15 @@ global/config/SchedulingConfig          @EnableScheduling
 |---|---|---|
 | 원장에 없는 `pgId` | `NOT_OUR_PAYMENT` | `IGNORED` |
 | 이미 `FAILED`(`PAYMENT_ALREADY_PROCESSED`) | `ALREADY_DONE` | `PROCESSED` |
-| 원장 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED` → 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리 | `REFUND_SYNC_REQUIRED` (기록되지 않음) | 아래 세 줄 중 하나 |
-| ↳ PG 취소 금액 = 완료 환불 합계 | `ALREADY_DONE` | `PROCESSED` |
-| ↳ 차이와 같은 미완료 환불 1건을 PG 기준 완료 | `REFUND_SYNCED` | `PROCESSED` |
-| ↳ PG 취소 금액 < 완료 환불 합계 (조회 이후 다른 환불 완료) | 예외 전파 (`REFUND_PG_CANCELLED_AMOUNT_STALE`) | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
-| ↳ 그 밖(외부 취소 등) | `REFUND_MISMATCH` | **즉시 `DEAD`** + error 로그 (수동 확인) |
+| 원장 `PAID`·`PARTIALLY_REFUNDED`·`REFUNDED` → 환불 동기화(`RefundProcessor.syncWithPg`)로 이어서 처리 | `REFUND_SYNC_REQUIRED` (기록되지 않음) | 아래 줄 중 하나 |
+| ↳ PG 조회에서 결제 없음 | 예외 전파 (`PAYMENT_PG_PAYMENT_NOT_FOUND`) | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
+| ↳ ① `PG_PENDING` 환불이 있으면 그 취소 내역으로 먼저 판단: 확정(`SUCCEEDED`) | `REFUND_SYNCED` | `PROCESSED` |
+| ↳ ① 아직 확정 안 됨 (금액으로 판단하지 않음) | `REFUND_PENDING` | `PROCESSED` (환불 스케줄러가 이어서 확인) |
+| ↳ ① 취소 실패(`FAILED`로 기록)·다른 처리가 먼저 기록 | ②로 이어서 판단 | — |
+| ↳ ② PG 취소 금액 = 완료 환불 합계 | `ALREADY_DONE` | `PROCESSED` |
+| ↳ ② 차이와 같은 미완료 환불 1건을 PG 기준 완료 | `REFUND_SYNCED` | `PROCESSED` |
+| ↳ ② PG 취소 금액 < 완료 환불 합계 (조회 이후 다른 환불 완료) | 예외 전파 (`REFUND_PG_CANCELLED_AMOUNT_STALE`) | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
+| ↳ ② 그 밖(외부 취소 등) | `REFUND_MISMATCH` | **즉시 `DEAD`** + error 로그 (수동 확인) |
 | PG 결제 완료, 금액 일치 → 승인 | `APPROVED` | `PROCESSED` |
 | PG 미완료(`PAYMENT_NOT_PAID`) | `NOT_PAID` | `PROCESSED` |
 | PG 실패(`PAYMENT_PG_FAILED`) → 결제 실패 처리 | `PG_FAILED` | `PROCESSED` |
@@ -154,6 +165,7 @@ global/config/SchedulingConfig          @EnableScheduling
 | 원장 상태 때문에 승인 불가(`PAYMENT_INVALID_STATUS_TRANSITION`, `ORDER_INVALID_STATUS_TRANSITION`) | `STATE_CONFLICT` | **즉시 `DEAD`** + error 로그 (수동 확인) |
 | 그 밖의 예외 (PG 조회 실패, PG에 결제 없음, 락 충돌, DB 오류) | 예외 전파 | `FAILED` → 재시도, 한도 초과 시 `DEAD` |
 
+- 환불 동기화는 PG를 한 번 조회한 뒤 ① 확정 대기 환불 → ② 금액 비교 순서로 판단한다. ①의 상세는 [refund-requirements.md 5-3](../requirements/refund-requirements.md)의 "확정 대기 환불 먼저"와 같다.
 - `NOT_PAID`를 `PROCESSED`로 두는 이유: READY 등의 웹훅은 할 일이 없고, 이후 결제 완료 시 Paid 웹훅이 따로 온다.
 - `COMPENSATED`는 PG 취소 결과와 무관하다. 보상 요청이 결제 실패와 함께 커밋되고, 즉시 시도가 실패해도 보상 Outbox가 재시도한다([payment-compensation.md](payment-compensation.md)). 웹훅 쪽에서 보상 실패를 추적하지 않는다.
 - **재시도하지 않고 바로 `DEAD`로 보내는 경우**
@@ -177,6 +189,8 @@ payment:
       batch-size: 50     # 한 번에 처리할 최대 웹훅 수
 ```
 
+- 스케줄러는 ECS worker 서비스(task 1개)에서만 실행된다. api 프로필(`application-api.yml`)은 `payment.webhook.scheduler.enabled: false`로 끈다.
+
 ## 6. 테스트
 
 | 테스트 | 종류 | 내용 |
@@ -199,10 +213,10 @@ payment:
 
 ### 배포 전 필수
 
-- [ ] **`webhook_events` 테이블 생성**: `ddl-auto: validate`이므로 테이블이 없으면 애플리케이션이 시작되지 않는다. DDL 공유·적용 방식(마이그레이션 도구 도입 여부)을 팀과 정한다.
-  - 시각 컬럼(`next_retry_at`, `processed_at`, `created_at`, `updated_at`)은 `DATETIME(6)`으로 만든다. 소수 초가 없으면 최대 0.5초 반올림되어 재시도 시각 비교가 어긋난다.
+- [x] **`webhook_events` 테이블 생성**: 마이그레이션 도구로 Flyway를 도입했고, 테이블은 `db/migration/V1__init.sql`로 관리한다.
+  - 시각 컬럼(`next_retry_at`, `processed_at`, `created_at`, `updated_at`)은 `DATETIME(6)`이다. 소수 초가 없으면 최대 0.5초 반올림되어 재시도 시각 비교가 어긋난다.
 - [ ] **PortOne 콘솔에 웹훅 URL 등록**: `POST /api/payments/webhooks/portone`
-- [ ] **인증 적용 시** `/api/payments/webhooks/**`를 인증 없이 허용(`permitAll`). 이 엔드포인트의 보안은 서명 검증이다.
+- [x] **인증 적용 시** 웹훅 경로를 인증 없이 허용(`permitAll`). `SecurityConfig`에 `POST /api/payments/webhooks/portone`으로 적용했다. 이 엔드포인트의 보안은 서명 검증이다.
 
 ### 검증
 
@@ -218,7 +232,8 @@ payment:
 
 ### 운영
 
-- [ ] `DEAD` 웹훅 확인 수단(알림, 조회 쿼리 또는 API)
+- [x] `DEAD` 웹훅 알림: Grafana 알림 규칙 `payment-final-failure`("결제·환불 최종 실패")가 `WEBHOOK_RETRY_EXHAUSTED`, `WEBHOOK_STATE_CONFLICTED`, `REFUND_AMOUNT_MISMATCHED` 등 `PAYMENT_COMPENSATION|REFUND|WEBHOOK`으로 시작하는 ERROR 이벤트를 event·pgId별로 알린다
+- [ ] `DEAD` 웹훅 조회 수단(조회 쿼리 또는 API)
 - [ ] 처리 완료 웹훅 보관 기간과 정리 배치
 - [ ] **대사 배치**: 웹훅도 오지 않고 승인 API도 호출되지 않은 결제는 Inbox·Outbox로도 잡히지 않는다. PortOne 결제 목록과 원장을 비교하는 배치를 마지막 안전망으로 둔다.
 - [ ] `eventType`은 SDK 클래스 이름이다. PortOne 원문 `type`(예: `Transaction.Paid`)으로 저장하려면 본문을 한 번 더 파싱해야 한다.

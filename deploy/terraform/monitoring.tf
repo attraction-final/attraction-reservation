@@ -44,6 +44,12 @@ resource "aws_instance" "monitoring" {
   }
 }
 
+# 꺼 둘 때(paused) 지우지 않고 중지한다. 루트 볼륨(/data)과 고정 사설 IP가 그대로 남는다.
+resource "aws_ec2_instance_state" "monitoring" {
+  instance_id = aws_instance.monitoring.id
+  state       = var.paused ? "stopped" : "running"
+}
+
 resource "aws_iam_instance_profile" "monitoring" {
   name = "monitoring-ec2-role"
   role = aws_iam_role.monitoring.name

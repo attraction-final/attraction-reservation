@@ -16,7 +16,10 @@ resource "aws_cloudwatch_log_group" "ecs" {
 # task definition은 CD가 deploy/ecs/*-task-definition.json으로 등록하고 서비스를 갱신한다.
 # Terraform은 서비스 설정만 관리하고 task_definition 값은 따라가지 않는다.
 
+# 꺼 둘 때(paused) 서비스만 지운다. task definition은 CD가 등록한 리비전이 남아 있어
+# 다시 만들 때 패밀리의 최신 리비전으로 뜬다.
 resource "aws_ecs_service" "api" {
+  count                         = var.paused ? 0 : 1
   name                          = "api"
   cluster                       = aws_ecs_cluster.main.arn
   task_definition               = "attraction-reservation-api"
@@ -42,7 +45,7 @@ resource "aws_ecs_service" "api" {
   alarms {
     enable      = true
     rollback    = true
-    alarm_names = [aws_cloudwatch_metric_alarm.api_5xx.alarm_name]
+    alarm_names = [aws_cloudwatch_metric_alarm.api_5xx[0].alarm_name]
   }
 
   load_balancer {
@@ -61,6 +64,17 @@ resource "aws_ecs_service" "api" {
     project = "attraction-reservation"
   }
 
+  # 다시 켤 때 task가 기동에 실패해 서킷 브레이커가 걸리지 않도록, 의존하는 리소스가 준비된 뒤에 만든다.
+  # 대상 그룹이 ALB에 연결되기 전에 만들면 서비스 생성 자체가 실패한다.
+  depends_on = [
+    aws_lb_listener.https,
+    aws_route_table.private_2a,
+    aws_route_table.private_2b,
+    aws_db_instance.main,
+    aws_elasticache_replication_group.main,
+    aws_ec2_instance_state.monitoring,
+  ]
+
   # task 수는 아래 오토스케일링이 바꾼다.
   lifecycle {
     ignore_changes = [task_definition, desired_count]
@@ -72,6 +86,7 @@ resource "aws_ecs_service" "api" {
 # 사람에게 보내는 알림은 Grafana(api 5xx)가 맡으므로 alarm_actions는 두지 않는다.
 # 5분 창을 쓰지 않는 이유: 배포가 끝난 뒤 ECS가 알람을 지켜보는 시간(bake time)이 5분이 채 안 된다.
 resource "aws_cloudwatch_metric_alarm" "api_5xx" {
+  count               = var.paused ? 0 : 1
   alarm_name          = "attraction-reservation-api-5xx"
   alarm_description   = "api 배포 중 5xx 급증 시 ECS가 이전 리비전으로 롤백한다"
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -96,7 +111,7 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
       stat        = "Sum"
       period      = 60
       dimensions = {
-        LoadBalancer = aws_lb.main.arn_suffix
+        LoadBalancer = aws_lb.main[0].arn_suffix
         TargetGroup  = aws_lb_target_group.app_ecs.arn_suffix
       }
     }
@@ -111,7 +126,7 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
       stat        = "Sum"
       period      = 60
       dimensions = {
-        LoadBalancer = aws_lb.main.arn_suffix
+        LoadBalancer = aws_lb.main[0].arn_suffix
         TargetGroup  = aws_lb_target_group.app_ecs.arn_suffix
       }
     }
@@ -120,18 +135,20 @@ resource "aws_cloudwatch_metric_alarm" "api_5xx" {
 
 # api task 수를 CPU 사용률에 맞춰 1~3개로 조정한다. worker는 스케줄러가 겹치지 않도록 1개로 고정한다.
 resource "aws_appautoscaling_target" "api" {
+  count              = var.paused ? 0 : 1
   service_namespace  = "ecs"
-  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api[0].name}"
   scalable_dimension = "ecs:service:DesiredCount"
   min_capacity       = 1
   max_capacity       = 3
 }
 
 resource "aws_appautoscaling_policy" "api_cpu" {
+  count              = var.paused ? 0 : 1
   name               = "api-cpu-target-tracking"
-  service_namespace  = aws_appautoscaling_target.api.service_namespace
-  resource_id        = aws_appautoscaling_target.api.resource_id
-  scalable_dimension = aws_appautoscaling_target.api.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.api[0].service_namespace
+  resource_id        = aws_appautoscaling_target.api[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.api[0].scalable_dimension
   policy_type        = "TargetTrackingScaling"
 
   target_tracking_scaling_policy_configuration {
@@ -149,6 +166,7 @@ resource "aws_appautoscaling_policy" "api_cpu" {
 
 # 스케줄러를 실행한다. 스케줄러가 겹치지 않도록 이전 task를 내린 뒤 새 task를 띄운다.
 resource "aws_ecs_service" "worker" {
+  count                         = var.paused ? 0 : 1
   name                          = "worker"
   cluster                       = aws_ecs_cluster.main.arn
   task_definition               = "attraction-reservation-worker"
@@ -176,6 +194,15 @@ resource "aws_ecs_service" "worker" {
   tags = {
     project = "attraction-reservation"
   }
+
+  # NAT 경로(ECR 이미지), RDS, Redis, Loki(모니터링 EC2)가 준비된 뒤에 만든다.
+  depends_on = [
+    aws_route_table.private_2a,
+    aws_route_table.private_2b,
+    aws_db_instance.main,
+    aws_elasticache_replication_group.main,
+    aws_ec2_instance_state.monitoring,
+  ]
 
   lifecycle {
     ignore_changes = [task_definition]

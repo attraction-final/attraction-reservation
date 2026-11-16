@@ -57,7 +57,9 @@ resource "aws_internet_gateway" "main" {
 }
 
 # 비용 때문에 NAT는 2a에 하나만 둔다. private 라우팅 테이블 두 개가 모두 이 NAT를 쓴다.
+# 꺼 둘 때(paused) EIP와 함께 지운다. 다시 켜면 공인 IP가 바뀐다.
 resource "aws_eip" "nat_2a" {
+  count  = var.paused ? 0 : 1
   domain = "vpc"
 
   tags = {
@@ -66,7 +68,8 @@ resource "aws_eip" "nat_2a" {
 }
 
 resource "aws_nat_gateway" "nat_2a" {
-  allocation_id = aws_eip.nat_2a.id
+  count         = var.paused ? 0 : 1
+  allocation_id = aws_eip.nat_2a[0].id
   subnet_id     = aws_subnet.public_2a.id
 
   tags = {
@@ -90,9 +93,13 @@ resource "aws_route_table" "public" {
 resource "aws_route_table" "private_2a" {
   vpc_id = aws_vpc.main.id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat_2a.id
+  dynamic "route" {
+    for_each = aws_nat_gateway.nat_2a
+
+    content {
+      cidr_block     = "0.0.0.0/0"
+      nat_gateway_id = route.value.id
+    }
   }
 
   tags = {
@@ -103,9 +110,13 @@ resource "aws_route_table" "private_2a" {
 resource "aws_route_table" "private_2b" {
   vpc_id = aws_vpc.main.id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat_2a.id
+  dynamic "route" {
+    for_each = aws_nat_gateway.nat_2a
+
+    content {
+      cidr_block     = "0.0.0.0/0"
+      nat_gateway_id = route.value.id
+    }
   }
 
   tags = {

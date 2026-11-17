@@ -18,6 +18,7 @@
 - RDS를 지우면 자동 백업도 함께 지워진다. 최종 스냅샷 하나만 남고 시점 복구(PITR)는 할 수 없다.
 - 꺼 둔 동안 private 라우팅 테이블에는 지운 NAT를 가리키는 경로가 blackhole로 남는다. 비용이 없고, 다시 켜면 새 NAT로 바뀐다.
 - 꺼 둔 동안 남는 비용은 모니터링 EC2 볼륨(30GB), RDS 스냅샷, ECR 이미지, Route 53 존 정도다.
+- ACM `*.xevbn.click` 인증서는 사용 중이 아니면 자동 갱신되지 않는다. ALB가 없는 동안 만료(2027-02-14)되면 `data.aws_acm_certificate`가 인증서를 찾지 못해 다시 켜는 plan이 실패한다. 만료 60일 전(12월 중순)보다 먼저 다시 켜거나, 새 인증서를 요청한다. DNS 검증 레코드가 남아 있어 새 인증서는 자동으로 검증된다.
 
 ## 2. 꺼 두기
 
@@ -39,6 +40,7 @@ db_final_snapshot_identifier = "attraction-final-db-paused-20261116"
 ```bash
 cd deploy/terraform
 terraform plan   # aws_db_instance.main[0]의 in-place 변경 2개만 있어야 한다
+                 # (처음 한 번은 15개 주소 이동과 aws_ec2_instance_state.monitoring 추가도 함께 나온다)
 terraform apply
 ```
 
@@ -104,7 +106,12 @@ aws rds delete-db-snapshot --db-snapshot-identifier attraction-final-db-paused-2
 
 ## 4. 검증 상태
 
-2026-11-16 기준 plan으로만 확인했고, 실제로 내리고 켜 본 적은 없다.
+2026-11-16에는 plan으로만 확인했다. 2026-11-17에 실제로 꺼 두었다. 다시 켜 본 적은 아직 없다.
+
+- 꺼 두기: 1단계 RDS 변경에 1분 21초가 걸렸다. 2단계는 15개를 삭제하고 모니터링 EC2를 중지했고 약 10분이 걸렸다. ECS api 서비스 삭제에 4분, RDS 삭제(최종 스냅샷 포함)에 5분이 걸렸다. 스냅샷 `attraction-final-db-paused-20261117`이 `available`이고, 그 뒤 `terraform plan`은 `No changes`였다.
+- 꺼 두기 전에 다시 켜는 데 필요한 것을 확인했다. task definition 최신 리비전이 ACTIVE였고 그 이미지 태그가 ECR에 있었다. KMS 키(AWS 관리형)가 Enabled였고, grafana 대상 그룹에 모니터링 EC2가 등록돼 있었다. SSM에 NAT IP나 ALB DNS를 담은 값은 없었다.
+
+plan으로 확인한 내용:
 
 - `paused=false`: 기존 리소스 15개가 `[0]` 주소로 옮겨지고, `aws_ec2_instance_state.monitoring` 1개가 추가된다(실행 중 상태를 state에 기록할 뿐 인스턴스는 바뀌지 않는다).
 - 꺼 두기 1단계: RDS in-place 변경 2개(`deletion_protection`, `final_snapshot_identifier`)

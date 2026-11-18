@@ -38,3 +38,6 @@ out/
 
 ### jev ai 키 ###
 http-client.private.env.json
+
+### 부하 측정 결과 (perf/*/.local) ###
+perf/**/.local/

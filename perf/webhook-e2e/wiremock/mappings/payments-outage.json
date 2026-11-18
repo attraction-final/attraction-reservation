@@ -1,0 +1,12 @@
+{
+  "id": "6f0b1c2a-0000-4000-8000-000000000004",
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/payments/pay-e2e-004"
+  },
+  "response": {
+    "status": 500,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "type": "INTERNAL_SERVER_ERROR", "message": "e2e: PG 장애 재현" }
+  }
+}

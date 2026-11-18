@@ -106,7 +106,10 @@ aws rds delete-db-snapshot --db-snapshot-identifier attraction-final-db-paused-2
 
 ## 4. 검증 상태
 
-2026-11-16에는 plan으로만 확인했다. 2026-11-17에 실제로 꺼 두었다. 다시 켜 본 적은 아직 없다.
+2026-11-16에는 plan으로만 확인했다. 2026-11-17에 실제로 꺼 두었고, 2026-11-18에 다시 켰다가(부하 측정, 알람 롤백 시험) 같은 날 다시 꺼 두었다. 지금 남은 스냅샷은 `attraction-final-db-paused-20261118`이다.
+
+- 다시 켜기(2026-11-18): plan은 15개 추가, 3개 변경(모니터링 EC2 시작, private 라우팅 테이블 2개의 NAT 경로)이었다. NAT 1분 43초, ElastiCache 7분 35초, RDS 복원 9분 31초가 걸렸다. ECS 서비스는 그 뒤 만들어져 api·worker가 약 5분 만에 `COMPLETED`가 됐고 `/readyz`가 200이었다. 적용 뒤 `terraform plan`은 `No changes`였다.
+- 다시 꺼 두기(2026-11-18): 1단계 1분 21초. 2단계에서 ECS api 서비스 삭제 4분 20초, RDS 삭제(최종 스냅샷 포함) 4분 54초가 걸렸다. 스냅샷이 `available`이고 `terraform plan`은 `No changes`였다.
 
 - 꺼 두기: 1단계 RDS 변경에 1분 21초가 걸렸다. 2단계는 15개를 삭제하고 모니터링 EC2를 중지했고 약 10분이 걸렸다. ECS api 서비스 삭제에 4분, RDS 삭제(최종 스냅샷 포함)에 5분이 걸렸다. 스냅샷 `attraction-final-db-paused-20261117`이 `available`이고, 그 뒤 `terraform plan`은 `No changes`였다.
 - 꺼 두기 전에 다시 켜는 데 필요한 것을 확인했다. task definition 최신 리비전이 ACTIVE였고 그 이미지 태그가 ECR에 있었다. KMS 키(AWS 관리형)가 Enabled였고, grafana 대상 그룹에 모니터링 EC2가 등록돼 있었다. SSM에 NAT IP나 ALB DNS를 담은 값은 없었다.
@@ -117,9 +120,9 @@ plan으로 확인한 내용:
 - 꺼 두기 1단계: RDS in-place 변경 2개(`deletion_protection`, `final_snapshot_identifier`)
 - 꺼 두기 2단계: 15개 삭제, 모니터링 EC2 중지
 
-처음 실제로 실행할 때 확인할 것:
+처음 실제로 다시 켰을 때(2026-11-18) 확인한 것:
 
-- [ ] RDS 스냅샷 복원 뒤 설정(백업 보존, 삭제 보호, 서브넷 그룹)이 코드와 같은지 (`terraform plan`이 `No changes`인지)
-- [ ] ElastiCache 엔드포인트가 그대로인지
-- [ ] ECS 서비스가 서킷 브레이커 없이 처음 배포에 성공하는지
-- [ ] Grafana 대상 그룹에 모니터링 EC2가 healthy로 돌아오는지
+- [x] RDS 스냅샷 복원 뒤 설정이 코드와 같은지: 적용 뒤 `terraform plan`이 `No changes`
+- [x] ElastiCache 엔드포인트가 그대로인지: `master.attraction-final-cache.r0ibn2.apn2.cache.amazonaws.com`으로 SSM `env/REDIS_HOST`와 같아 바꾸지 않았다
+- [x] ECS 서비스가 서킷 브레이커 없이 처음 배포에 성공하는지: api·worker 모두 `COMPLETED`
+- [x] Grafana에 들어가지는지: `https://grafana.xevbn.click`에 접속해 Prometheus 지표를 조회했다

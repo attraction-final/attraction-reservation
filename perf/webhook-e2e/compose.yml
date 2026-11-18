@@ -1,0 +1,51 @@
+# 결제 웹훅 E2E 재현 환경: 앱 + MySQL + Redis + WireMock(가짜 PortOne)
+#   ./gradlew bootJar -x test 후 perf/webhook-e2e/run.sh 로 실행한다.
+# 비밀값은 이 환경 전용 테스트 값이다. 운영 값과 무관하다.
+name: webhook-e2e
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: e2e
+      MYSQL_DATABASE: attraction_reservation
+    ports: ["13306:3306"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pe2e"]
+      interval: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.4
+    ports: ["16379:6379"]
+
+  # PortOne API 대신 응답한다. 응답은 wiremock/mappings, 장애·복구는 관리 API로 바꾼다.
+  wiremock:
+    image: wiremock/wiremock:3.9.2
+    command: ["--verbose"]
+    volumes:
+      - ./wiremock:/home/wiremock
+    ports: ["18089:8080"]
+
+  app:
+    build:
+      context: ../../build/libs
+      dockerfile: ../../Dockerfile
+      args:
+        JAR_FILE: attraction-reservation-0.0.1-SNAPSHOT.jar
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_started }
+      wiremock: { condition: service_started }
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/attraction_reservation
+      DB_USERNAME: root
+      DB_PASSWORD: e2e
+      REDIS_HOST: redis
+      JWT_SECRET: ZTJlLW9ubHktand0LXNlY3JldC1rZXktZm9yLWxvY2FsLXRlc3RpbmctMzJieXRlcw==
+      PORTONE_BASE_URL: http://wiremock:8080
+      PORTONE_API_SECRET: e2e-api-secret
+      PORTONE_STORE_ID: store-e2e
+      PORTONE_CHANNEL_KEY: channel-e2e
+      PORTONE_WEBHOOK_SECRET: whsec_ZTJlLW9ubHktd2ViaG9vay1zZWNyZXQta2V5LTMyYg==
+    ports: ["18080:8080"]

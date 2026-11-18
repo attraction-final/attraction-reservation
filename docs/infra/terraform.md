@@ -20,7 +20,7 @@
 | `iam.tf` | GitHub OIDC provider, ECS execution·task 역할, `github-actions-role`, `monitoring-ec2-role` |
 | `ecr.tf` | 저장소 3개, lifecycle 정책(태그된 이미지 최근 30개 유지) |
 | `s3.tf` | CD 아티팩트 버킷 |
-| `imports.tf` | 처음 가져올 때 쓴 import 블록. 이미 state에 있으면 아무 일도 하지 않는다 |
+| `variables.tf` | 인프라를 잠시 꺼 두는 `paused`와 RDS 삭제·복원 값. 절차는 [pause-resume.md](pause-resume.md) |
 
 ### 관리하지 않는 것
 
@@ -61,6 +61,7 @@ terraform apply           # plan을 확인한 뒤 적용
 
 - RDS는 `apply_immediately = true`라서 apply하면 maintenance window를 기다리지 않고 바로 반영된다. 재시작이 필요한 변경은 plan을 보고 시간을 골라 적용한다.
 - RDS는 자동 마이너 업그레이드가 켜져 있다. AWS가 버전을 올리면 `engine_version` diff가 생기므로 코드의 버전을 실제 값으로 고친다.
+- import 블록(`imports.tf`)은 가져오기가 끝난 뒤 지웠다. 리소스에 `count`를 붙이면 주소가 맞지 않아 오류가 나기 때문이다.
 - ALB 리스너·규칙의 forward 액션은 import 결과에 맞춰 적었다. 형식을 바꾸면 의미가 같아도 diff가 생길 수 있다.
 - ECR lifecycle 정책은 태그된 이미지만 센다. buildx로 올린 이미지는 태그된 index 아래 플랫폼 이미지가 태그 없이 들어 있어서, 태그 없는 이미지를 지우는 규칙을 두면 실행 중인 이미지가 깨질 수 있다.
 - api task 수는 오토스케일링 대상(`aws_appautoscaling_target.api`)의 min/max로 바꾼다. 서비스의 `desired_count`는 `ignore_changes`라서 고쳐도 반영되지 않는다. worker는 스케줄러가 겹치면 안 되므로 1개로 두고 오토스케일링을 붙이지 않는다.

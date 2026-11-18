@@ -108,7 +108,7 @@ aws rds delete-db-snapshot --db-snapshot-identifier attraction-final-db-paused-2
 
 2026-11-16에는 plan으로만 확인했다. 2026-11-17에 실제로 꺼 두었고, 2026-11-18에 다시 켰다가(부하 측정, 알람 롤백 시험) 같은 날 다시 꺼 두었다. 지금 남은 스냅샷은 `attraction-final-db-paused-20261118`이다.
 
-- 다시 켜기(2026-11-18): plan은 15개 추가, 3개 변경(모니터링 EC2 시작, private 라우팅 테이블 2개의 NAT 경로)이었다. NAT 1분 43초, ElastiCache 7분 35초, RDS 복원 9분 31초가 걸렸다. ECS 서비스는 그 뒤 만들어져 api·worker가 약 5분 만에 `COMPLETED`가 됐고 `/readyz`가 200이었다. 적용 뒤 `terraform plan`은 `No changes`였다.
+- 다시 켜기(2026-11-18): plan은 15개 추가, 3개 변경(모니터링 EC2 시작, private 라우팅 테이블 2개의 NAT 경로)이었다. NAT 1분 43초, ElastiCache 7분 35초, RDS 복원 9분 31초가 걸렸다. ECS 서비스는 그 뒤 만들어져 api·worker가 `COMPLETED`가 됐고 `/readyz`가 200이었다. 적용 뒤 `terraform plan`은 `No changes`였다.
 - 다시 꺼 두기(2026-11-18): 1단계 1분 21초. 2단계에서 ECS api 서비스 삭제 4분 20초, RDS 삭제(최종 스냅샷 포함) 4분 54초가 걸렸다. 스냅샷이 `available`이고 `terraform plan`은 `No changes`였다.
 
 - 꺼 두기: 1단계 RDS 변경에 1분 21초가 걸렸다. 2단계는 15개를 삭제하고 모니터링 EC2를 중지했고 약 10분이 걸렸다. ECS api 서비스 삭제에 4분, RDS 삭제(최종 스냅샷 포함)에 5분이 걸렸다. 스냅샷 `attraction-final-db-paused-20261117`이 `available`이고, 그 뒤 `terraform plan`은 `No changes`였다.

@@ -9,25 +9,27 @@ resource "aws_route53_zone" "public" {
 }
 
 resource "aws_route53_record" "api" {
+  count   = var.paused ? 0 : 1
   zone_id = aws_route53_zone.public.zone_id
   name    = "api.xevbn.click"
   type    = "A"
 
   alias {
-    name                   = "dualstack.${aws_lb.main.dns_name}"
-    zone_id                = aws_lb.main.zone_id
+    name                   = "dualstack.${aws_lb.main[0].dns_name}"
+    zone_id                = aws_lb.main[0].zone_id
     evaluate_target_health = true
   }
 }
 
 resource "aws_route53_record" "grafana" {
+  count   = var.paused ? 0 : 1
   zone_id = aws_route53_zone.public.zone_id
   name    = "grafana.xevbn.click"
   type    = "A"
 
   alias {
-    name                   = "dualstack.${aws_lb.main.dns_name}"
-    zone_id                = aws_lb.main.zone_id
+    name                   = "dualstack.${aws_lb.main[0].dns_name}"
+    zone_id                = aws_lb.main[0].zone_id
     evaluate_target_health = true
   }
 }

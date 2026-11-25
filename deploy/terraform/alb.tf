@@ -1,4 +1,7 @@
+# 꺼 둘 때(paused) ALB와 리스너만 지운다. 대상 그룹은 비용이 없어 남긴다.
+# 다시 만들면 DNS 이름이 바뀌지만 Route 53 alias가 따라간다.
 resource "aws_lb" "main" {
+  count              = var.paused ? 0 : 1
   name               = "attraction-final"
   load_balancer_type = "application"
   internal           = false
@@ -7,7 +10,8 @@ resource "aws_lb" "main" {
 }
 
 resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.main.arn
+  count             = var.paused ? 0 : 1
+  load_balancer_arn = aws_lb.main[0].arn
   port              = 80
   protocol          = "HTTP"
 
@@ -23,7 +27,8 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.main.arn
+  count             = var.paused ? 0 : 1
+  load_balancer_arn = aws_lb.main[0].arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09"
@@ -43,7 +48,8 @@ resource "aws_lb_listener" "https" {
 
 # grafana.xevbn.click: Cognito 인증을 거친 뒤 모니터링 EC2의 Grafana로 보낸다.
 resource "aws_lb_listener_rule" "grafana" {
-  listener_arn = aws_lb_listener.https.arn
+  count        = var.paused ? 0 : 1
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 10
 
   action {

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/payments/pay-e2e-00[15]"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "id": "{{request.pathSegments.[1]}}",
+      "status": "PAID",
+      "amount": { "total": 50000, "cancelled": 0 },
+      "paidAt": "{{now}}"
+    },
+    "transformers": ["response-template"]
+  }
+}

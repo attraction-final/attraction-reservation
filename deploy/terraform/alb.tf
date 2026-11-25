@@ -106,13 +106,15 @@ resource "aws_lb_target_group" "app_ecs" {
     cookie_duration = 300
   }
 
+  # 과부하로 느려진 task를 바로 빼지 않고, 새 task는 시작 대기(120초) 안에 healthy가 되게 한다.
+  # 이전 값(30초 간격, 5초 제한, 5회 성공/2회 실패)에서는 부하 중 task 교체가 반복돼 확장이 늦었다. (perf/autoscale)
   health_check {
     path                = "/readyz"
     matcher             = "200"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 5
-    unhealthy_threshold = 2
+    interval            = 15
+    timeout             = 10
+    healthy_threshold   = 2
+    unhealthy_threshold = 4
   }
 }
 
